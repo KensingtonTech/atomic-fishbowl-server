@@ -5,7 +5,6 @@ const Observable = require('rxjs/Observable').Observable;
 const Subject = require('rxjs/Subject').Subject;
 const express = require('express');
 const app = express();
-const cors = require('cors');
 const bodyParser = require('body-parser');
 const listenPort = 3002;
 const uuidV4 = require('uuid/v4');
@@ -19,8 +18,17 @@ const passport = require('passport');
 const LocalStrategy = require('passport-local').Strategy;
 const util = require('util');
 const sprintf = require('sprintf-js').sprintf;
-
 const winston = require('winston');
+const mongoose = require('mongoose');
+mongoose.Promise = global.Promise;
+const bearerToken = require('express-bearer-token');
+const jwt = require('jsonwebtoken');
+const JwtStrategy = require('passport-jwt').Strategy;
+const ExtractJwt = require('passport-jwt').ExtractJwt;
+var mongo = require('mongodb').MongoClient;
+const version = '2017.08.04';
+
+//Configure logging
 winston.remove(winston.transports.Console);
 winston.add(winston.transports.Console, {'timestamp': () => {
                                                               return moment().format('YYYY-MM-DD HH:mm:ss,SSS')
@@ -31,149 +39,78 @@ winston.add(winston.transports.Console, {'timestamp': () => {
                                                               }
                                          });
 winston.level = 'debug';
-const version = '2017.08.01';
+
+
 winston.info('Starting 221B server version', version);
 
-const mongoose = require('mongoose');
-mongoose.Promise = global.Promise;
-const bearerToken = require('express-bearer-token');
-const jwt = require('jsonwebtoken');
-var JwtStrategy = require('passport-jwt').Strategy;
-var ExtractJwt = require('passport-jwt').ExtractJwt;
-
-var defaultPreferences = { nwInvestigateUrl: '',
+//Set default preferences
+var defaultPreferences = {
+                    nwInvestigateUrl: '',
                     gsPath: '/usr/bin/gs',
                     pdftotextPath: '/usr/bin/pdftotext',
                     unrarPath: '/usr/bin/unrar',
-                    defaultNwQuery: "vis.level exists || content = 'application/pdf'",
+                    defaultNwQuery: "filetype = 'jpg','gif','png','pdf','zip','rar','windows executable','apple executable (pef)','apple executable (mach-o)'",
+                    defaultQuerySelection : "All Supported File Types",
                     defaultImageLimit: 1000,
                     defaultRollingHours: 1,
                     minX: 255,
-                    minY: 255
+                    minY: 255,
+                    displayedKeys : [ 
+                      "size", 
+                      "service", 
+                      "ip.src", 
+                      "ip.dst", 
+                      "alias.host", 
+                      "city.dst", 
+                      "country.dst", 
+                      "action", 
+                      "content", 
+                      "ad.username.src", 
+                      "ad.computer.src", 
+                      "filename", 
+                      "client"
+                    ],
+                    masonryKeys : [ 
+                      {
+                        key : "alias.host",
+                        friendly : "Hostname"
+                      }, 
+                      {
+                        key : "ad.username.src",
+                        friendly : "AD User"
+                      }, 
+                      {
+                        key : "ad.computer.src",
+                        friendly : "AD Computer"
+                      }, 
+                      {
+                        key : "ad.domain.src",
+                        friendly : "AD Domain"
+                      }
+                    ],
+                    masonryColumnSize : 350,
                   };
+
+var justInstalled = true;
 var preferences = {};
 var nwservers = {};
 var collections = {};
 var collectionsData = {};
 
-var mongo = require('mongodb').MongoClient;
 var url = "mongodb://localhost:27017/221b";
 var db;
-mongo.connect(url, (err, database) => {
-  if (err) throw err;
-  db = database;
-  
-  db.listCollections().toArray( (err, cols) => {
-    if (err) throw err;
+connectToDB(); //this must come before mongoose user connection so that we know whether to create the default admin account
 
-    let foundPrefs = false;
-    for (let i=0; i < cols.length; i++) {
-      if (cols[i].name == "preferences") {
-         //read prefs
-         foundPrefs = true;
-         winston.debug("Reading preferences");
-         db.collection('preferences').findOne( (err, res) => {
-           preferences = res.preferences;
-         });
-      }
-      
-      if (cols[i].name == "nwservers") {
-        winston.debug("Reading nwservers");
-        db.collection('nwservers').find({}).toArray( (err, res) => {
-           for (let x=0; x < res.length; x++) {
-              let id = res[x].id;
-              nwservers[id] = res[x];
-           }
-         });
-      }
-      
-      if (cols[i].name == "collections") {
-        winston.debug("Reading collections");
-        db.collection('collections').find({}).toArray( (err, res) => {
-           for (let x=0; x < res.length; x++) {
-              let id = res[x].id;
-              collections[id] = res[x];
-           }
-           cleanRollingDirs();
-         });
-      }
-      
-      if (cols[i].name == "collectionsData") {
-        winston.debug("Reading collectionsData");
-        db.collection('collectionsData').find({}).toArray( (err, res) => {
-           for (let x=0; x < res.length; x++) {
-              //winston.debug("res[x]:", res[x]);
-              let id = res[x].id;
-              collectionsData[id] = JSON.parse(res[x].data);
-           }
-         });
-      }    
-    }
-    
-    if (!foundPrefs) {
-      winston.info("Creating default preferences");
-      preferences = defaultPreferences;
-      db.collection('preferences').insertOne( {'preferences': preferences}, (err, res) => {
-        if (err) throw err;
-      });
-    }
-  });
-  
-  
-  
-});
-
-function writePreferences() {
-  db.collection('preferences').updateOne({},{'preferences': preferences}, (err, res) => {
-    if (err) throw err;
-  });
-}
-
-/*
-graphual-server
-  -collections
-    -<collectionId1>
-      +img1
-      +img2
-    -<collectionId2>
-  -etc
-    +collections.cfg
-    +nwservers.cfg
-    +collectiondefs.cfg
-  -var
-    -run
-      +graphual.socket
-*/
-
-const cfgDir = '/etc/kentech/221b';
-const certDir = cfgDir + '/certificates';
-const keyfile = certDir + '/221b.key'
-const certfile = certDir + '/221b.pem'
+//const cfgDir = '/etc/kentech/221b';
+//const certDir = cfgDir + '/certificates';
 const collectionsUrl = '/collections'
 var collectionsDir = '/var/kentech/221b/collections';
-//var collectionsDir = './collections';
 
 
 app.use(bearerToken());
 app.use(bodyParser.json());
 app.use(bodyParser.urlencoded({ extended: true }));
 app.use(passport.initialize());
-
-function cleanRollingDirs() {
-  try {
-    winston.info("Cleaning up rolling and monitoring collection directories");
-    for (let collection in collections) {
-      winston.debug("Cleaning collection '" + collections[collection].name + "' with id " + collection);
-      if (collections.hasOwnProperty(collection) && ( collections[collection].type == 'monitoring' || collections[collection].type == 'rolling' ) ) { //hasOwnProperty needed to filter out object prototypes
-        //winston.debug('Deleting dir', collectionsDir + '/' + collections[collection].id);
-        rimraf( collectionsDir + '/' + collections[collection].id, () => {} ); //delete output directory
-      }
-    }
-  }
-  catch(exception) {
-    winston.error('ERROR deleting output directory collectionsDir + '/' + id', exception);
-  }
-}
 
 // passport config
 var jwtTokenKey = 'akudshfos9dfjkewjhtiw87weg51f5';
@@ -218,6 +155,20 @@ mongoose.connect("mongodb://localhost:27017/221b_users");
 //mongoose.connect("mongodb://localhost:27017/221b_users", { useMongoClient: true });
 var tokenBlacklist = {};
 
+
+//Create default user account if we think the app was just installed and if the count of users is 0
+User.count({}, (err, count) => {
+  if (err) {
+    winston.error("Error getting user count:", err);
+  }
+  else if (justInstalled == true && count == 0) {
+      winston.log("Adding default user 'admin'");
+      //createDefaultUser();
+  }
+});
+
+
+
 app.post('/api/login', passport.authenticate('local'), (req,res) => {
   winston.info('POST /api/login');
   User.findOne({username: req.body.username}, (err, user) => {
@@ -246,7 +197,6 @@ app.get('/api/logout', passport.authenticate('jwt', { session: false } ), (req,r
   tokenBlacklist[tokenId] = tokenId;
   res.sendStatus(200);
 });
-
 
 app.get('/api/users', passport.authenticate('jwt', { session: false } ), (req,res)=>{
   winston.info('GET /api/users');
@@ -374,6 +324,18 @@ app.delete('/api/user/:id', passport.authenticate('jwt', { session: false } ), (
 });
 
 //login and return JWT
+
+app.get('/api/version', passport.authenticate('jwt', { session: false } ), (req,res)=>{
+  winston.info('GET /api/version');
+  try {
+    res.json({version: version});
+  }
+  catch(e) {
+    winston.error('ERROR GET /api/version:', e);
+    res.sendStatus(500);
+  }
+});
+  
 
 app.get('/api/collections', passport.authenticate('jwt', { session: false } ), (req,res)=>{
   winston.info('GET /api/collections');
@@ -1237,6 +1199,105 @@ app.get('/api/getrollingcollection/:id', passport.authenticate('jwt', { session:
   }
 });
 
+function connectToDB() {
+  mongo.connect(url, (err, database) => {
+    if (err) throw err;
+    db = database;
+  
+    db.listCollections().toArray( (err, cols) => {
+      if (err) throw err;
+
+      let foundPrefs = false;
+      for (let i=0; i < cols.length; i++) {
+        if (cols[i].name == "preferences") {
+           //read prefs
+           foundPrefs = true;
+           justInstalled = false;
+           winston.debug("Reading preferences");
+           db.collection('preferences').findOne( (err, res) => {
+             preferences = res.preferences;
+           });
+        }
+      
+        if (cols[i].name == "nwservers") {
+          winston.debug("Reading nwservers");
+          db.collection('nwservers').find({}).toArray( (err, res) => {
+             for (let x=0; x < res.length; x++) {
+                let id = res[x].id;
+                nwservers[id] = res[x];
+             }
+           });
+        }
+      
+        if (cols[i].name == "collections") {
+          winston.debug("Reading collections");
+          db.collection('collections').find({}).toArray( (err, res) => {
+             for (let x=0; x < res.length; x++) {
+                let id = res[x].id;
+                collections[id] = res[x];
+             }
+             cleanRollingDirs();
+           });
+        }
+      
+        if (cols[i].name == "collectionsData") {
+          winston.debug("Reading collectionsData");
+          db.collection('collectionsData').find({}).toArray( (err, res) => {
+             for (let x=0; x < res.length; x++) {
+                //winston.debug("res[x]:", res[x]);
+                let id = res[x].id;
+                collectionsData[id] = JSON.parse(res[x].data);
+             }
+           });
+        }    
+      }
+    
+      if (!foundPrefs) {
+        winston.info("Creating default preferences");
+        preferences = defaultPreferences;
+        db.collection('preferences').insertOne( {'preferences': preferences}, (err, res) => {
+          if (err) throw err;
+        });
+      }
+    });
+  
+  
+  
+  });
+}
+
+function writePreferences() {
+  db.collection('preferences').updateOne({},{'preferences': preferences}, (err, res) => {
+    if (err) throw err;
+  });
+}
+
+function cleanRollingDirs() {
+  try {
+    winston.info("Cleaning up rolling and monitoring collection directories");
+    for (let collection in collections) {
+      winston.debug("Cleaning collection '" + collections[collection].name + "' with id " + collection);
+      if (collections.hasOwnProperty(collection) && ( collections[collection].type == 'monitoring' || collections[collection].type == 'rolling' ) ) { //hasOwnProperty needed to filter out object prototypes
+        //winston.debug('Deleting dir', collectionsDir + '/' + collections[collection].id);
+        rimraf( collectionsDir + '/' + collections[collection].id, () => {} ); //delete output directory
+      }
+    }
+  }
+  catch(exception) {
+    winston.error('ERROR deleting output directory collectionsDir + '/' + id', exception);
+  }
+}
+
+function createDefaultUser() {
+  User.register(new User({ id: uuidV4(), username : 'admin', fullname: 'System Administrator', email: '', enabled: true }), 'kentech0', (err, user) => {
+    if (err) {
+      winston.error("ERROR adding default user 'admin':", err);
+    }
+    else {
+      winston.info("Default user 'admin' added:");
+    }
+  });
+}
 
 app.listen(listenPort);
 winston.info('Serving on localhost:' + listenPort);

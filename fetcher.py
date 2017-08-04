@@ -8,15 +8,15 @@ import email
 import mimetypes
 from pprint import pprint
 import StringIO
-from PIL import Image
+from PIL import Image ##install
 from communicator import communicator
 import time
 from subprocess import Popen, PIPE
 import zipfile
 import shutil
-import magic
+import magic ##install
 import hashlib
-import rarfile
+import rarfile ##install
 import re
 import logging
 
