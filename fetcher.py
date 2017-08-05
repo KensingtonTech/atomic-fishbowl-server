@@ -160,7 +160,7 @@ class Fetcher:
       log.warning("Could not identify image file " + filename + ".  This is likely due to file corruption")
       output.close()
       return False
-
+      
     #print "minX, minY:",self.minX,self.minY
     #check file for dimensions and only write if minimum
 
@@ -173,7 +173,7 @@ class Fetcher:
 
       try:
         #if x > 350 or y > 350: #our thumbnail size is max 350x350
-        log.debug("Generating thumbnail for " + filename)
+        log.debug("Generating thumbnail for image " + filename)
         thumbnailName = 'thumbnail_' + filename
         im.thumbnail(self.thumbnailSize, Image.ANTIALIAS)
         im.save(os.path.join(self.directory, thumbnailName), im.format)
@@ -185,12 +185,12 @@ class Fetcher:
         self.imageCount += 1
 
       except Exception as e: #we don't want to keep corrupt files.  we know it's corrupt if we can't generate a thumbnail
-        log.exception("Error generating thumbnail for " + filename)
+        log.exception("Error generating thumbnail for image " + filename)
       
 
     else:
       log.debug("Discarding image " + filename + " due to minimum size requirements")
-    im.close()
+    
     output.close()
     #fp = open(os.path.join(self.directory, filename), 'wb')
     #fp.write(part.get_payload(decode=True))

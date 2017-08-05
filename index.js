@@ -20,7 +20,7 @@ const util = require('util');
 const sprintf = require('sprintf-js').sprintf;
 const winston = require('winston');
 const mongoose = require('mongoose');
-mongoose.Promise = global.Promise;
+mongoose.Promise = Promise; //global.Promise;
 const bearerToken = require('express-bearer-token');
 const jwt = require('jsonwebtoken');
 const JwtStrategy = require('passport-jwt').Strategy;
@@ -150,8 +150,21 @@ var User = require('./models/user');
 passport.use(new LocalStrategy(User.authenticate()));
 passport.serializeUser(User.serializeUser());
 passport.deserializeUser(User.deserializeUser());
+
 // mongoose
-mongoose.connect("mongodb://localhost:27017/221b_users");
+mongoose.connect("mongodb://localhost:27017/221b_users", {useMongoClient: true, promiseLibrary: global.Promise});
+var db = mongoose.connection;
+//db.on('error', (err) => {winston.error("Error connecting to 221b_users DB:"), err} );
+//db.once('open', () => {winston.info("Connected to 221b_users DB")} );
+
+/*
+conn.221b_.listCollections({name: 'users'})
+        .next(function(err, collinfo) {
+                if (collinfo) {
+                  winston.info("Collection 'users' exists");
+                }
+            });
+*/
 //mongoose.connect("mongodb://localhost:27017/221b_users", { useMongoClient: true });
 var tokenBlacklist = {};
 
@@ -162,8 +175,9 @@ User.count({}, (err, count) => {
     winston.error("Error getting user count:", err);
   }
   else if (justInstalled == true && count == 0) {
-      winston.log("Adding default user 'admin'");
-      //createDefaultUser();
+      winston.info("Adding default user 'admin'");
+      createDefaultUser();
+      justInstalled = false;
   }
 });
 
@@ -1294,7 +1308,7 @@ function createDefaultUser() {
       winston.error("ERROR adding default user 'admin':", err);
     }
     else {
-      winston.info("Default user 'admin' added:");
+      winston.info("Default user 'admin' added");
     }
   });
 }
