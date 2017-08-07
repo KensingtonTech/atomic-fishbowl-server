@@ -16,17 +16,17 @@ const temp = require('temp');
 const moment = require('moment');
 const passport = require('passport');
 const LocalStrategy = require('passport-local').Strategy;
+const cookieParser = require('cookie-parser');
 const util = require('util');
 const sprintf = require('sprintf-js').sprintf;
 const winston = require('winston');
 const mongoose = require('mongoose');
 mongoose.Promise = Promise; //global.Promise;
-const bearerToken = require('express-bearer-token');
 const jwt = require('jsonwebtoken');
 const JwtStrategy = require('passport-jwt').Strategy;
 const ExtractJwt = require('passport-jwt').ExtractJwt;
 var mongo = require('mongodb').MongoClient;
-const version = '2017.08.04';
+const version = '2017.08.06';
 
 //Configure logging
 winston.remove(winston.transports.Console);
@@ -101,36 +101,65 @@ var url = "mongodb://localhost:27017/221b";
 var db;
 connectToDB(); //this must come before mongoose user connection so that we know whether to create the default admin account
 
-//const cfgDir = '/etc/kentech/221b';
-//const certDir = cfgDir + '/certificates';
+const cfgDir = '/etc/kentech/221b';
+const certDir = cfgDir + '/certificates';
+const jwtPrivateKeyFile = certDir + '/221b.key';
+const jwtPublicKeyFile = certDir + '/221b.pem';
 const collectionsUrl = '/collections'
 var collectionsDir = '/var/kentech/221b/collections';
 
-
-app.use(bearerToken());
+app.use(cookieParser());
 app.use(bodyParser.json());
 app.use(bodyParser.urlencoded({ extended: true }));
 app.use(passport.initialize());
 
+
 // passport config
-var jwtTokenKey = 'akudshfos9dfjkewjhtiw87weg51f5';
-var jwtOpts = {
-  //jwtFromRequest: ExtractJwt.fromAuthHeader(),
-  jwtFromRequest: ExtractJwt.fromAuthHeaderWithScheme('Bearer'),
-  secretOrKey: jwtTokenKey,
-  //issuer: 'issuer.221b.knowledgekta.com',
-  //audience: '221b.knowledgekta.com'
+try {
+  var jwtPrivateKey = fs.readFileSync(jwtPrivateKeyFile, 'utf8');
+}
+catch(e) {
+  winston.error("Cannot read private key file", jwtPrivateKeyFile);
+  process.exit(1);
 }
 
-passport.use(new JwtStrategy(jwtOpts, (jwt_payload, done) => {
-    //winston.debug("jwt validator jwt_payload:", jwt_payload);
-    //winston.debug("verifying token id:", jwt_payload.jti);
-    if (jwt_payload.jti in tokenBlacklist) { //check blacklist
-      winston.info("User " + jwt_payload._doc.username + " has already logged out!");
-      return done(null, false);
-    }
+try {
+  var jwtPublicKey = fs.readFileSync(jwtPublicKeyFile, 'utf8');
+}
+catch(e) {
+  winston.error("Cannot read public key file", jwtPublicKeyFile);
+  process.exit(1);
+}
 
-    User.findOne({id: jwt_payload._doc.id}, function(err, user) {
+
+var cookieExtractor = function(req) {
+  //Extract JWT from cookie 'access_token' and return to JwtStrategy
+  //winston.debug("cookieExtractor()", req.cookies);
+  var token = null;
+  if (req && req.cookies)
+  {
+      token = req.cookies['access_token'];
+  }
+  return token;
+};
+
+var jwtOpts = {
+  jwtFromRequest: ExtractJwt.fromExtractors([cookieExtractor]),
+  secretOrKey: jwtPublicKey,
+  algorithms: ['RS256']
+};
+
+
+passport.use(new JwtStrategy(jwtOpts, (jwt_payload, done) => {
+  //After automatically verifying that JWT was signed by us, perform extra validation with this function
+  //winston.debug("jwt validator jwt_payload:", jwt_payload);
+  //winston.debug("verifying token id:", jwt_payload.jti);
+  if (jwt_payload.jti in tokenBlacklist) { //check blacklist
+    winston.info("User " + jwt_payload.username + " has already logged out!");
+    return done(null, false);
+  }
+
+  User.findOne({id: jwt_payload.sub}, function(err, user) {
       if (err) {
         return done(err, false);
       }
@@ -145,7 +174,7 @@ passport.use(new JwtStrategy(jwtOpts, (jwt_payload, done) => {
 }));
 
 
-//we use mongoose for auth, and MongoClient for everything else.  This is because Passport-Local Mongoose required it.  We may want to migrate everything to Mongoose in the future
+//We use mongoose for auth, and MongoClient for everything else.  This is because Passport-Local Mongoose required it, and it is ill-suited to the free-formish objects which we want to use.
 var User = require('./models/user');
 passport.use(new LocalStrategy(User.authenticate()));
 passport.serializeUser(User.serializeUser());
@@ -182,21 +211,30 @@ User.count({}, (err, count) => {
 });
 
 
+var transformUser = function(doc, ret, options) {
+  delete ret._id;
+  delete ret.id;
+  delete ret.email;
+  return ret;
+};
 
 app.post('/api/login', passport.authenticate('local'), (req,res) => {
   winston.info('POST /api/login');
   User.findOne({username: req.body.username}, (err, user) => {
-    if (!user) {
-      winston.info('Login failed for user', req.body.username);
-      res.json({ success: false, message: 'Authentication failed. User not found.' });
+    if (err) {
+      winston.info("Error looking up user " + req.body.username + ': ' + err);
+    }
+    if (!user) { //we likely will never enter this block as  the validation is really already done by passport
+      winston.info('Login failed for user ' + req.body.username + '.  User not found');
+      res.json({ success: false, message: 'Authentication failed' });
     }
     else {
-      var token = jwt.sign(user, jwtTokenKey, { expiresIn: 60*60*24, jwtid: uuidV4() }); // expires in 24 hours
+      winston.debug("Found user " + req.body.username + ".  Signing token");
+      let token = jwt.sign(user.toObject({ versionKey: false, transform: transformUser }), jwtPrivateKey, { subject: user.id, algorithm: 'RS256', expiresIn: 60*60*24, jwtid: uuidV4() }); // expires in 24 hours
+      res.cookie('access_token', token, { httpOnly: true, secure: true })
       res.json({
         success: true,
-        //message: 'Enjoy your token!',
-        user: user,
-        token: token
+        user: user
       });
     }
   });
@@ -204,11 +242,17 @@ app.post('/api/login', passport.authenticate('local'), (req,res) => {
 
 app.get('/api/logout', passport.authenticate('jwt', { session: false } ), (req,res) => {
   winston.info('GET /api/logout');
-  let decoded = jwt.decode(req.token); //we can use jwt.decode here without signature verification as it's already been verified during authentication
+  let decoded = jwt.decode(req.cookies.access_token); //we can use jwt.decode here without signature verification as it's already been verified during authentication
   //winston.debug("decoded:", decoded);
   let tokenId = decoded.jti; //store this
   //winston.debug("decoded tokenId:", tokenId);
   tokenBlacklist[tokenId] = tokenId;
+  res.clearCookie('access_token');
+  res.sendStatus(200);
+});
+
+app.get('/api/isloggedin', passport.authenticate('jwt', { session: false } ), (req, res)=>{
+  winston.debug("GET /api/isloggedin");
   res.sendStatus(200);
 });
 

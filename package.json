@@ -13,7 +13,6 @@
     "body-parser": "^1.17.1",
     "cookie-parser": "^1.4.3",
     "express": "^4.15.2",
-    "express-bearer-token": "^2.1.0",
     "express-session": "^1.15.3",
     "jsonwebtoken": "^7.4.2",
     "moment": "^2.18.1",

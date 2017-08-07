@@ -455,7 +455,7 @@ class Fetcher:
               #identify the file
               archivedFile.seek(0)
               archivedFileType = magic.from_buffer( archivedFile.getvalue(), mime=True)
-              log.debug("archivedFileType:", archivedFileType)
+              log.debug("archivedFileType: " + archivedFileType)
               archivedFile.seek(0)
               if archivedFileType == 'application/pdf':
                 #fp = open(os.path.join(self.directory, filename), 'wb')

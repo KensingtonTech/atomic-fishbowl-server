@@ -1,5 +1,0 @@
-[req]
-req_extensions = v3_req
-keyUsage = nonRepudiation, digitalSignature, keyEncipherment, dataEncipherment
-distinguished_name = req_distinguished_name
-
