@@ -26,7 +26,7 @@ const jwt = require('jsonwebtoken');
 const JwtStrategy = require('passport-jwt').Strategy;
 const ExtractJwt = require('passport-jwt').ExtractJwt;
 var mongo = require('mongodb').MongoClient;
-const version = '2017.08.06';
+const version = '2017.08.08';
 
 //Configure logging
 winston.remove(winston.transports.Console);
@@ -163,8 +163,13 @@ passport.use(new JwtStrategy(jwtOpts, (jwt_payload, done) => {
       if (err) {
         return done(err, false);
       }
-      if (user) {
+      if (user && user.enabled) {
         return done(null, user);
+      }
+      if (user && !user.enabled) {
+        winston.info('Login denied for user', user.username);
+        winston.info('Attempt to authenticate by disabled user', user.username);
+        return done(null, false);
       }
       else {
         return done(null, false);
@@ -220,15 +225,16 @@ var transformUser = function(doc, ret, options) {
 
 app.post('/api/login', passport.authenticate('local'), (req,res) => {
   winston.info('POST /api/login');
-  User.findOne({username: req.body.username}, (err, user) => {
+  User.findOne({username: req.body.username, enabled: true}, (err, user) => {
     if (err) {
       winston.info("Error looking up user " + req.body.username + ': ' + err);
     }
     if (!user) { //we likely will never enter this block as  the validation is really already done by passport
-      winston.info('Login failed for user ' + req.body.username + '.  User not found');
+      winston.info('Login failed for user ' + req.body.username + '.  User either not found or not enabled');
       res.json({ success: false, message: 'Authentication failed' });
     }
     else {
+      winston.info("Login successful for user", req.body.username);
       winston.debug("Found user " + req.body.username + ".  Signing token");
       let token = jwt.sign(user.toObject({ versionKey: false, transform: transformUser }), jwtPrivateKey, { subject: user.id, algorithm: 'RS256', expiresIn: 60*60*24, jwtid: uuidV4() }); // expires in 24 hours
       res.cookie('access_token', token, { httpOnly: true, secure: true })
@@ -251,9 +257,14 @@ app.get('/api/logout', passport.authenticate('jwt', { session: false } ), (req,r
   res.sendStatus(200);
 });
 
+var transformUserIsLoggedIn = function(doc, ret, options) {
+  delete ret._id;
+  return ret;
+};
+
 app.get('/api/isloggedin', passport.authenticate('jwt', { session: false } ), (req, res)=>{
   winston.debug("GET /api/isloggedin");
-  res.sendStatus(200);
+  res.json(req.user.toObject({ versionKey: false, transform: transformUserIsLoggedIn }));
 });
 
 app.get('/api/users', passport.authenticate('jwt', { session: false } ), (req,res)=>{
@@ -326,7 +337,7 @@ function updateUser(req, res) {
 }
 
 app.post('/api/updateuser', passport.authenticate('jwt', { session: false } ), (req, res) => {
-  winston.info("POST /api/updateuser", req.body);
+  winston.info("POST /api/updateuser");
   
   if ('password' in req.body) {
     winston.info("Updating password for user with id", req.body.id);
