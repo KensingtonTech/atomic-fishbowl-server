@@ -26,7 +26,7 @@ const jwt = require('jsonwebtoken');
 const JwtStrategy = require('passport-jwt').Strategy;
 const ExtractJwt = require('passport-jwt').ExtractJwt;
 var mongo = require('mongodb').MongoClient;
-const version = '2017.08.08';
+const version = '2017.08.11';
 
 //Configure logging
 winston.remove(winston.transports.Console);
@@ -718,7 +718,7 @@ app.get('/api/getbuildingcollection/:id', passport.authenticate('jwt', { session
 
 var buildingCollections = {}; //we shall house collections which are under construction here
 
-function socketConnectionWorker(id, socket, tempName, subject) {
+function socketConnectionWorker(id, socket, tempName, subject) { // for fixed collections
   winston.info("socketConnectionWorker(): Connection received from worker to build collection",id);
   
   var data = ''; //buffer for worker data
@@ -922,6 +922,21 @@ function chunkHandler(collectionRoot, id, subject, data, chunk) {
 
     //modify image paths to point to /collections/:collectionId
     for (var i=0; i < update.collectionUpdate.images.length; i++) {
+      
+      update.collectionUpdate.images[i].contentFile = collectionsUrl + '/' + id + '/' + update.collectionUpdate.images[i].contentFile;
+
+      if ('thumbnail' in update.collectionUpdate.images[i]) {
+        update.collectionUpdate.images[i].thumbnail = collectionsUrl + '/' + id + '/' + update.collectionUpdate.images[i].thumbnail;
+      }
+      if ('pdfImage' in update.collectionUpdate.images[i]) {
+        update.collectionUpdate.images[i].pdfImage = collectionsUrl + '/' + id + '/' + update.collectionUpdate.images[i].pdfImage;
+      }
+      if ('archiveFilename' in update.collectionUpdate.images[i]) {
+        update.collectionUpdate.images[i].archiveFilename = collectionsUrl + '/' + id + '/' + update.collectionUpdate.images[i].archiveFilename;
+      }
+      collectionRoot[id].images.push(update.collectionUpdate.images[i]);
+    }
+    /*for (var i=0; i < update.collectionUpdate.images.length; i++) {
       update.collectionUpdate.images[i].image = collectionsUrl + '/' + id + '/' + update.collectionUpdate.images[i].image;
       if ('thumbnail' in update.collectionUpdate.images[i]) {
         update.collectionUpdate.images[i].thumbnail = collectionsUrl + '/' + id + '/' + update.collectionUpdate.images[i].thumbnail;
@@ -930,7 +945,7 @@ function chunkHandler(collectionRoot, id, subject, data, chunk) {
         update.collectionUpdate.images[i].contentFile = collectionsUrl + '/' + id + '/' + update.collectionUpdate.images[i].contentFile;
       }
       collectionRoot[id].images.push(update.collectionUpdate.images[i]);
-    }
+    }*/
     
     subject.next(update);
   }
@@ -1358,7 +1373,7 @@ function cleanRollingDirs() {
 }
 
 function createDefaultUser() {
-  User.register(new User({ id: uuidV4(), username : 'admin', fullname: 'System Administrator', email: '', enabled: true }), 'kentech0', (err, user) => {
+  User.register(new User({ id: uuidV4(), username : 'admin', fullname: 'System Administrator', email: 'noreply@knowledgekta.com', enabled: true }), 'kentech0', (err, user) => {
     if (err) {
       winston.error("ERROR adding default user 'admin':", err);
     }

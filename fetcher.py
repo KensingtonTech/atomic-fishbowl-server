@@ -19,6 +19,7 @@ import hashlib
 import rarfile ##install
 import re
 import logging
+from ContentObj import ContentObj
 
 log = logging.getLogger(__name__)
 
@@ -43,34 +44,33 @@ class Fetcher:
     self.imageCount = 0
     self.thumbnailSize = 350, 350
     self.devmode = True
-    log.info("Minimum dimensions are: " + str(minX) + " x " + str(minY) )
-    
+    log.info("Minimum dimensions are: " + str(minX) + " x " + str(minY))
 
   """curl "http://admin:netwitness@172.16.0.55:50104/sdk?msg=query&query=$query&force-content-type=application/json"""
 
   def fetchSummary(self):
-    request=urllib2.Request(self.url + '/sdk?msg=summary')
+    request = urllib2.Request(self.url + '/sdk?msg=summary')
     base64string = base64.b64encode('%s:%s' % (self.user, self.password))
-    request.add_header("Authorization", "Basic %s" % base64string)  
-    request.add_header('Content-type','application/json') 
-    request.add_header('Accept','application/json')
+    request.add_header("Authorization", "Basic %s" % base64string)
+    request.add_header('Content-type', 'application/json')
+    request.add_header('Accept', 'application/json')
     summaryResult = json.load(urllib2.urlopen(request, timeout=5))
     for e in summaryResult['string'].split():
-      (k,v) = e.split('=')
+      (k, v) = e.split('=')
       self.summary[k] = v
-      
-      
-      
+
+
+
   def runQuery(self, query):
     reqStr = self.url + '/sdk?msg=query&query=' + query  #&flags=4096
     ctx = ssl.create_default_context()
     ctx.check_hostname = False
-    ctx.verify_mode = ssl.CERT_NONE 
-    request=urllib2.Request(reqStr)
+    ctx.verify_mode = ssl.CERT_NONE
+    request = urllib2.Request(reqStr)
     base64string = base64.b64encode('%s:%s' % (self.user, self.password))
-    request.add_header("Authorization", "Basic %s" % base64string)  
-    request.add_header('Content-type','application/json') 
-    request.add_header('Accept','application/json')
+    request.add_header("Authorization", "Basic %s" % base64string)
+    request.add_header('Content-type', 'application/json')
+    request.add_header('Accept', 'application/json')
     try:
       rawQueryRes = json.load(urllib2.urlopen(request, context=ctx, timeout=5))
       #pprint(rawQueryRes)
@@ -82,9 +82,9 @@ class Fetcher:
           if 'fields' in field['results']:
             metaList = field['results']['fields']
             for meta in metaList:
-              key=meta['type']
-              value=meta['value']
-              sessionId=meta['group']
+              key = meta['type']
+              value = meta['value']
+              sessionId = meta['group']
               if not sessionId in self.sessions:
                 self.sessions[sessionId] = { 'images': [], 'session': { 'id': sessionId, 'meta': {} } }
               if not key in self.sessions[sessionId]['session']['meta']:
@@ -102,10 +102,10 @@ class Fetcher:
       sys.exit(1)
     return len(self.sessions)
 
-      
- 
-  
-  
+
+
+
+
   def pullFiles(self, distillationTerms, regexDistillationTerms, ignoredSessions, md5Hashes=[], sha1Hashes=[], sha256Hashes=[]):
 
     for sessionId in self.sessions:
@@ -115,11 +115,11 @@ class Fetcher:
             ctx = ssl.create_default_context()
             ctx.check_hostname = False
             ctx.verify_mode = ssl.CERT_NONE
-            request=urllib2.Request(self.url + '/sdk/content?render=107&session=' + str(sessionId))
+            request = urllib2.Request(self.url + '/sdk/content?render=107&session=' + str(sessionId))
             base64string = base64.b64encode('%s:%s' % (self.user, self.password))
-            request.add_header("Authorization", "Basic %s" % base64string)  
-            request.add_header('Content-type','application/json') 
-            request.add_header('Accept','application/json')
+            request.add_header("Authorization", "Basic %s" % base64string)
+            request.add_header('Content-type', 'application/json')
+            request.add_header('Accept', 'application/json')
             res = urllib2.urlopen(request, context=ctx, timeout=5)
             if res.info().getheader('Content-Type').startswith('multipart/mixed'):
               contentType = res.info().getheader('Content-Type')
@@ -144,14 +144,58 @@ class Fetcher:
     
 
 
-  def processImage(self, filename, sessionId, contentType, fromArchive='', part='', stringFile=''): #must specify either part or stringFile
+  
+  def processImage(self, contentObj): #must specify either part or stringFile
+    log.debug("Analyzing image " + contentObj.contentFile)
+    contentObj.contentType = 'image'
+    output = contentObj.getFileContent()
+      
+    try:
+      im = Image.open(output)
+      (x,y) = im.size
+    except Exception as e:
+      log.warning("Could not identify image file " + contentObj.contentFile + ".  This is likely due to file corruption")
+      return False
+      
+    #check file for dimensions and only write if minimum
+    if x >= int(self.minX) and y >= int(self.minY):
+      log.debug("Keeping image " + contentObj.contentFile + " of resolution " + str(x) + 'x' + str(y) )
+      fp = open(os.path.join(self.directory, contentObj.contentFile), 'wb')
+      fp.write(output.getvalue())
+      fp.close()
+
+      try:
+        log.debug("Generating thumbnail for image " + contentObj.contentFile)
+        thumbnailName = 'thumbnail_' + contentObj.contentFile
+        im.thumbnail(self.thumbnailSize, Image.ANTIALIAS)
+        im.save(os.path.join(self.directory, thumbnailName), im.format)
+        #overwrite imgObj if we had to make a thumbnail
+        contentObj.thumbnail = thumbnailName
+        ###imgObj = { 'session': sessionId, 'image': filename, 'thumbnail': thumbnailName, 'contentType': contentType}
+        self.sessions[contentObj.session]['images'].append( contentObj.get() )
+        self.imageCount += 1
+
+      except Exception as e: #we don't want to keep corrupt files.  we know it's corrupt if we can't generate a thumbnail
+        log.exception("Error generating thumbnail for image " + contentObj.contentFile)
+        return False
+
+    else:
+      log.debug("Discarding image " + contentObj.contentFile + " due to minimum size requirements")
+      return False
+    
+    return True
+
+  """
+  def processImageOld(self, filename, sessionId, contentType, fromArchive='', part='', stringFile=''): #must specify either part or stringFile
     log.debug("Analyzing image " + filename)
 
-    if part != '':
-      output = StringIO.StringIO()
-      output.write(part.get_payload(decode=True))
-    elif stringFile != '':
-      output = stringFile
+    #if part != '':
+    #  output = StringIO.StringIO()
+    #  output.write(part.get_payload(decode=True))
+    #elif stringFile != '':
+    #  output = stringFile
+    
+    output = contentObj.getContentFile()
       
     try:
       im = Image.open(output)
@@ -161,20 +205,19 @@ class Fetcher:
       output.close()
       return False
       
-    #print "minX, minY:",self.minX,self.minY
     #check file for dimensions and only write if minimum
-
     if x >= int(self.minX) and y >= int(self.minY):
-      log.debug("Keeping image " + filename + " of resolution " + str(x) + 'x' + str(y) )
-      fp = open(os.path.join(self.directory, filename), 'wb')
+      #log.debug("Keeping image " + filename + " of resolution " + str(x) + 'x' + str(y) )
+      log.debug("Keeping image " + contentObj.image + " of resolution " + str(x) + 'x' + str(y) )
+      #fp = open(os.path.join(self.directory, filename), 'wb')
+      fp = open(os.path.join(self.directory, contentObj.image), 'wb')
+
       fp.write(output.getvalue())
       fp.close()
-      #imgObj = { 'session': sessionId, 'image': filename, 'thumbnail': filename, 'contentType': contentType}
 
       try:
-        #if x > 350 or y > 350: #our thumbnail size is max 350x350
-        log.debug("Generating thumbnail for image " + filename)
-        thumbnailName = 'thumbnail_' + filename
+        log.debug("Generating thumbnail for image " + contentObj.image)
+        thumbnailName = 'thumbnail_' + contentObj.image
         im.thumbnail(self.thumbnailSize, Image.ANTIALIAS)
         im.save(os.path.join(self.directory, thumbnailName), im.format)
         #overwrite imgObj if we had to make a thumbnail
@@ -196,17 +239,93 @@ class Fetcher:
     #fp.write(part.get_payload(decode=True))
     #fp.close()
     return True
+  """
+
+
+
+
+
+  #def processPdfOld(self, filename, sessionId, contentType, distillationTerms, regexDistillationTerms, fromArchive='', part='', stringFile=''):
+  def processPdf(self, contentObj, distillationTerms, regexDistillationTerms):
+    contentObj.contentType = 'pdf'
+
+    #write pdf to disk
+    log.debug("Writing pdf to " + os.path.join(self.directory, contentObj.contentFile) )
+    fp = open(os.path.join(self.directory, contentObj.contentFile), 'wb')
+    shutil.copyfileobj(contentObj.getFileContent(), fp)
+    fp.close()
     
+    #extract first page of pdf
+    #gs -dNOPAUSE -sDEVICE=jpeg -r144 -sOutputFile="p%o3d.jpg" -dFirstPage=1 -dLastPage=1 -dBATCH "$filename"
+    log.debug("Extracting first page of pdf " + contentObj.contentFile)
+    outputfile = "page1-" + contentObj.contentFile + ".jpg"
+    contentObj.pdfImage = outputfile
+    log.debug("Running gs on file " + contentObj.contentFile)
+    
+    try:
+      gsCmd = self.gsPath + " -dNOPAUSE -sDEVICE=jpeg -r144 -sOutputFile='" + os.path.join(self.directory, outputfile) + "' -dFirstPage=1 -dLastPage=1 -dBATCH '" +  os.path.join(self.directory, contentObj.contentFile) + "'"
+      log.debug("Ghostscript command line: " + gsCmd)
+      process = Popen(gsCmd, stdout=PIPE, stderr=PIPE, shell = True)
+      #print "process opened"
+      (output, err) = process.communicate()
+      exit_code = process.wait()
+
+      if exit_code == 0: #this means we successfully generated an image of the pdf and we want to keep it
+        keep = True
+        ###keep means we want to keep the file.  We choose to not keep the file (by making keep = False) on these conditions:
+        ###1: if an error is generated by gs whilst trying to render an image of the first page
+        ###2: if we have distillationTerms and/or regexDistillationTerms and they aren't matched
+        if len(distillationTerms) == 0 and len(regexDistillationTerms) == 0:
+          self.getPdfText(contentObj)
+        elif len(distillationTerms) != 0 and len(regexDistillationTerms) == 0:
+          keep = self.getPdfText(contentObj, searchTerms=distillationTerms)
+        elif len(distillationTerms) == 0 and len(regexDistillationTerms) != 0:
+          keep = self.getPdfText(contentObj, regexSearchTerms=regexDistillationTerms)
+        else:
+          keep = self.getPdfText(contentObj, searchTerms=distillationTerms, regexSearchTerms=regexDistillationTerms)
+        
+        if keep == False:
+          return False #return if we've chosen to not keep the file
+        
+        try:
+          #now let's try generating a thumbnail - if we already have an image, this should succeed.  If not, there's something screwy...
+          #but we'll keep it anyway and use the original image as the thumbnail and let the browser deal with any potential corruption
+          log.debug("Generating thumbnail for pdf " + outputfile)
+          thumbnailName = 'thumbnail_' + outputfile
+          pdfim = Image.open(os.path.join(self.directory, outputfile))
+          pdfim.thumbnail(self.thumbnailSize, Image.ANTIALIAS)
+          pdfim.save(os.path.join(self.directory, thumbnailName), pdfim.format)
+          #pdfim.close()
+
+          ###imgObj = { 'session': sessionId, 'image': outputfile, 'thumbnail': thumbnailName, 'contentFile': filename, 'contentType': contentType}
+          #set thumbnail to our generated thumbnail
+          contentObj.thumbnail = thumbnailName
+          self.sessions[contentObj.session]['images'].append( contentObj.get() )
+          self.imageCount += 1
+          return True
+        except Exception as e:
+          log.exception("Error generating thumbnail for pdf " + contentObj.contentFile)
+          ###imgObj = { 'session': sessionId, 'image': outputfile, 'thumbnail': outputfile, 'contentFile': filename, 'contentType': contentType}
+          #thumbnail generation failed, so set thumbnail to be the original image generated by gs
+          contentObj.thumbnail = outputfile
+          self.sessions[contentObj.session]['images'].append( contentObj.get() )
+          self.imageCount += 1
+          return True
+
+      if exit_code != 0:
+        #Ghostscript exited with a non-zero exit code, and thus was unsuccessful
+        log.warning("GhostScript exited abnormally with code " + str(exit_code) )
+        return False
+        
+    except Exception as e:
+      #Ghostscript couldn't even be run
+      log.exception("Could not run GhostScript command at " + self.gsPath )
+      return False
 
 
 
-
-
-
-
-
-
-  def processPdf(self, filename, sessionId, contentType, distillationTerms, regexDistillationTerms, fromArchive='', part='', stringFile=''):
+  """
+  def processPdfOld(self, filename, sessionId, contentType, distillationTerms, regexDistillationTerms, fromArchive='', part='', stringFile=''):
     log.debug("Extracting first page of pdf " + filename)
     #write pdf to disk
     log.debug("Writing pdf to " + os.path.join(self.directory, filename) )
@@ -217,6 +336,7 @@ class Fetcher:
     elif stringFile != '':
       shutil.copyfileobj(stringFile, fp)
     fp.close()
+
     #extract first page of pdf
     #gs -dNOPAUSE -sDEVICE=jpeg -r144 -sOutputFile="p%o3d.jpg" -dFirstPage=1 -dLastPage=1 -dBATCH "$filename"
     outputfile = "page1-" + filename + ".jpg"
@@ -250,7 +370,6 @@ class Fetcher:
           pdfim.save(os.path.join(self.directory, thumbnailName), pdfim.format)
           pdfim.close()
           #overwrite imgObj if we had to make a thumbnail
-          #imgObj = { 'session': sessionId, 'image': filename, 'thumbnail': thumbnailName, 'contentType': contentType}
           if keep:
             imgObj = { 'session': sessionId, 'image': outputfile, 'thumbnail': thumbnailName, 'contentFile': filename, 'contentType': contentType}
             if fromArchive != '':
@@ -276,9 +395,40 @@ class Fetcher:
     except Exception as e:
       log.exception("Could not run GhostScript command at " + self.gsPath )
       return False
+  """
 
 
+  ###def genHash(self, filename, sessionId, contentType, md5Hashes, fromArchive='', part='', stringFile=''): #must specify either part or stringFile
+  def genHash(self, contentObj, hashes): #must specify either part or stringFile
+    #print "genHash()"
+    contentObj.contentType = 'hash'
+    log.debug("genHash(): Generating " + contentObj.hashType + " hash for " + contentObj.contentFile)
 
+    contentFileObj = contentObj.getFileContent()
+
+    if contentObj.hashType == 'md5':
+      hash = hashlib.md5()
+    if contentObj.hashType == 'sha1':
+      hash = hashlib.sha1()
+    if contentObj.hashType == 'sha256':
+      hash = hashlib.sha256()
+    hash.update(contentFileObj.getvalue())
+      
+    log.debug(contentObj.hashType + " hash for " + contentObj.contentFile + " is " + hash.hexdigest())
+
+    for h in hashes:
+      if hash.hexdigest().decode('utf-8').lower() == h['hash'].lower():
+        log.debug("Matched " + contentObj.hashType + " hash " + h['hash'])
+        fp = open(os.path.join(self.directory, contentObj.contentFile), 'wb')
+        fp.write(contentFileObj.getvalue())
+        fp.close()
+        ###imgObj = { 'session': sessionId, 'contentType': 'md5Matched', 'contentFile': filename, 'image': filename, 'md5Hash': hash_md5.hexdigest() }
+        contentObj.hashValue = hash.hexdigest()
+        if 'friendly' in h:
+          contentObj.hashFriendly = h['friendly']
+        self.sessions[contentObj.session]['images'].append( contentObj.get() )
+
+  """
   def genMd5(self, filename, sessionId, contentType, md5Hashes, fromArchive='', part='', stringFile=''): #must specify either part or stringFile
     log.debug("genMd5(): Generating md5 hash for " + filename)
 
@@ -296,13 +446,14 @@ class Fetcher:
     log.debug("MD5 hash for " + filename + " is " + hash_md5.hexdigest())
 
     for h in md5Hashes:
-      if hash_md5.hexdigest().decode('utf-8').lower() == h.lower():
-      #if hash_md5.digest().lower() == h.lower():
-        log.debug("Matched hash " + h)
+      if hash_md5.hexdigest().decode('utf-8').lower() == h['hash'].lower():
+        log.debug("Matched hash " + h['hash'])
         fp = open(os.path.join(self.directory, filename), 'wb')
         fp.write(output.getvalue())
         fp.close()
         imgObj = { 'session': sessionId, 'contentType': 'md5Matched', 'contentFile': filename, 'image': filename, 'md5Hash': hash_md5.hexdigest() }
+        if 'friendly' in h:
+          imgObj['md5Friendly'] = h['friendly']
         if fromArchive != '':
           imgObj['fromArchive'] = fromArchive #fromArchive is the type of archive (either 'zip' or 'rar')
         self.sessions[sessionId]['images'].append( imgObj )
@@ -327,13 +478,14 @@ class Fetcher:
     log.debug("SHA1 hash for " + filename + " is " + hash_sha1.hexdigest() )
 
     for h in sha1Hashes:
-      if hash_sha1.hexdigest().decode('utf-8').lower() == h.lower():
-      #if hash_sha1.digest().lower() == h.lower():
-        log.debug("Matched hash " + h)
+      if hash_sha1.hexdigest().decode('utf-8').lower() == h['hash'].lower():
+        log.debug("Matched hash " + h['hash'])
         fp = open(os.path.join(self.directory, filename), 'wb')
         fp.write(output.getvalue())
         fp.close()
         imgObj = { 'session': sessionId, 'contentType': 'sha1Matched', 'contentFile': filename, 'image': filename, 'sha1Hash': hash_sha1.hexdigest() }
+        if 'friendly' in h:
+          imgObj['sha1Friendly'] = h['friendly']
         if fromArchive != '':
           imgObj['fromArchive'] = fromArchive #fromArchive is the type of archive (either 'zip' or 'rar')
         self.sessions[sessionId]['images'].append( imgObj )
@@ -358,17 +510,18 @@ class Fetcher:
     log.debug("SHA256 hash for " + filename + " is " + hash_sha256.hexdigest() )
 
     for h in sha256Hashes:
-      if hash_sha256.hexdigest().decode('utf-8').lower() == h.lower():
-      #if hash_sha256.digest().lower() == h.lower():
-        log.debug("Matched hash " + h)
+      if hash_sha256.hexdigest().decode('utf-8').lower() == h['hash'].lower():
+        log.debug("Matched hash " + h['hash'])
         fp = open(os.path.join(self.directory, filename), 'wb')
         fp.write(output.getvalue())
         fp.close()
         imgObj = { 'session': sessionId, 'contentType': 'sha256Matched', 'contentFile': filename, 'image': filename, 'sha256Hash': hash_sha256.hexdigest() }
+        if 'friendly' in h:
+          imgObj['sha256Friendly'] = h['friendly']
         if fromArchive != '':
           imgObj['fromArchive'] = fromArchive #fromArchive is the type of archive (either 'zip' or 'rar')
         self.sessions[sessionId]['images'].append( imgObj )
-        
+  """
         
 
 
@@ -421,70 +574,126 @@ class Fetcher:
 
       if self.imageCount >= self.imageLimit:
         return
+
+
+
+      ##########################################################################
+      #We're going to keep the content - so now start doing things with the content
+      ##########################################################################
+      contentObj = ContentObj()
+      contentObj.session = contentObj.session = sessionId
+
+      if contentType == 'image':
+        contentObj.contentFile = filename
+        contentObj.setPartContent(part)
+        ###if not self.processImage(filename, sessionId, contentType, part=part):
+        if not self.processImage(contentObj):
+          continue
+        
+      elif contentType == 'pdf':
+        contentObj.contentFile = filename
+        contentObj.setPartContent(part)
+        ###if not self.processPdf(filename, sessionId, contentType, distillationTerms, regexDistillationTerms, part=part):
+        if not self.processPdf(contentObj, distillationTerms, regexDistillationTerms):
+          continue
+        
+      elif contentType == 'executable':
+        contentObj.contentFile = filename
+        contentObj.setPartContent(part)
+        if len(md5Hashes) != 0:
+          contentObj.hashType = 'md5'
+          self.genMd5(contentObj, md5Hashes)
+        if len(sha1Hashes) != 0:
+          contentObj.hashType = 'sha1'
+          self.genSha1(contentObj, sha1Hashes)
+        if len(sha256Hashes) != 0:
+          contentObj.hashType = 'sha256'
+          ###self.genSha256(filename, sessionId, contentType, sha256Hashes, part=part)
+          self.genSha256(contentObj, sha256Hashes)
       
-      if contentType == 'zip':
+      elif contentType == 'zip':
         log.debug("Attempting to extract zip file " + filename)
-        output = StringIO.StringIO()
-        output.write(part.get_payload(decode=True))
+        contentObj.fromArchive = True
+        contentObj.archiveType = 'zip'
+        saveZipFile = False
+        
         try:
-          zf = zipfile.ZipFile(output)
-          saveZipFile = False
+          zf = zipfile.ZipFile(self.convertPartToStringIO(part))
           for zinfo in zf.infolist():
             is_encrypted = zinfo.flag_bits & 0x1
             #print "DEBUG: zip compression type is",str(zinfo.compress_type)
             unsupported_compression = zinfo.compress_type == 99
+            
             if is_encrypted:
               saveZipFile = True
               log.debug('%s is encrypted!' % filename)
-              imgObj = { 'session': sessionId, 'contentType': 'encryptedZipEntry', 'contentFile': filename, 'image': zinfo.filename}
-              self.sessions[sessionId]['images'].append( imgObj )
+              ###imgObj = { 'session': sessionId, 'contentType': 'encryptedZipEntry', 'contentFile': filename, 'image': zinfo.filename}
+              contentObj.contentType = 'encryptedZipEntry'
+              contentObj.contentFile = filename #this is the zip file itself
+              #we won't save contentObj.image
+              ###self.sessions[sessionId]['images'].append( imgObj )
+              self.sessions[sessionId]['images'].append( contentObj.get() )
               break
+
             elif unsupported_compression:
               saveZipFile = True
               log.debug('%s uses an unsupported compression type!' % filename)
-              imgObj = { 'session': sessionId, 'contentType': 'unsupportedZipEntry', 'contentFile': filename, 'image': zinfo.filename}
-              self.sessions[sessionId]['images'].append( imgObj )
+              ###imgObj = { 'session': sessionId, 'contentType': 'unsupportedZipEntry', 'contentFile': filename, 'image': zinfo.filename}
+              contentObj.contentType = 'unsupportedZipEntry'
+              contentObj.contentFile = filename #this is the zip file itself
+              #we won't save contentObj.image
+              ###self.sessions[sessionId]['images'].append( imgObj )
+              self.sessions[sessionId]['images'].append( contentObj.get() )
               break
+            
             else: #identify archived file and save it permanently if a supported file type
+              #print("Got to 1")
               archivedFilename = zinfo.filename
-              archivedFile = StringIO.StringIO()
+              contentObj.contentFile = archivedFilename
+
+              extractedFileObj = StringIO.StringIO() #we will write the extracted file to this buffer
+
               #extract the file to buffer
-              zipArchiveFileObject = zf.open(archivedFilename)
-              archivedFile.write(zipArchiveFileObject.read() )
-              zipArchiveFileObject.close()
-              #identify the file
-              archivedFile.seek(0)
-              archivedFileType = magic.from_buffer( archivedFile.getvalue(), mime=True)
-              log.debug("archivedFileType: " + archivedFileType)
-              archivedFile.seek(0)
-              if archivedFileType == 'application/pdf':
-                #fp = open(os.path.join(self.directory, filename), 'wb')
-                #shutil.copyfileobj(archivedFile, fp)
-                #fp.close()
+              compressedFileHandle = zf.open(archivedFilename) #compressedFileHandle is a handle to the file while it's still in the zip file.  we will extract from this object
+              extractedFileObj.write(compressedFileHandle.read() )  #this is where we extract the file into
+              compressedFileHandle.close()
+
+              contentObj.archiveFilename = filename
+              contentObj.setStringIOContent(extractedFileObj)
+              self.processExtractedFile(contentObj, distillationTerms, regexDistillationTerms, md5Hashes, sha1Hashes, sha256Hashes) #now let's process the extracted file
+              extractedFileObj.close()
+
+              """
+              if fileType == 'application/pdf': #process extracted file as pdf
                 log.debug("Processing '" + archivedFilename + "' as pdf")
-                contentType='pdf'
-                self.processPdf(archivedFilename, sessionId, contentType, distillationTerms, regexDistillationTerms, stringFile=archivedFile, fromArchive='zip')
-              elif archivedFileType.startswith('image/'):
+                ###self.processPdf(archivedFilename, sessionId, contentType, distillationTerms, regexDistillationTerms, stringFile=archivedFile, fromArchive='zip')
+                self.processPdf(contentObj, distillationTerms, regexDistillationTerms)
+
+              elif fileType.startswith('image/'): #process extracted file as image
                 log.debug("Processing '" + archivedFilename + "' as image")
-                contentType='image'
-                self.processImage(archivedFilename, sessionId, contentType, stringFile=archivedFile, fromArchive='zip')
+                ###self.processImage(archivedFilename, sessionId, contentType, stringFile=archivedFile, fromArchive='zip')
+                self.processImage(contentObj)
+
               #####################################################################
-              #elif archivedFileType.startswith('application/') and len(md5Hashes) != 0: #fix for executable
-              elif archivedFileType in ['application/x-msdownload', 'application/x-ms-installer', 'application/x-elf', 'application/x-dosexec', 'application/x-executable']:
-              #####################################################################
-                log.debug("Processing '" + archivedFilename + "' as executable")
-                contentType='executable'
-                #self.processImage(archivedFilename, sessionId, contentType, stringFile=archivedFile, fromArchive='zip')
+              elif fileType in ['application/x-msdownload', 'application/x-ms-installer', 'application/x-elf', 'application/x-dosexec', 'application/x-executable']:
+                #process extracted file as hash
+                log.debug("Processing '" + archivedFilename + "' as hash")
                 if len(md5Hashes) != 0:
-                  self.genMd5(archivedFilename, sessionId, contentType, md5Hashes, stringFile=archivedFile, fromArchive='zip')
+                  ###self.genMd5(archivedFilename, sessionId, contentType, md5Hashes, stringFile=archivedFile, fromArchive='zip')
+                  contentObj.hashType = 'md5'
+                  self.genHash(contentObj, md5Hashes)
                 if len(sha1Hashes) != 0:
-                  self.genSha1(archivedFilename, sessionId, contentType, sha1Hashes, stringFile=archivedFile, fromArchive='zip')
+                  contentObj.hashType = 'sha1'
+                  ##self.genSha1(archivedFilename, sessionId, contentType, sha1Hashes, stringFile=archivedFile, fromArchive='zip')
+                  self.genHash(contentObj, sha1Hashes)
                 if len(sha256Hashes) != 0:
-                  self.genSha256(archivedFilename, sessionId, contentType, sha256Hashes, stringFile=archivedFile, fromArchive='zip')
+                  contentObj.hashType = 'sha256'
+                  ###self.genSha256(archivedFilename, sessionId, contentType, sha256Hashes, stringFile=archivedFile, fromArchive='zip')
+                  self.genHash(contentObj, sha256Hashes)
               else:
-                #print "DEBUG: discarding " + archivedFilename + ' with MIME type ' + archivedFileType
+                #print "DEBUG: discarding " + archivedFilename + ' with MIME type ' + fileType
                 pass
-              archivedFile.close()
+              """
         except zipfile.BadZipfile as e:
           log.exception("Exception during zip open (file was not opened)") 
         except zipfile.LargeZipFile as e:
@@ -493,69 +702,51 @@ class Fetcher:
           log.exception("NotImplemented exception during zip extraction")
         except Exception as e:
           log.exception("Unhandled exception during zip extraction")
-        continue
-            
         if saveZipFile:
           fp = open(os.path.join(self.directory, filename), 'wb')
           fp.write(part.get_payload(decode=True))
           fp.close()
+        continue          
           
-          
-      if contentType == 'rar':
+      elif contentType == 'rar':
         log.debug("Attempting to extract rar file " + filename)
-        output = StringIO.StringIO()
-        output.write(part.get_payload(decode=True))
+        contentObj.fromArchive = True
+        contentObj.archiveType = 'rar'
+        saveRarFile = False
         
         try:
-          rf = rarfile.RarFile(output)
-          saveRarFile = False
+          rf = rarfile.RarFile(self.convertPartToStringIO(part))
+
+          #we need something here for if the entire rar file table is encrypted
         
           for rinfo in rf.infolist():
+
             is_encrypted = rinfo.needs_password()
             if is_encrypted:
               saveRarFile = True
               log.debug('%s is encrypted!' % filename)
-              imgObj =  { 'session': sessionId, 'contentType': 'encryptedRarEntry', 'contentFile': filename, 'image': rinfo.filename}
-              self.sessions[sessionId]['images'].append( imgObj )
+              ###imgObj = { 'session': sessionId, 'contentType': 'encryptedRarEntry', 'contentFile': filename, 'image': rinfo.filename}
+              contentObj.contentType = 'encryptedRarEntry'
+              contentObj.contentFile = filename #this is the rar file itself
+              self.sessions[sessionId]['images'].append( contentObj.get() )
               break
+
             else: #identify archived file and save it permanently if a supported file type
               archivedFilename = rinfo.filename
-              archivedFile = StringIO.StringIO()
+              contentObj.contentFile = archivedFilename
+
+              extractedFileObj = StringIO.StringIO() #we will write the extracted file to this buffer
+
               #extract the file to buffer
-              rarArchiveFileObject = rf.open(archivedFilename)
-              archivedFile.write(rarArchiveFileObject.read() )
-              rarArchiveFileObject.close()
-              #identify the file
-              archivedFile.seek(0)
-              archivedFileType = magic.from_buffer( archivedFile.getvalue(), mime=True)
-              archivedFile.seek(0)
-              if archivedFileType == 'application/pdf':
-                #fp = open(os.path.join(self.directory, filename), 'wb')
-                #shutil.copyfileobj(archivedFile, fp)
-                #fp.close()
-                log.debug("processing '" + archivedFilename + "' as pdf")
-                contentType='pdf'
-                self.processPdf(archivedFilename, sessionId, contentType, distillationTerms, regexDistillationTerms, stringFile=archivedFile, fromArchive='rar')
-              elif archivedFileType.startswith('image/'):
-                log.debug("Processing '" + archivedFilename + "' as image")
-                contentType='image'
-                self.processImage(archivedFilename, sessionId, contentType, stringFile=archivedFile, fromArchive='rar')
-              #####################################################################
-              elif archivedFileType.startswith('application/'): #fix for executable
-              #####################################################################
-                log.debug("Processing '" + archivedFilename + "' as executable")
-                contentType='executable'
-                if len(md5Hashes) != 0:
-                 #self.processImage(archivedFilename, sessionId, contentType, stringFile=archivedFile, fromArchive='zip')
-                 self.genMd5(archivedFilename, sessionId, contentType, md5Hashes, stringFile=archivedFile, fromArchive='rar')
-                if len(sha1Hashes) != 0:
-                 self.genSha1(archivedFilename, sessionId, contentType, sha1Hashes, stringFile=archivedFile, fromArchive='rar')
-                if len(sha256Hashes) != 0:
-                 self.genSha256(archivedFilename, sessionId, contentType, sha256Hashes, stringFile=archivedFile, fromArchive='rar')
-              else:
-                #print "DEBUG: discarding " + archivedFilename + ' with MIME type ' + archivedFileType
-                pass
-              archivedFile.close()
+              compressedFileHandle = rf.open(archivedFilename) #compressedFileHandle is a handle to the file while it's still in the rar file.  we will extract from this object
+              extractedFileObj.write(compressedFileHandle.read() ) #this is where we extract the file into
+              compressedFileHandle.close()
+
+              contentObj.archiveFilename = filename
+              contentObj.setStringIOContent(extractedFileObj)
+              self.processExtractedFile(contentObj, distillationTerms, regexDistillationTerms, md5Hashes, sha1Hashes, sha256Hashes) #now let's process the extracted file
+              extractedFileObj.close()
+
         except rarfile.BadRarFile as e:
           log.exception("Bad RAR file")
         except rarfile.NotRarFile as e:
@@ -595,35 +786,58 @@ class Fetcher:
           if self.devmode:
             log.debug("Exiting with code 1") #we only exit if in dev mode, so we can deal with the problem afterwards
             sys.exit(1)
-        continue
-            
         if saveRarFile:
           fp = open(os.path.join(self.directory, filename), 'wb')
           fp.write(part.get_payload(decode=True))
-          fp.close()          
-
-        
-      if contentType == 'image':
-        if not self.processImage(filename, sessionId, contentType, part=part):
-          continue
-        
-        
-      if contentType == 'pdf':
-        if not self.processPdf(filename, sessionId, contentType, distillationTerms, regexDistillationTerms, part=part):
-          continue
-        
-      if contentType == 'executable':
-        if len(md5Hashes) != 0:
-          self.genMd5(filename, sessionId, contentType, md5Hashes, part=part)
-        if len(sha1Hashes) != 0:
-          self.genSha1(filename, sessionId, contentType, sha1Hashes, part=part)
-        if len(sha256Hashes) != 0:
-          self.genSha256(filename, sessionId, contentType, sha256Hashes, part=part)
+          fp.close()
+        continue
 
 
-  def getPdfText(self, filename, sessionId, searchTerms=[], regexSearchTerms=[]):
+
+  def processExtractedFile(self, contentObj, distillationTerms, regexDistillationTerms, md5Hashes, sha1Hashes, sha256Hashes):
+    log.debug("processExtractedFile() Attempting to process extracted file " + contentObj.contentFile )
+    #get the file
+    fileObj = contentObj.getFileContent()
+
+    #identify the extracted file
+    fileType = magic.from_buffer( fileObj.getvalue(), mime=True) #this is where we identify the content file type
+
+    if fileType.startswith('image/'):
+      #log.debug("Processing '" + archivedFilename + "' as image")
+      self.processImage(contentObj)
+
+    elif fileType == 'application/pdf':
+      #log.debug("processing '" + contentObj.contentType + "' as pdf")
+      self.processPdf(contentObj, distillationTerms, regexDistillationTerms)
+
+    elif fileType.startswith('application/'): #fix for executable
+      #log.debug("Processing '" + archivedFilename + "' as executable")
+      if len(md5Hashes) != 0:
+        contentObj.hashType = 'md5'
+        self.genHash(contentObj, md5Hashes)
+      if len(sha1Hashes) != 0:
+        contentObj.hashType = 'sha1'
+        self.genHash(contentObj, sha1Hashes)
+      if len(sha256Hashes) != 0:
+        contentObj.hashType = 'sha256'
+        self.genHash(contentObj, sha256Hashes)
+        
+    else:
+      #print "DEBUG: discarding " + archivedFilename + ' with MIME type ' + fileType
+      pass
+
+
+
+  def convertPartToStringIO(self, part):
+    output = StringIO.StringIO()
+    output.write(part.get_payload(decode=True))
+    return output
+
+  ###def getPdfText(self, filename, sessionId, searchTerms=[], regexSearchTerms=[]):
+  def getPdfText(self, contentObj, searchTerms=[], regexSearchTerms=[]):
     try: #now extract pdf text
-      pdftotextCmd = self.pdftotextPath + " -enc UTF-8 -eol unix -nopgbrk -q '" + os.path.join(self.directory, filename) + "' -"
+      sessionId = contentObj.session
+      pdftotextCmd = self.pdftotextPath + " -enc UTF-8 -eol unix -nopgbrk -q '" + os.path.join(self.directory, contentObj.contentFile) + "' -"
       log.debug("pdftotextCmd: " + pdftotextCmd)
       pdftotextProcess = Popen(pdftotextCmd, stdout=PIPE, stderr=PIPE, shell = True)
       (output, err) = pdftotextProcess.communicate()
@@ -631,8 +845,6 @@ class Fetcher:
       if exit_code == 0:
         #extracted successfully, get output
         joinedText = output.replace('\n', ' ').replace('\r', '')
-        #print "joinedText:", joinedText
-        #print "joinedText:", type(joinedText)
 
         found = 0
         for term in searchTerms:
@@ -657,10 +869,11 @@ class Fetcher:
           keep = False
         
         if keep:
-          log.debug("getPdfText(): keeping file " + filename)
-          searchObj = { 'session': sessionId, 'contentFile': filename, 'searchString': joinedText }
+          log.debug("getPdfText(): keeping file " + contentObj.contentFile)
+          searchObj = { 'session': sessionId, 'contentFile': contentObj.contentFile, 'searchString': joinedText }
           if not 'search' in self.sessions[sessionId]:
             self.sessions[sessionId]['search'] = []
+          pprint(self.sessions[sessionId]['search'])
           self.sessions[sessionId]['search'].append(searchObj)
 
         return keep

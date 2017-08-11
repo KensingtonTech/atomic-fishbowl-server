@@ -15,21 +15,6 @@ import logging
 
 #sys.exit(1)
 
-#timeformatter='%Y-%B-%d %H:%M:%S'
-#curtime = time.gmtime()
-#print "curtime:",curtime
-#curtimeEpoch = calendar.timegm(curtime)
-#print "curtimeEpoch:", curtimeEpoch
-#curtimeStr = time.strftime(timeformatter,curtime)
-
-#oneHourAgoEpoch = curtimeEpoch - (3600)
-#oneHourAgo = time.gmtime(oneHourAgoEpoch)
-#oneHourAgoStr = time.strftime(timeformatter,oneHourAgo)
-#timeClause = "time='%s'-'%s'" % (oneHourAgoStr, curtimeStr)
-
-#outputDir = './collections'
-
-
 def configCallback(cfg):
   log.debug("Configuration received")
   #pprint(cfg)
