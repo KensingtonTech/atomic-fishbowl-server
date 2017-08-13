@@ -26,7 +26,7 @@ const jwt = require('jsonwebtoken');
 const JwtStrategy = require('passport-jwt').Strategy;
 const ExtractJwt = require('passport-jwt').ExtractJwt;
 var mongo = require('mongodb').MongoClient;
-const version = '2017.08.11';
+const version = '2017.08.12';
 
 //Configure logging
 winston.remove(winston.transports.Console);
@@ -236,11 +236,11 @@ app.post('/api/login', passport.authenticate('local'), (req,res) => {
     else {
       winston.info("Login successful for user", req.body.username);
       winston.debug("Found user " + req.body.username + ".  Signing token");
-      let token = jwt.sign(user.toObject({ versionKey: false, transform: transformUser }), jwtPrivateKey, { subject: user.id, algorithm: 'RS256', expiresIn: 60*60*24, jwtid: uuidV4() }); // expires in 24 hours
+      let token = jwt.sign(user.toObject({versionKey: false, transform: transformUser}), jwtPrivateKey, { subject: user.id, algorithm: 'RS256', expiresIn: 60*60*24, jwtid: uuidV4() }); // expires in 24 hours
       res.cookie('access_token', token, { httpOnly: true, secure: true })
       res.json({
         success: true,
-        user: user
+        user: user.toObject()
       });
     }
   });
@@ -257,14 +257,15 @@ app.get('/api/logout', passport.authenticate('jwt', { session: false } ), (req,r
   res.sendStatus(200);
 });
 
-var transformUserIsLoggedIn = function(doc, ret, options) {
+/*var transformUserIsLoggedIn = function(doc, ret, options) {
   delete ret._id;
   return ret;
 };
+*/
 
 app.get('/api/isloggedin', passport.authenticate('jwt', { session: false } ), (req, res)=>{
   winston.debug("GET /api/isloggedin");
-  res.json(req.user.toObject({ versionKey: false, transform: transformUserIsLoggedIn }));
+  res.json(req.user.toObject()); // { versionKey: false, transform: transformUserIsLoggedIn }
 });
 
 app.get('/api/users', passport.authenticate('jwt', { session: false } ), (req,res)=>{
@@ -296,7 +297,7 @@ app.get('/api/user/:uname', passport.authenticate('jwt', { session: false } ), (
         res.sendStatus(500);
       }
       else {
-        res.json(user);
+        res.json(user.toObject());
       }
     
     } );
@@ -993,7 +994,9 @@ function rollingCollectionSocketConnectionWorker(id, socket, tempName, subject, 
 
     for (let i=0; i < rollingCollections[id].sessions.length; i++) {
       let session = rollingCollections[id].sessions[i];
+      winston.debug('session:', session);
       let sessionId = session.id;
+      winston.debug('sessionId:', sessionId);
       if ( session.meta.time < maxTime ) {
         sessionsToPurge.push(sessionId);
         rollingCollections[id].sessions.splice(i, 1);
