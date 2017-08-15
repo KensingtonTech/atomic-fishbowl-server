@@ -26,7 +26,7 @@ const jwt = require('jsonwebtoken');
 const JwtStrategy = require('passport-jwt').Strategy;
 const ExtractJwt = require('passport-jwt').ExtractJwt;
 var mongo = require('mongodb').MongoClient;
-const version = '2017.08.12';
+const version = '2017.08.14';
 
 //Configure logging
 winston.remove(winston.transports.Console);
@@ -987,50 +987,65 @@ function rollingCollectionSocketConnectionWorker(id, socket, tempName, subject, 
   }
   else if (!firstRun && collections[id].type === 'rolling') { //purge events older than collections[id].lastHours
     winston.debug('Running purge routine');
-    var sessionsToPurge = [];
+    let sessionsToPurge = [];
+    let purgedSessionPositions = [];
 
     let maxTime = collections[id].lastRun - collections[id].lastHours * 60 * 60;
-    //let maxTime = collections[id].lastRun - 60 * 5; //5 minute setting used for testing
+    // let maxTime = collections[id].lastRun - 60 * 5; //5 minute setting used for testing
 
     for (let i=0; i < rollingCollections[id].sessions.length; i++) {
       let session = rollingCollections[id].sessions[i];
-      winston.debug('session:', session);
       let sessionId = session.id;
-      winston.debug('sessionId:', sessionId);
       if ( session.meta.time < maxTime ) {
+        purgedSessionPositions.push(i);
         sessionsToPurge.push(sessionId);
-        rollingCollections[id].sessions.splice(i, 1);
+        //rollingCollections[id].sessions.splice(i, 1);
       }
     }
 
-    winston.debug("sessionsToPurge:", sessionsToPurge);
+    // Sort sessionsToPurge
+    purgedSessionPositions.sort(sortNumber);
+    
+    //Now remove purged sessions from rollingCollections
+    for (let i = 0; i < purgedSessionPositions.length; i++) {
+      rollingCollections[id].sessions.splice(purgedSessionPositions[i], 1);
+    }
+
     
     //we now have sessionsToPurge.  let's purge them
     //purge images
     //winston.debug("images:", rollingCollections[id].images);
-    for (let v=0; v < sessionsToPurge.length; v++) {
-      for (let i=0; i < rollingCollections[id].images.length; i++) {
+    for (let v = 0; v < sessionsToPurge.length; v++) {
+      for (let i = 0; i < rollingCollections[id].images.length; i++) {
         if ( rollingCollections[id].images[i].session === sessionsToPurge[v]) {
           //delete files
           //winston.debug("deleting files for session", sessionsToPurge[v]);
-          fs.unlink(rollingCollections[id].images[i].image, () => {});
+          if ('contentFile' in rollingCollections[id].images[i]) {
+            fs.unlink(rollingCollections[id].images[i].contentFile, () => {});
+          }
           if ('thumbnail' in rollingCollections[id].images[i]) {
             fs.unlink(rollingCollections[id].images[i].thumbnail, () => {});
           }
-          if (rollingCollections[id].images[i].contentFile) {
-            fs.unlink(rollingCollections[id].images[i].contentFile, () => {});
+          if ('pdfImage' in rollingCollections[id].images[i]) {
+            fs.unlink(rollingCollections[id].images[i].pdfImage, () => {});
           }
           rollingCollections[id].images.splice(i, 1);
         }
       }
     }
     //purge search data
-    for (let v=0; v < sessionsToPurge.length; v++) {
-      for (let i=0; i < rollingCollections[id].search.length; i++) {
+    let purgedSearchPositions = [];
+    for (let v = 0; v < sessionsToPurge.length; v++) {
+      for (let i = 0; i < rollingCollections[id].search.length; i++) {
         if ( rollingCollections[id].search[i].session === sessionsToPurge[v]) {
-          rollingCollections[id].search.splice(i, 1);
+          //rollingCollections[id].search.splice(i, 1);
+          purgedSearchPositions.push(i);
         }
       }
+    }
+    purgedSearchPositions.sort(sortNumber);
+    for (let i = 0; i < purgedSearchPositions.length; i++) {
+      rollingCollections[id].search.splice(purgedSessionPositions[i], 1);
     }
     
     //now send update
@@ -1366,7 +1381,7 @@ function cleanRollingDirs() {
       winston.debug("Cleaning collection '" + collections[collection].name + "' with id " + collection);
       if (collections.hasOwnProperty(collection) && ( collections[collection].type == 'monitoring' || collections[collection].type == 'rolling' ) ) { //hasOwnProperty needed to filter out object prototypes
         //winston.debug('Deleting dir', collectionsDir + '/' + collections[collection].id);
-        rimraf( collectionsDir + '/' + collections[collection].id, () => {} ); //delete output directory
+        rimraf( collectionsDir + '/' + collections[collection].id, () => {} ); // delete output directory
       }
     }
   }
@@ -1384,6 +1399,10 @@ function createDefaultUser() {
       winston.info("Default user 'admin' added");
     }
   });
+}
+
+function sortNumber(a, b) {
+  return b - a;
 }
 
 app.listen(listenPort);
