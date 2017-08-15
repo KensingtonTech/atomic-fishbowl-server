@@ -3,11 +3,10 @@ import StringIO
 
 class ContentObj:
 
-    def __init__(self, session=0, contentType='', contentFile='', image='', thumbnail='', hashType='', hashValue='', hashFriendly='', fromArchive=False, archiveType='', archiveFilename='', isArchive=False):
+    def __init__(self, session=0, contentType='', contentFile='', image='', thumbnail='', hashType='', hashValue='', hashFriendly='', fromArchive=False, archiveType='', archiveFilename='', isArchive=False, textDistillationEnabled=False, regexDistillationEnabled=False, textTermsMatched=[], regexTermsMatched=[]):
         self.session = session                  # number: session id
         self.contentType = contentType          # should be image, pdf, or hash, unsupportedZipEntry, encryptedZipEntry, encryptedRarEntry, encryptedRarTable
 
-        # Files
         self.contentFile = contentFile          # the image or pdf or exe filename
         self.pdfImage = image                   # the PDF gs-generated image filename
         self.thumbnail = thumbnail              # thumbnail image file
@@ -22,6 +21,12 @@ class ContentObj:
         self.fromArchive = fromArchive          # boolean, whether the content file came from a zip or rar archive
         self.isArchive = isArchive              # boolean, whether the file IS an archive rather than came from an archive
         self.archiveType = archiveType          # either zip or rar
+
+        #Distillation
+        self.textDistillationEnabled = textDistillationEnabled
+        self.regexDistillationEnabled = regexDistillationEnabled
+        self.textTermsMatched = textTermsMatched
+        self.regexTermsMatched = regexTermsMatched
         
 
     def get(self):
@@ -47,6 +52,13 @@ class ContentObj:
             o['archiveType'] = self.archiveType
         if self.archiveFilename:
             o['archiveFilename'] = self.archiveFilename
+        
+        o['textDistillationEnabled'] = self.textDistillationEnabled
+        o['regexDistillationEnabled'] = self.regexDistillationEnabled
+        if len(self.textTermsMatched) != 0:
+            o['textTermsMatched'] = self.textTermsMatched
+        if len(self.regexTermsMatched) != 0:
+            o['regexTermsMatched'] = self.regexTermsMatched
         return o
 
     def setPartContent(self, content): # takes an email part object

@@ -26,7 +26,7 @@ const jwt = require('jsonwebtoken');
 const JwtStrategy = require('passport-jwt').Strategy;
 const ExtractJwt = require('passport-jwt').ExtractJwt;
 var mongo = require('mongodb').MongoClient;
-const version = '2017.08.14';
+const version = '2017.08.15';
 
 //Configure logging
 winston.remove(winston.transports.Console);

@@ -12,8 +12,14 @@ from fetcher import Fetcher
 from communicator import communicator
 from pprint import pprint, pformat
 import logging
+import signal
 
 #sys.exit(1)
+
+def sigIntHandler(signal, frame):
+  log.info("Worker terminated cleanly by interrupt")
+  log.info("Exiting with code 0")
+  sys.exit(0)
 
 def configCallback(cfg):
   log.debug("Configuration received")
@@ -151,12 +157,18 @@ if __name__ == "__main__":
     print "Argument must be a path to a UNIX socket"
     sys.exit(1)
   try:
+    #Set up logging
     log = logging.getLogger()
     handler = logging.StreamHandler()
     formatter = logging.Formatter('%(asctime)s 221b_worker     %(levelname)-10s %(message)s')
     handler.setFormatter(formatter)
     log.setLevel(logging.DEBUG)
     log.addHandler(handler)
+
+    #Register handler for SIGINT
+    signal.signal(signal.SIGINT, sigIntHandler)
+
+    #Handle rest of startup
     log.info("221b_worker is starting")
     socketFile = sys.argv[1]
     client = communicator(socketFile, configCallback)
