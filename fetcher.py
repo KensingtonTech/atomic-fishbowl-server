@@ -163,20 +163,22 @@ class Fetcher:
       fp.write(output.getvalue())
       fp.close()
 
+      log.debug("processImage(): Generating thumbnail for image " + contentObj.contentFile)
+      thumbnailName = 'thumbnail_' + contentObj.contentFile
+      
       try:
-        log.debug("processImage(): Generating thumbnail for image " + contentObj.contentFile)
-        thumbnailName = 'thumbnail_' + contentObj.contentFile
         im.thumbnail(self.thumbnailSize, Image.ANTIALIAS)
-        im.save(os.path.join(self.directory, thumbnailName), im.format)
-        #overwrite imgObj if we had to make a thumbnail
-        contentObj.thumbnail = thumbnailName
-        ###imgObj = { 'session': sessionId, 'image': filename, 'thumbnail': thumbnailName, 'contentType': contentType}
-        self.sessions[contentObj.session]['images'].append( contentObj.get() )
-        self.imageCount += 1
-
-      except Exception as e: #we don't want to keep corrupt files.  we know it's corrupt if we can't generate a thumbnail
-        log.exception("Error generating thumbnail for image " + contentObj.contentFile)
+      except IOError as e: #we don't want to keep corrupt files.  we know it's corrupt if we can't generate a thumbnail
+        log.warning("Image appears to be corrupt: " + contentObj.contentFile)
         return False
+      except Exception as e:
+        log.exception("Unhandled exception whilst generating thumbnail")
+        return False
+      
+      im.save(os.path.join(self.directory, thumbnailName), im.format)
+      contentObj.thumbnail = thumbnailName
+      self.sessions[contentObj.session]['images'].append( contentObj.get() )
+      self.imageCount += 1
 
     else:
       log.debug("processImage(): Discarding image " + contentObj.contentFile + " due to minimum size requirements")
@@ -457,62 +459,65 @@ class Fetcher:
         
         try:
           zipFileHandle = zipfile.ZipFile(self.convertPartToStringIO(part))
-
-          for zinfo in zipFileHandle.infolist():
-            contentObj = copy(origContentObj)
-            
-            archivedFilename = zinfo.filename
-            contentObj.contentFile = archivedFilename
-            contentObj.archiveFilename = filename
-            is_encrypted = zinfo.flag_bits & 0x1
-            #print "DEBUG: zip compression type is",str(zinfo.compress_type)
-            unsupported_compression = zinfo.compress_type == 99
-            
-            if is_encrypted and len(distillationTerms) == 0 and len(regexDistillationTerms) == 0:
-              saveZipFile = True
-              log.debug('extractFilesFromMultipart(): ZIP contentFile %s from archive %s is encrypted!' % (archivedFilename, filename))
-              contentObj.contentType = 'encryptedZipEntry'
-              #contentObj.contentFile = filename #this is the zip file itself
-              contentObj.fromArchive = True
-              self.sessions[sessionId]['images'].append( contentObj.get() )
-              continue
-
-            elif unsupported_compression and len(distillationTerms) == 0 and len(regexDistillationTerms) == 0:
-              saveZipFile = True
-              log.debug('extractFilesFromMultipart(): ZIP archive %s uses an unsupported compression type!' % filename)
-              contentObj.contentType = 'unsupportedZipEntry'
-              contentObj.contentFile = filename #this is the zip file itself
-              contentObj.fromArchive = False # if the file is unsupported, it becomes the content itself, not what's inside it,so it's not FROM an archive, it IS the archive
-              contentObj.isArchive = True
-              self.sessions[sessionId]['images'].append( contentObj.get() )
-              break
-            
-            else: #identify archived file and save it permanently if a supported file type
-              #print("Got to 1")
-              extractedFileObj = StringIO.StringIO() #we will write the extracted file to this buffer
-
-              #extract the file to buffer
-              compressedFileHandle = zipFileHandle.open(archivedFilename) #compressedFileHandle is a handle to the file while it's still in the zip file.  we will extract from this object
-              extractedFileObj.write(compressedFileHandle.read() )  #this is where we extract the file into
-              compressedFileHandle.close()
-
-              contentObj.setStringIOContent(extractedFileObj)
-              self.processExtractedFile(contentObj, distillationTerms, regexDistillationTerms, md5Hashes, sha1Hashes, sha256Hashes) #now let's process the extracted file
-              extractedFileObj.close()
-
         except zipfile.BadZipfile as e:
-          log.exception("Exception during zip open (file was not opened)") 
+          log.warning("Bad ZIP File (file was not opened): " + contentObj.archiveFilename)
         except zipfile.LargeZipFile as e:
-          log.exception("Exception during zip open (file was not opened)")
+          log.warning("ZIP file was too large to open: " + contentObj.archiveFilename)
         except NotImplementedError as e:
-          log.exception("NotImplemented exception during zip extraction")
-        except RuntimeError as e:
-          if 'is encrypted, password required for extraction' in e.message:
-            pass
-          else:
-            log.exception('Unhandled RuntimeError')
+          log.exception("NotImplemented exception during zip open")
         except Exception as e:
-          log.exception("Unhandled exception during zip extraction")
+          log.exception("Unhandled exception during zip file open")
+
+          try:
+            for zinfo in zipFileHandle.infolist():
+              contentObj = copy(origContentObj)
+              
+              archivedFilename = zinfo.filename
+              contentObj.contentFile = archivedFilename
+              contentObj.archiveFilename = filename
+              is_encrypted = zinfo.flag_bits & 0x1
+              #print "DEBUG: zip compression type is",str(zinfo.compress_type)
+              unsupported_compression = zinfo.compress_type == 99
+              
+              if is_encrypted and len(distillationTerms) == 0 and len(regexDistillationTerms) == 0:
+                saveZipFile = True
+                log.debug('extractFilesFromMultipart(): ZIP contentFile %s from archive %s is encrypted!' % (archivedFilename, filename))
+                contentObj.contentType = 'encryptedZipEntry'
+                #contentObj.contentFile = filename #this is the zip file itself
+                contentObj.fromArchive = True
+                self.sessions[sessionId]['images'].append( contentObj.get() )
+                continue
+
+              elif unsupported_compression and len(distillationTerms) == 0 and len(regexDistillationTerms) == 0:
+                saveZipFile = True
+                log.debug('extractFilesFromMultipart(): ZIP archive %s uses an unsupported compression type!' % filename)
+                contentObj.contentType = 'unsupportedZipEntry'
+                contentObj.contentFile = filename #this is the zip file itself
+                contentObj.fromArchive = False # if the file is unsupported, it becomes the content itself, not what's inside it,so it's not FROM an archive, it IS the archive
+                contentObj.isArchive = True
+                self.sessions[sessionId]['images'].append( contentObj.get() )
+                break
+              
+              else: #identify archived file and save it permanently if a supported file type
+                #print("Got to 1")
+                extractedFileObj = StringIO.StringIO() #we will write the extracted file to this buffer
+
+                #extract the file to buffer
+                compressedFileHandle = zipFileHandle.open(archivedFilename) #compressedFileHandle is a handle to the file while it's still in the zip file.  we will extract from this object
+                extractedFileObj.write(compressedFileHandle.read() )  #this is where we extract the file into
+                compressedFileHandle.close()
+
+                contentObj.setStringIOContent(extractedFileObj)
+                self.processExtractedFile(contentObj, distillationTerms, regexDistillationTerms, md5Hashes, sha1Hashes, sha256Hashes) #now let's process the extracted file
+                extractedFileObj.close()
+        
+          except RuntimeError as e:
+            if 'is encrypted, password required for extraction' in e.message:
+              pass # do nothing and let our own code take the lead
+            else:
+              log.exception('Unhandled RuntimeError')
+          except Exception as e:
+            log.exception("Unhandled exception during zip file extraction")
 
         if saveZipFile:
           fp = open(os.path.join(self.directory, filename), 'wb')

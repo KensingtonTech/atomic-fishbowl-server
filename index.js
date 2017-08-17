@@ -1,5 +1,7 @@
 'use strict';
 
+const version = '2017.08.16';
+
 // Load dependencies
 const Observable = require('rxjs/Observable').Observable;
 const Subject = require('rxjs/Subject').Subject;
@@ -26,7 +28,7 @@ const jwt = require('jsonwebtoken');
 const JwtStrategy = require('passport-jwt').Strategy;
 const ExtractJwt = require('passport-jwt').ExtractJwt;
 var mongo = require('mongodb').MongoClient;
-const version = '2017.08.15';
+var purgeHack = false; // causes sessions older than 5 minutes to be purged, if set to true.  Useful for testing purging without having to wait an hour
 
 //Configure logging
 winston.remove(winston.transports.Console);
@@ -991,7 +993,7 @@ function rollingCollectionSocketConnectionWorker(id, socket, tempName, subject, 
     let purgedSessionPositions = [];
 
     let maxTime = collections[id].lastRun - collections[id].lastHours * 60 * 60;
-    // let maxTime = collections[id].lastRun - 60 * 5; //5 minute setting used for testing
+    if (purgeHack) { maxTime = collections[id].lastRun - 60 * 5; } // 5 minute setting used for testing
 
     for (let i=0; i < rollingCollections[id].sessions.length; i++) {
       let session = rollingCollections[id].sessions[i];
