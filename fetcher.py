@@ -1,4 +1,4 @@
-import os 
+import os
 import sys
 import urllib2
 import ssl
@@ -318,7 +318,7 @@ class Fetcher:
 
         if returnObj['keep'] == True:
           log.debug("getPdfText(): keeping file " + contentObj.contentFile)
-          searchObj = { 'session': sessionId, 'contentFile': contentObj.contentFile, 'searchString': joinedText }
+          searchObj = { 'id': contentObj.id, 'session': sessionId, 'contentFile': contentObj.contentFile, 'searchString': joinedText }
           if not 'search' in self.sessions[sessionId]:
             self.sessions[sessionId]['search'] = []
           #pprint(self.sessions[sessionId]['search'])
@@ -638,6 +638,10 @@ class Fetcher:
 
   def processExtractedFile(self, contentObj, distillationTerms, regexDistillationTerms, md5Hashes, sha1Hashes, sha256Hashes):
     log.debug("processExtractedFile(): Attempting to process extracted file " + contentObj.contentFile )
+    
+    #generate a new uuid for the content object
+    contentObj.newId()
+    
     #get the file
     fileObj = contentObj.getFileContent()
 

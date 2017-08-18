@@ -1,5 +1,6 @@
 import email
 import StringIO
+from uuid import uuid4
 
 class ContentObj:
 
@@ -27,6 +28,11 @@ class ContentObj:
         self.regexDistillationEnabled = regexDistillationEnabled
         self.textTermsMatched = textTermsMatched
         self.regexTermsMatched = regexTermsMatched
+
+        self.id = str(uuid4()) # generate a unique identifier for this content
+
+    def newId(self):
+        self.id = str(uuid4())
         
 
     def get(self):
@@ -59,6 +65,7 @@ class ContentObj:
             o['textTermsMatched'] = self.textTermsMatched
         if len(self.regexTermsMatched) != 0:
             o['regexTermsMatched'] = self.regexTermsMatched
+        o['id'] = self.id
         return o
 
     def setPartContent(self, content): # takes an email part object

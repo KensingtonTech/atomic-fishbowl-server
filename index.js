@@ -1,6 +1,6 @@
 'use strict';
 
-const version = '2017.08.16';
+const version = '2017.08.17';
 
 // Load dependencies
 const Observable = require('rxjs/Observable').Observable;
@@ -1162,7 +1162,7 @@ function runRollingCollection(id, firstRun) {
                                                       if (id in rollingCollectionSubjects && 'worker' in rollingCollectionSubjects[id]) delete rollingCollectionSubjects[id].worker;
                                                     }
                                                     else if (code != 0) {
-                                                      winston.debug('Worker process exited abnormally with exit code',code.toString());
+                                                      winston.debug('Worker process exited in bad state with non-zero exit code',code.toString());
                                                       collections[id]['state'] = 'error';
                                                       subject.next({collection: { id: id, state: 'error'}});
                                                       if (id in rollingCollectionSubjects && 'worker' in rollingCollectionSubjects[id]) delete rollingCollectionSubjects[id].worker;
@@ -1221,7 +1221,6 @@ app.get('/api/getrollingcollection/:id', passport.authenticate('jwt', { session:
         //destroy subject
         winston.debug("Last client disconnected from rolling collection with id " + id + '.  Destroying observable');
         clearInterval(rollingCollectionSubjects[id].interval);
-        clearInterval(rollingCollectionSubjects[id].keepaliveInterval);
         rollingCollectionSubjects[id].subject.complete();
 
         try {
