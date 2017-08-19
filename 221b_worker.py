@@ -48,20 +48,7 @@ def configReceived(cfgObj):
     timeEnd = time.gmtime( cfg['timeEnd'] )
     timeEndStr = time.strftime(timeformatter,timeEnd)
     timeClause = "time='%s'-'%s'" % (timeBeginStr, timeEndStr)
-    
-    """else: #rolling collection
-      lastHours = cfg['lastHours'] #this is how many hours back to go
-      timeformatter='%Y-%B-%d %H:%M:%S'
-      curtime = time.gmtime()
-      curtimeEpoch = calendar.timegm(curtime)
-      curtimeStr = time.strftime(timeformatter,curtime)
-      lastHoursEpoch = curtimeEpoch - (lastHours * 3600)
-      lastHoursTime = time.gmtime(lastHoursEpoch)
-      lastHoursStr = time.strftime(timeformatter, lastHoursTime)
-      timeClause = "time='%s'-'%s'" % (lastHoursStr, curtimeStr)
-      ignoredSessions = cfg['ignoredSessions']
-    """
-    
+     
     log.debug("timeClause: " + timeClause)
 
     directory = outputDir + '/' + cfg['id']

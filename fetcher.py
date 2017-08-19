@@ -90,14 +90,13 @@ class Fetcher:
                 self.sessions[sessionId]['session']['meta'][key] = []
               self.sessions[sessionId]['session']['meta'][key].append(value)
     except urllib2.HTTPError as e:
-      log.exception("HTTP Error.  Exiting with code 1.")
+      log.error("runQuery(): HTTP Error whilst running query.  Exiting with code 1: " + str(e))
       sys.exit(1)
     except urllib2.URLError as e:
-      log.exception("URL Error.  Exiting with code 1")
+      log.error("runQuery(): URL Error whilst running query.  Exiting with code 1: "  + str(e))
       sys.exit(1)
     except Exception as e:
-      raise
-      log.exception("Exception during runQuery.  Exiting with code 1.")
+      log.exception("runQuery(): Unhandled exception whilst running query.  Exiting with code 1")
       sys.exit(1)
     return len(self.sessions)
 
@@ -133,10 +132,10 @@ class Fetcher:
             return
         
         except urllib2.HTTPError as e:
-          log.exception("HTTP error pulling content for session " + sessionId + ".  Exiting with code 1.")
+          log.error("HTTP error pulling content for session " + sessionId + ".  Exiting with code 1.")
           sys.exit(1)
         except urllib2.URLError as e:
-          log.exception("ERROR: URL error pulling content for session " + sessionId + ".  Exiting with code 1.")
+          log.error("ERROR: URL error pulling content for session " + sessionId + ".  Exiting with code 1.")
           sys.exit(1)
     
     

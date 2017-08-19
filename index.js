@@ -1,12 +1,13 @@
 'use strict';
 
-const version = '2017.08.17';
+const version = '2017.08.18';
 
 // Load dependencies
 const Observable = require('rxjs/Observable').Observable;
 const Subject = require('rxjs/Subject').Subject;
 const express = require('express');
 const app = express();
+const session = require('express-session');
 const bodyParser = require('body-parser');
 const listenPort = 3002;
 const uuidV4 = require('uuid/v4');
@@ -30,7 +31,40 @@ const ExtractJwt = require('passport-jwt').ExtractJwt;
 var mongo = require('mongodb').MongoClient;
 var purgeHack = false; // causes sessions older than 5 minutes to be purged, if set to true.  Useful for testing purging without having to wait an hour
 
-//Configure logging
+
+
+
+
+
+///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////////EXPRESS////////////////////////////////////////////////////////////////
+///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+/*app.set('trust proxy', 1);
+app.use(session( {
+  name: 'twosession',
+  secret: 'abc',
+  cookie: { secure: false, httpOnly: false },
+  //proxy: true,
+  resave: false,
+  saveUninitialized: false
+}));*/
+app.use(cookieParser());
+app.use(bodyParser.json());
+app.use(bodyParser.urlencoded({ extended: true }));
+app.use(passport.initialize());
+
+
+
+
+
+
+
+
+///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////////LOGGING////////////////////////////////////////////////////////////////
+///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
 winston.remove(winston.transports.Console);
 winston.add(winston.transports.Console, {'timestamp': () => {
                                                               return moment().format('YYYY-MM-DD HH:mm:ss,SSS')
@@ -45,63 +79,19 @@ winston.level = 'debug';
 
 winston.info('Starting 221B server version', version);
 
-//Set default preferences
-var defaultPreferences = {
-                    nwInvestigateUrl: '',
-                    gsPath: '/usr/bin/gs',
-                    pdftotextPath: '/usr/bin/pdftotext',
-                    unrarPath: '/usr/bin/unrar',
-                    defaultNwQuery: "filetype = 'jpg','gif','png','pdf','zip','rar','windows executable','apple executable (pef)','apple executable (mach-o)'",
-                    defaultQuerySelection : "All Supported File Types",
-                    defaultImageLimit: 1000,
-                    defaultRollingHours: 1,
-                    minX: 255,
-                    minY: 255,
-                    displayedKeys : [ 
-                      "size", 
-                      "service", 
-                      "ip.src", 
-                      "ip.dst", 
-                      "alias.host", 
-                      "city.dst", 
-                      "country.dst", 
-                      "action", 
-                      "content", 
-                      "ad.username.src", 
-                      "ad.computer.src", 
-                      "filename", 
-                      "client"
-                    ],
-                    masonryKeys : [ 
-                      {
-                        key : "alias.host",
-                        friendly : "Hostname"
-                      }, 
-                      {
-                        key : "ad.username.src",
-                        friendly : "AD User"
-                      }, 
-                      {
-                        key : "ad.computer.src",
-                        friendly : "AD Computer"
-                      }, 
-                      {
-                        key : "ad.domain.src",
-                        friendly : "AD Domain"
-                      }
-                    ],
-                    masonryColumnSize : 350,
-                  };
+
+
+
+
+///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////////CONFIGURATION//////////////////////////////////////////////////////////////
+///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
 var justInstalled = true;
 var preferences = {};
 var nwservers = {};
 var collections = {};
 var collectionsData = {};
-
-var url = "mongodb://localhost:27017/221b";
-var db;
-connectToDB(); //this must come before mongoose user connection so that we know whether to create the default admin account
 
 const cfgDir = '/etc/kentech/221b';
 const certDir = cfgDir + '/certificates';
@@ -110,13 +100,84 @@ const jwtPublicKeyFile = certDir + '/221b.pem';
 const collectionsUrl = '/collections'
 var collectionsDir = '/var/kentech/221b/collections';
 
-app.use(cookieParser());
-app.use(bodyParser.json());
-app.use(bodyParser.urlencoded({ extended: true }));
-app.use(passport.initialize());
 
 
-// passport config
+
+
+
+
+
+
+
+///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////////USER PREFERENCES///////////////////////////////////////////////////////////
+///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+//Set default preferences
+var defaultPreferences = {
+  nwInvestigateUrl: '',
+  gsPath: '/usr/bin/gs',
+  pdftotextPath: '/usr/bin/pdftotext',
+  unrarPath: '/usr/bin/unrar',
+  defaultNwQuery: "filetype = 'jpg','gif','png','pdf','zip','rar','windows executable','apple executable (pef)','apple executable (mach-o)'",
+  defaultQuerySelection : "All Supported File Types",
+  defaultImageLimit: 1000,
+  defaultRollingHours: 1,
+  minX: 255,
+  minY: 255,
+  displayedKeys : [ 
+    "size", 
+    "service", 
+    "ip.src", 
+    "ip.dst", 
+    "alias.host", 
+    "city.dst", 
+    "country.dst", 
+    "action", 
+    "content", 
+    "ad.username.src", 
+    "ad.computer.src", 
+    "filename", 
+    "client"
+  ],
+  masonryKeys : [ 
+    {
+      key : "alias.host",
+      friendly : "Hostname"
+    }, 
+    {
+      key : "ad.username.src",
+      friendly : "AD User"
+    }, 
+    {
+      key : "ad.computer.src",
+      friendly : "AD Computer"
+    }, 
+    {
+      key : "ad.domain.src",
+      friendly : "AD Domain"
+    }
+  ],
+  masonryColumnSize : 350,
+};
+
+
+
+///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////////PASSPORT AND MONGOOSE//////////////////////////////////////////////////////////
+///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+var cookieExtractor = function(req) {
+  //Extract JWT from cookie 'access_token' and return to JwtStrategy
+  //winston.debug("cookieExtractor()", req.cookies);
+  var token = null;
+  if (req && req.cookies)
+  {
+      token = req.cookies['access_token'];
+  }
+  return token;
+};
+
 try {
   var jwtPrivateKey = fs.readFileSync(jwtPrivateKeyFile, 'utf8');
 }
@@ -133,18 +194,6 @@ catch(e) {
   process.exit(1);
 }
 
-
-var cookieExtractor = function(req) {
-  //Extract JWT from cookie 'access_token' and return to JwtStrategy
-  //winston.debug("cookieExtractor()", req.cookies);
-  var token = null;
-  if (req && req.cookies)
-  {
-      token = req.cookies['access_token'];
-  }
-  return token;
-};
-
 var jwtOpts = {
   jwtFromRequest: ExtractJwt.fromExtractors([cookieExtractor]),
   secretOrKey: jwtPublicKey,
@@ -152,43 +201,18 @@ var jwtOpts = {
 };
 
 
-passport.use(new JwtStrategy(jwtOpts, (jwt_payload, done) => {
-  //After automatically verifying that JWT was signed by us, perform extra validation with this function
-  //winston.debug("jwt validator jwt_payload:", jwt_payload);
-  //winston.debug("verifying token id:", jwt_payload.jti);
-  if (jwt_payload.jti in tokenBlacklist) { //check blacklist
-    winston.info("User " + jwt_payload.username + " has already logged out!");
-    return done(null, false);
-  }
-
-  User.findOne({id: jwt_payload.sub}, function(err, user) {
-      if (err) {
-        return done(err, false);
-      }
-      if (user && user.enabled) {
-        return done(null, user);
-      }
-      if (user && !user.enabled) {
-        winston.info('Login denied for user', user.username);
-        winston.info('Attempt to authenticate by disabled user', user.username);
-        return done(null, false);
-      }
-      else {
-        return done(null, false);
-        // or you could create a new account
-      }
-    });
-}));
-
-
 //We use mongoose for auth, and MongoClient for everything else.  This is because Passport-Local Mongoose required it, and it is ill-suited to the free-formish objects which we want to use.
+
+var mongoUrl = "mongodb://localhost:27017/221b";
+connectToDB(); //this must come before mongoose user connection so that we know whether to create the default admin account
+
 var User = require('./models/user');
 passport.use(new LocalStrategy(User.authenticate()));
 passport.serializeUser(User.serializeUser());
 passport.deserializeUser(User.deserializeUser());
 
-// mongoose
-mongoose.connect("mongodb://localhost:27017/221b_users", {useMongoClient: true, promiseLibrary: global.Promise});
+// Connect to Mongoose
+mongoose.connect("mongodb://localhost:27017/221b_users", { useMongoClient: true, promiseLibrary: global.Promise });
 var db = mongoose.connection;
 //db.on('error', (err) => {winston.error("Error connecting to 221b_users DB:"), err} );
 //db.once('open', () => {winston.info("Connected to 221b_users DB")} );
@@ -205,7 +229,7 @@ conn.221b_.listCollections({name: 'users'})
 var tokenBlacklist = {};
 
 
-//Create default user account if we think the app was just installed and if the count of users is 0
+// Create the default user account, if we think the app was just installed and if the count of users is 0
 User.count({}, (err, count) => {
   if (err) {
     winston.error("Error getting user count:", err);
@@ -218,12 +242,44 @@ User.count({}, (err, count) => {
 });
 
 
-var transformUser = function(doc, ret, options) {
-  delete ret._id;
-  delete ret.id;
-  delete ret.email;
-  return ret;
-};
+passport.use(new JwtStrategy(jwtOpts, (jwt_payload, done) => {
+  //After automatically verifying that JWT was signed by us, perform extra validation with this function
+  //winston.debug("jwt validator jwt_payload:", jwt_payload);
+  //winston.debug("verifying token id:", jwt_payload.jti);
+  if (jwt_payload.jti in tokenBlacklist) { //check blacklist
+    winston.info("User " + jwt_payload.username + " has already logged out!");
+    return done(null, false);
+  }
+
+  User.findOne({id: jwt_payload.sub}, function(err, user) {
+    if (err) {
+      return done(err, false);
+    }
+    if (user && user.enabled) {
+      return done(null, user);
+    }
+    if (user && !user.enabled) {
+      winston.info('Login denied for user', user.username);
+      winston.info('Attempt to authenticate by disabled user', user.username);
+      return done(null, false);
+    }
+    else {
+      return done(null, false);
+      // or you could create a new account
+    }
+  });
+}));
+
+
+
+
+
+
+
+///////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+/////////////////////////////////////////////////////API CALLS/////////////////////////////////////////////////////
+///////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
 
 app.post('/api/login', passport.authenticate('local'), (req,res) => {
   winston.info('POST /api/login');
@@ -239,10 +295,12 @@ app.post('/api/login', passport.authenticate('local'), (req,res) => {
       winston.info("Login successful for user", req.body.username);
       winston.debug("Found user " + req.body.username + ".  Signing token");
       let token = jwt.sign(user.toObject({versionKey: false, transform: transformUser}), jwtPrivateKey, { subject: user.id, algorithm: 'RS256', expiresIn: 60*60*24, jwtid: uuidV4() }); // expires in 24 hours
-      res.cookie('access_token', token, { httpOnly: true, secure: true })
+      res.cookie('access_token', token, { httpOnly: true, secure: true });
+      // res.cookie( req.session );
       res.json({
         success: true,
-        user: user.toObject()
+        user: user.toObject(),
+        sessionId: uuidV4()
       });
     }
   });
@@ -251,9 +309,9 @@ app.post('/api/login', passport.authenticate('local'), (req,res) => {
 app.get('/api/logout', passport.authenticate('jwt', { session: false } ), (req,res) => {
   winston.info('GET /api/logout');
   let decoded = jwt.decode(req.cookies.access_token); //we can use jwt.decode here without signature verification as it's already been verified during authentication
-  //winston.debug("decoded:", decoded);
+  // winston.debug("decoded:", decoded);
   let tokenId = decoded.jti; //store this
-  //winston.debug("decoded tokenId:", tokenId);
+  // winston.debug("decoded tokenId:", tokenId);
   tokenBlacklist[tokenId] = tokenId;
   res.clearCookie('access_token');
   res.sendStatus(200);
@@ -267,7 +325,13 @@ app.get('/api/logout', passport.authenticate('jwt', { session: false } ), (req,r
 
 app.get('/api/isloggedin', passport.authenticate('jwt', { session: false } ), (req, res)=>{
   winston.debug("GET /api/isloggedin");
-  res.json(req.user.toObject()); // { versionKey: false, transform: transformUserIsLoggedIn }
+  // winston.debug('sessionID:', req.session.id);
+  // winston.debug('Session object:', req.session);
+  // res.cookie('access_token', token, { httpOnly: true, secure: true })
+  // res.cookie( req.session.cookie );
+  // req.session.save();
+
+  res.json( { user: req.user.toObject(), sessionId: uuidV4() }); // { versionKey: false, transform: transformUserIsLoggedIn }
 });
 
 app.get('/api/users', passport.authenticate('jwt', { session: false } ), (req,res)=>{
@@ -623,22 +687,42 @@ app.post('/api/addcollection', passport.authenticate('jwt', { session: false } )
 });
 
 
-//returns a streaming collection which is in the process of building
-app.get('/api/getbuildingcollection/:id', passport.authenticate('jwt', { session: false } ), (req, res)=>{ 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////////FIXED COLLECTIONS//////////////////////////////////////////////////////////////////
+///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+
+// Returns a streaming fixed collection which is in the process of building
+app.get('/api/getbuildingfixedcollection/:id', passport.authenticate('jwt', { session: false } ), (req, res)=>{ 
   var id = req.params.id;
-  winston.info('GET /api/getbuildingcollection/:id', id);
-  //winston.debug('buildingCollections',buildingCollections);
+  winston.info('GET /api/getbuildingfixedcollection/:id', id);
+  //winston.debug('buildingFixedCollections',buildingFixedCollections);
   try {
-    if (buildingCollections[id]) {
+    if (buildingFixedCollections[id]) {
       //winston.debug('playing back collection which is in the process of building');
       res.writeHead(200, {'Content-Type': 'application/json','Content-Disposition': 'inline' });
-      var subject = buildingCollections[id].observable; //get our observable
+      var subject = buildingFixedCollections[id].observable; //get our observable
 
-      //play back the data already in buildingCollections. we must play back sessions and images separately as there are generally more images than sessions
-      for (var i=0; i < buildingCollections[id].sessions.length; i++) {
+      //play back the data already in buildingFixedCollections. we must play back sessions and images separately as there are generally more images than sessions
+      for (var i=0; i < buildingFixedCollections[id].sessions.length; i++) {
         let resp = {
           collectionUpdate: {
-            session: buildingCollections[id].sessions[i]
+            session: buildingFixedCollections[id].sessions[i]
           }
         };
         res.write(JSON.stringify(resp));
@@ -646,10 +730,10 @@ app.get('/api/getbuildingcollection/:id', passport.authenticate('jwt', { session
       }
       
       //now play back images
-      for (var i=0; i < buildingCollections[id].images.length; i++) {
+      for (var i=0; i < buildingFixedCollections[id].images.length; i++) {
         let resp = {
           collectionUpdate: {
-            images: [ buildingCollections[id].images[i] ]
+            images: [ buildingFixedCollections[id].images[i] ]
           }
         };
         res.write(JSON.stringify(resp));
@@ -658,12 +742,12 @@ app.get('/api/getbuildingcollection/:id', passport.authenticate('jwt', { session
       
       //now play back search text
       winston.debug("Playing back search");
-      if (buildingCollections[id].search) {
-        for (var i=0; i < buildingCollections[id].search.length; i++) {
+      if (buildingFixedCollections[id].search) {
+        for (var i=0; i < buildingFixedCollections[id].search.length; i++) {
           //winston.debug("loop", i);
           let resp = {
             collectionUpdate: {
-              search: buildingCollections[id].search[i]
+              search: buildingFixedCollections[id].search[i]
             }
           };
           res.write(JSON.stringify(resp));
@@ -684,7 +768,7 @@ app.get('/api/getbuildingcollection/:id', passport.authenticate('jwt', { session
       res.set('Content-Type', 'application/json');
       res.set('Content-Disposition', 'inline');
       res.set(200);
-      for (var i=0; i < collectionsData[id].images.length; i++) { //play back the image and session data already in buildingCollections
+      for (var i=0; i < collectionsData[id].images.length; i++) { //play back the image and session data already in buildingFixedCollections
         var sessionId = collectionsData[id].images[i].session;
         let resp = {
           collectionUpdate: {
@@ -696,7 +780,7 @@ app.get('/api/getbuildingcollection/:id', passport.authenticate('jwt', { session
         res.flush();
       }
 
-      if (buildingCollections[id].search) {
+      if (buildingFixedCollections[id].search) {
         for (var i=0; i < collectionsData[id].search.length; i++) { //now play back the search info
           let resp = {
             collectionUpdate: {
@@ -714,146 +798,162 @@ app.get('/api/getbuildingcollection/:id', passport.authenticate('jwt', { session
     }
   }
   catch(exception) {
-    winston.error('ERROR GET /api/getbuildingcollection/:id', exception);
+    winston.error('ERROR GET /api/getbuildingfixedcollection/:id', exception);
     res.sendStatus(500);
   }
 });
 
-var buildingCollections = {}; //we shall house collections which are under construction here
+var buildingFixedCollections = {}; // We shall house fixed collections which are under construction here
 
-function socketConnectionWorker(id, socket, tempName, subject) { // for fixed collections
-  winston.info("socketConnectionWorker(): Connection received from worker to build collection",id);
+function fixedSocketConnectionHandler(id, socket, tempName, subject) {
+  // For building fixed collections
+
+  winston.info("fixedSocketConnectionHandler(): Connection received from worker to build collection", id);
   
-  var data = ''; //buffer for worker data
+  //////////////////////////////////
+  //Build the worker configuration//
+  //////////////////////////////////
 
-  //Set socket options
-  socket.setEncoding('utf8');
-  
-  //tell our subscribers that we're building, so they can start their spinny icon
-  subject.next({collection: { id: id, state: 'building'}});
-
-  //Handle data from the socket (this really builds the collection)
-  socket.on('data', chunk => data = chunkHandler(buildingCollections, id, subject, data, chunk) );
-  //Now that we've finished building the new collection, emit a finished signal, and merge the new collection into the collectionsData object, and delete the object from buildingCollections
-  socket.on('end', () => {
-                            winston.debug('Worker disconnected.  Merging temporary collection into permanent collection');
-                            collectionsData[id].images = buildingCollections[id].images;
-                            collectionsData[id].search = buildingCollections[id].search;
-                            for (var e in buildingCollections[id].sessions) {
-                              let s = buildingCollections[id].sessions[e];
-                              let sid = s.id;
-                              collectionsData[id].sessions[sid] = s;
-                            }
-                            //moved into process exit
-                            winston.debug('Temporary collection merged into main branch.  Deleting temporary collection.');
-                            delete buildingCollections[id];
-                            fs.unlink(tempName, () => {});
-                          });
-
-  
-  //Build the worker configuration
-  let cfg = { id: id,
-              query: collections[id].query,
-              timeBegin: collections[id].timeBegin,
-              timeEnd: collections[id].timeEnd,
-              imageLimit: collections[id].imageLimit,
-              minX: collections[id].minX,
-              minY: collections[id].minY,
-              gsPath: preferences.gsPath,
-              pdftotextPath: preferences.pdftotextPath,
-              unrarPath: preferences.unrarPath,
-              distillationEnabled: collections[id].distillationEnabled,
-              regexDistillationEnabled: collections[id].regexDistillationEnabled,
-              md5Enabled: collections[id].md5Enabled,
-              sha1Enabled: collections[id].sha1Enabled,
-              sha256Enabled: collections[id].sha256Enabled,
-              collectionsDir: collectionsDir
+  let cfg = { 
+    id: id,
+    query: collections[id].query,
+    timeBegin: collections[id].timeBegin,
+    timeEnd: collections[id].timeEnd,
+    imageLimit: collections[id].imageLimit,
+    minX: collections[id].minX,
+    minY: collections[id].minY,
+    gsPath: preferences.gsPath,
+    pdftotextPath: preferences.pdftotextPath,
+    unrarPath: preferences.unrarPath,
+    distillationEnabled: collections[id].distillationEnabled,
+    regexDistillationEnabled: collections[id].regexDistillationEnabled,
+    md5Enabled: collections[id].md5Enabled,
+    sha1Enabled: collections[id].sha1Enabled,
+    sha256Enabled: collections[id].sha256Enabled,
+    collectionsDir: collectionsDir
   };
-  if (collections[id].distillationTerms) {
+  
+  if ('distillationTerms' in collections[id]) {
     cfg['distillationTerms'] = collections[id].distillationTerms;
   }
-  if (collections[id].regexDistillationTerms) {
+  if ('regexDistillationTerms' in collections[id]) {
     cfg['regexDistillationTerms'] = collections[id].regexDistillationTerms;
   }
-  if (collections[id].md5Hashes) {
+  if ('md5Hashes' in collections[id]) {
     cfg['md5Hashes'] = collections[id].md5Hashes;
   }
-  if (collections[id].sha1Hashes) {
+  if ('sha1Hashes' in collections[id]) {
     cfg['sha1Hashes'] = collections[id].sha1Hashes;
   }
-  if (collections[id].sha256Hashes) {
+  if ('sha256Hashes' in collections[id]) {
     cfg['sha256Hashes'] = collections[id].sha256Hashes;
   }
 
   let nwserver = nwservers[collections[id].nwserver];
   for (var k in nwserver) {
     if (k != 'id') {
-      cfg[k] = nwserver[k];
+      cfg[k] = nwserver[k];  // assign an nwserver to the collection cfg
     }
   }
   let outerCfg = { workerConfig: cfg };
-  //winston.debug('cfg:',cfg);
-  //Send configuration to worker.  After this, we should start receiving data on the socket
+
+  
+
+  ////////////////////////
+  //DEAL WITH THE SOCKET//
+  ////////////////////////
+
+  // Tell our subscribers that we're building, so they can start their spinny icon
+  subject.next({collection: { id: id, state: 'building'}});
+
+  // Buffer for worker data
+  var data = '';
+  
+  // Set socket options
+  socket.setEncoding('utf8');
+
+  //Handle data from the socket (this really builds the collection)
+  socket.on('data', chunk => data = chunkHandler(buildingFixedCollections, id, subject, data, chunk) );
+  
+  //Now that we've finished building the new collection, emit a finished signal, and merge the new collection into the collectionsData object, and delete the object from buildingFixedCollections
+  socket.on('end', () => {
+    winston.debug('Worker disconnected.  Merging temporary collection into permanent collection');
+    collectionsData[id].images = buildingFixedCollections[id].images;
+    collectionsData[id].search = buildingFixedCollections[id].search;
+    for (var e in buildingFixedCollections[id].sessions) {
+      let s = buildingFixedCollections[id].sessions[e];
+      let sid = s.id;
+      collectionsData[id].sessions[sid] = s;
+    }
+    //moved into process exit
+    winston.debug('Temporary collection merged into main branch.  Deleting temporary collection.');
+    delete buildingFixedCollections[id];
+    fs.unlink(tempName, () => {});
+  });
+                          
+  // Send configuration to worker.  This officially kicks off the work.  After this, we should start receiving data on the socket
   socket.write(JSON.stringify(outerCfg) + '\n'); 
   
 }
 
 
-function buildCollection(id) { //replacement function
-  winston.debug('buildCollection(): Building collection', id);
+function buildFixedCollection(id) {
+  // Builds fixed collections
+
+  winston.debug('buildFixedCollection(): Building collection', id);
   
   try {
     collections[id]['state'] = 'building';
     //Build observable which we can use to notify others of new additions to the collection
     var subject = new Subject();
-    buildingCollections[id] = {
+    buildingFixedCollections[id] = {
       observable: subject, //we add the observable subject object to the object so we can get it later
       images: [],
       sessions: []
     };
     var tempName = temp.path({suffix: '.socket'});
     //open UNIX domain socket to talk to worker script
-    var socketServer = net.createServer( (socket) => {socketConnectionWorker(id, socket, tempName, subject);} );
+    var socketServer = net.createServer( (socket) => { fixedSocketConnectionHandler(id, socket, tempName, subject); });
     socketServer.listen(tempName, () => {
-                                          winston.debug('Listening for worker communication');
-                                          winston.debug("Spawning worker with socket file " + tempName);
-                                          var worker = spawn('./221b_worker.py ',[tempName], {shell:true, stdio: 'inherit'});
-                                          worker.on('exit', (code) => {
-                                                                        if (typeof code === 'undefined') {
-                                                                          winston.debug('Worker process exited abnormally without an exit code');
-                                                                          collections[id]['state'] = 'error';
-                                                                          subject.next({collection: { id: id, state: 'error'}});
-                                                                        }
-                                                                        else if (code != 0) {
-                                                                          winston.debug('Worker process exited abnormally with exit code',code.toString());
-                                                                          collections[id]['state'] = 'error';
-                                                                          subject.next({collection: { id: id, state: 'error'}});
-                                                                        }
-                                                                        else {
-                                                                          winston.debug('Worker process exited normally with exit code', code.toString());
-                                                                          collections[id]['state'] = 'complete';
-                                                                          subject.next({collection: { id: id, state: 'complete'}});
-                                                                          db.collection('collections').update( {'id': id }, collections[id], (err, res) => {
-                                                                            if (err) throw err;
-                                                                          });
-                                                                          db.collection('collectionsData').update( {'id': id }, {'id': id, 'data': JSON.stringify(collectionsData[id])}, (err, res) => {
-                                                                            if (err) throw err;
-                                                                          });
-                                                                        }
-                                                                        subject.complete();
-                                                                        
-                                                                      });
-                                        } );
+      winston.debug('Listening for worker communication');
+      winston.debug("Spawning worker with socket file " + tempName);
+      var worker = spawn('./221b_worker.py ',[tempName], {shell:true, stdio: 'inherit'});
+      worker.on('exit', (code) => {
+        if (typeof code === 'undefined') {
+          winston.debug('Worker process exited abnormally without an exit code');
+          collections[id]['state'] = 'error';
+          subject.next({collection: { id: id, state: 'error'}});
+        }
+        else if (code != 0) {
+          winston.debug('Worker process exited abnormally with exit code',code.toString());
+          collections[id]['state'] = 'error';
+          subject.next({collection: { id: id, state: 'error'}});
+        }
+        else {
+          winston.debug('Worker process exited normally with exit code', code.toString());
+          collections[id]['state'] = 'complete';
+          subject.next({collection: { id: id, state: 'complete'}});
+          db.collection('collections').update( {'id': id }, collections[id], (err, res) => {
+            if (err) throw err;
+          });
+          db.collection('collectionsData').update( {'id': id }, {'id': id, 'data': JSON.stringify(collectionsData[id])}, (err, res) => {
+            if (err) throw err;
+          });
+        }
+        subject.complete();
+        
+      });
+    });
   }
   catch(e) {
-    winston.error("BuildCollection(): Caught error:",e);
+    winston.error("buildFixedCollection(): Caught error:",e);
   }
 
 }
 
-app.get('/api/buildcollection/:id', passport.authenticate('jwt', { session: false } ), (req, res)=>{
+app.get('/api/buildfixedcollection/:id', passport.authenticate('jwt', { session: false } ), (req, res)=>{
   let id = req.params.id;
-  winston.info('GET /api/buildcollection/:id', id);
+  winston.info('GET /api/buildfixedcollection/:id', id);
   try {
     if (collections[id].state === 'initial') {
       res.sendStatus(202);
@@ -863,118 +963,80 @@ app.get('/api/buildcollection/:id', passport.authenticate('jwt', { session: fals
     }
   }
   catch (exception) {
-    winston.error('ERROR GET /api/buildcollection/:id:',exception);
+    winston.error('ERROR GET /api/buildfixedcollection/:id:',exception);
     res.sendStatus(500);
     return;
   }
-  buildCollection(id);
+  buildFixedCollection(id);
 });
 
 
-function chunkHandler(collectionRoot, id, subject, data, chunk) {
-  winston.debug('Processing update from worker');
-  data += chunk
 
-  var splt = data.split("\n").filter( (el) => {return el.length != 0}) ;
-  //winston.debug("length of split:", splt.length);
 
-  if ( splt.length == 1 && data.indexOf("\n") === -1 ) {
-    //this case means the split resulted in only one element and that doesn't contain the newline delimiter, which means we haven't received an entire update yet...
-    //we'll continue and wait for the next update which will hopefully contain the delimeter
-    return data;
-  }
-  var d = []
-  if ( splt.length == 1 && data.endsWith("\n") ) {
-    //this case means the split resulted in only one element and that it does contain the newline delimiter.  This means we received a single complete update.
-    d.push(splt.shift() );
-    data='';
-  }
-  else if ( splt.length > 1 ) {
-    //this case means the split resulted in multiple elements and that it does contain a newline delimiter...
-    //This means we have at least one complete update, and possibly more.
-    if (data.endsWith("\n")) {  //the last element is a full update as data ends with a newline
-      while (splt.length > 0) {
-        d.push(splt.shift());
-      }
-      //winston.debug("now the length of split is", splt.length);
-      data = '';
-    }
-    else { //the last element is only a partial update, meaning that more data must be coming
-      while (splt.length > 1) {
-        d.push(splt.shift());
-      }
-      data = splt.shift();  //this should be the last partial update, which should be appended to in the next update
-    }
-  }
 
-  while (d.length > 0) {
-    let u = d.shift();
-    let update = JSON.parse(u);
-    
-    collectionRoot[id].sessions.push(update.collectionUpdate.session);
-    
-    if (update.collectionUpdate.search) {
-      if (!collectionRoot[id].search) {
-        collectionRoot[id].search = [];
-      }
-      for (var i = 0; i < update.collectionUpdate.search.length; i++) {
-        
-        collectionRoot[id].search.push(update.collectionUpdate.search[i]);
-      }
-    }
 
-    //modify image paths to point to /collections/:collectionId
-    for (var i=0; i < update.collectionUpdate.images.length; i++) {
-      
-      update.collectionUpdate.images[i].contentFile = collectionsUrl + '/' + id + '/' + update.collectionUpdate.images[i].contentFile;
 
-      if ('thumbnail' in update.collectionUpdate.images[i]) {
-        update.collectionUpdate.images[i].thumbnail = collectionsUrl + '/' + id + '/' + update.collectionUpdate.images[i].thumbnail;
-      }
-      if ('pdfImage' in update.collectionUpdate.images[i]) {
-        update.collectionUpdate.images[i].pdfImage = collectionsUrl + '/' + id + '/' + update.collectionUpdate.images[i].pdfImage;
-      }
-      if ('archiveFilename' in update.collectionUpdate.images[i]) {
-        update.collectionUpdate.images[i].archiveFilename = collectionsUrl + '/' + id + '/' + update.collectionUpdate.images[i].archiveFilename;
-      }
-      collectionRoot[id].images.push(update.collectionUpdate.images[i]);
-    }
-    /*for (var i=0; i < update.collectionUpdate.images.length; i++) {
-      update.collectionUpdate.images[i].image = collectionsUrl + '/' + id + '/' + update.collectionUpdate.images[i].image;
-      if ('thumbnail' in update.collectionUpdate.images[i]) {
-        update.collectionUpdate.images[i].thumbnail = collectionsUrl + '/' + id + '/' + update.collectionUpdate.images[i].thumbnail;
-      }
-      if (update.collectionUpdate.images[i].contentFile) {
-        update.collectionUpdate.images[i].contentFile = collectionsUrl + '/' + id + '/' + update.collectionUpdate.images[i].contentFile;
-      }
-      collectionRoot[id].images.push(update.collectionUpdate.images[i]);
-    }*/
-    
-    subject.next(update);
-  }
 
-  return data;
 
-}
+
+
+
+
+
+
+
+
+
+
+
+///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////////ROLLING COLLECTIONS////////////////////////////////////////////////////////////////
+///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
 
 
 function rollingSubjectWatcher(req, res, output) {
+  //The only job of this function is to take the output of our collection observable, and write it to the HTTP response stream so our client can see it
+  
   //winston.debug("rollingSubjectWatcher()", output);
   res.write(JSON.stringify(output));
   res.flush();
 }
 
 var rollingCollectionSubjects = {};
-var rollingCollections = {};
+// This contains observables for rolling collections, which can be subscribed to by new connections into a rolling collection
+// One observable per-collection
+/*
+rollingCollectionSubjects = { 
+  'collectionId' : { 
+    worker: 'spawned worker object',
+    interval: 'intervalObject for 60 second loop of worker',
+    observers: 'the number of clients watching this rolling collection',
+    subject: 'rxjs observable for the collection which can be used to pipe output back to the client'
+    lastRun: 'the time it was last run'
+  },
+  'collectionId2': ...
+}
+*/
 
-function rollingCollectionSocketConnectionWorker(id, socket, tempName, subject, firstRun) {
 
-  winston.debug("rollingCollectionSocketConnectionWorker(): Connection received from worker to build rolling or monitoring collection", id);
-  var data = ''; //buffer for worker data
-  //Set socket options
-  socket.setEncoding('utf8');
+var rollingCollections = {}; // This houses collection data for rolling and monitoring collections.  It is never committed to the DB as these collections are intended to be temporary only
+
+
+function rollingCollectionSocketConnectionHandler(id, socket, tempName, subject, firstRun, sessionId) {
+  // For rolling and monitoring collections
+  // Handles all dealings with the worker process after it has been spawned, including sending it its configuration, and sending data received from it to the chunkHandler() function
+  // It also purges old data from the collection as defined by the type of collection and number of hours back to retain
+
+  let rollingId = id;
+  if (sessionId != '') {
+    rollingId = sessionId;
+  }
   
-  //tell our subscribers that we're rolling, so they can start their spinny icon
+  winston.debug("rollingCollectionSocketConnectionHandler(): Connection received from worker to build rolling or monitoring collection", rollingId);
+  
+    
+  // Tell our subscribed clients that we're rolling, so they can start their spinny icon and whatnot
   if (collections[id].type === 'monitoring') {
     subject.next({collection: { id: id, state: 'refreshing'}});
   }
@@ -982,223 +1044,343 @@ function rollingCollectionSocketConnectionWorker(id, socket, tempName, subject, 
     subject.next({collection: { id: id, state: 'rolling'}});
   }
 
+
+  ///////////////////////////
+  //PURGE AGED-OUT SESSIONS//
+  ///////////////////////////
+
   if (collections[id].type === 'monitoring') {
-    rollingCollections[id].sessions = [];
-    rollingCollections[id].images = [];
-    rollingCollections[id].search = [];
+    rollingCollections[rollingId].sessions = [];
+    rollingCollections[rollingId].images = [];
+    rollingCollections[rollingId].search = [];
   }
-  else if (!firstRun && collections[id].type === 'rolling') { //purge events older than collections[id].lastHours
+  else if (!firstRun && collections[id].type === 'rolling') {
+    // Purge events older than collections[id].lastHours
+
     winston.debug('Running purge routine');
     let sessionsToPurge = [];
     let purgedSessionPositions = [];
 
-    let maxTime = collections[id].lastRun - collections[id].lastHours * 60 * 60;
-    if (purgeHack) { maxTime = collections[id].lastRun - 60 * 5; } // 5 minute setting used for testing
+    // Calculate the maximum age a given session is allowed to be
+    // let maxTime = collections[id].lastRun - collections[id].lastHours * 60 * 60;
+    // if (purgeHack) { maxTime = collections[id].lastRun - 60 * 5; } // 5 minute setting used for testing
+    let maxTime = rollingCollectionSubjects[rollingId].lastRun - collections[id].lastHours * 60 * 60;
+    if (purgeHack) { maxTime = rollingCollectionSubjects[rollingId].lastRun - 60 * 5; } // 5 minute setting used for testing
 
-    for (let i=0; i < rollingCollections[id].sessions.length; i++) {
-      let session = rollingCollections[id].sessions[i];
-      let sessionId = session.id;
+
+    for (let i=0; i < rollingCollections[rollingId].sessions.length; i++) {
+      // Look at each session and determine whether it is older than maxtime
+      // If so, add it to purgedSessionPositions and sessionsToPurge
+      let session = rollingCollections[rollingId].sessions[i];
+      let sid = session.id;
       if ( session.meta.time < maxTime ) {
         purgedSessionPositions.push(i);
-        sessionsToPurge.push(sessionId);
-        //rollingCollections[id].sessions.splice(i, 1);
+        sessionsToPurge.push(sid);
+        //rollingCollections[rollingId].sessions.splice(i, 1);
       }
     }
 
     // Sort sessionsToPurge
     purgedSessionPositions.sort(sortNumber);
     
-    //Now remove purged sessions from rollingCollections
+    //Now remove purged sessions from rollingCollections[rollingId]
     for (let i = 0; i < purgedSessionPositions.length; i++) {
-      rollingCollections[id].sessions.splice(purgedSessionPositions[i], 1);
+      rollingCollections[rollingId].sessions.splice(purgedSessionPositions[i], 1);
     }
 
     
-    //we now have sessionsToPurge.  let's purge them
-    //purge images
-    //winston.debug("images:", rollingCollections[id].images);
+    //We now have sessionsToPurge.  let's purge them
+
+    //Purge images
     for (let v = 0; v < sessionsToPurge.length; v++) {
-      for (let i = 0; i < rollingCollections[id].images.length; i++) {
-        if ( rollingCollections[id].images[i].session === sessionsToPurge[v]) {
+      for (let i = 0; i < rollingCollections[rollingId].images.length; i++) {
+        if ( rollingCollections[rollingId].images[i].session === sessionsToPurge[v]) {
           //delete files
           //winston.debug("deleting files for session", sessionsToPurge[v]);
-          if ('contentFile' in rollingCollections[id].images[i]) {
-            fs.unlink(rollingCollections[id].images[i].contentFile, () => {});
+          if ('contentFile' in rollingCollections[rollingId].images[i]) {
+            fs.unlink(rollingCollections[rollingId].images[i].contentFile, () => {});
           }
-          if ('thumbnail' in rollingCollections[id].images[i]) {
-            fs.unlink(rollingCollections[id].images[i].thumbnail, () => {});
+          if ('thumbnail' in rollingCollections[rollingId].images[i]) {
+            fs.unlink(rollingCollections[rollingId].images[i].thumbnail, () => {});
           }
-          if ('pdfImage' in rollingCollections[id].images[i]) {
-            fs.unlink(rollingCollections[id].images[i].pdfImage, () => {});
+          if ('pdfImage' in rollingCollections[rollingId].images[i]) {
+            fs.unlink(rollingCollections[rollingId].images[i].pdfImage, () => {});
           }
-          rollingCollections[id].images.splice(i, 1);
+          rollingCollections[rollingId].images.splice(i, 1);
         }
       }
     }
-    //purge search data
+
+    // Purge search data
     let purgedSearchPositions = [];
     for (let v = 0; v < sessionsToPurge.length; v++) {
-      for (let i = 0; i < rollingCollections[id].search.length; i++) {
-        if ( rollingCollections[id].search[i].session === sessionsToPurge[v]) {
-          //rollingCollections[id].search.splice(i, 1);
+      for (let i = 0; i < rollingCollections[rollingId].search.length; i++) {
+        if ( rollingCollections[rollingId].search[i].session === sessionsToPurge[v]) {
+          //rollingCollections[rollingId].search.splice(i, 1);
           purgedSearchPositions.push(i);
         }
       }
     }
     purgedSearchPositions.sort(sortNumber);
     for (let i = 0; i < purgedSearchPositions.length; i++) {
-      rollingCollections[id].search.splice(purgedSessionPositions[i], 1);
+      rollingCollections[rollingId].search.splice(purgedSessionPositions[i], 1);
     }
     
-    //now send update
+    // Notify the client of our purged sessions
     if (sessionsToPurge.length > 0) {
       let update = { collectionPurge: sessionsToPurge };
       subject.next(update);
     }
     
   }
-  
-  //Handle data from the socket (this really builds the collection)
-  socket.on('data', chunk => data = chunkHandler(rollingCollections, id, subject, data, chunk) );
-                              
-                              
-  //Now that we've finished building the new collection, emit a finished signal, and merge the new collection into the collectionsData object, and delete the object from rollingCollections
-  socket.on('end', () => {
-                            winston.debug('Worker disconnected.  Rolling collection update cycle complete.');
-                            fs.unlink(tempName, () => {});
-                          });
 
-  
-  //Build the rolling collection worker configuration
-  let cfg = { id: id,
-              query: collections[id].query,
-              imageLimit: collections[id].imageLimit,
-              minX: collections[id].minX,
-              minY: collections[id].minY,
-              gsPath: preferences.gsPath,
-              pdftotextPath: preferences.pdftotextPath,
-              unrarPath: preferences.unrarPath,
-              distillationEnabled: collections[id].distillationEnabled,
-              regexDistillationEnabled: collections[id].regexDistillationEnabled,
-              md5Enabled: collections[id].md5Enabled,
-              sha1Enabled: collections[id].sha1Enabled,
-              sha256Enabled: collections[id].sha256Enabled,
-              collectionsDir: collectionsDir
-              //timeBegin: collections[id].timeBegin,
-              //timeEnd: collections[id].timeEnd
+  //////////////////////////////////
+  //Build the worker configuration//
+  //////////////////////////////////
+
+  let cfg = {
+    // id: id,
+    id: rollingId,
+    query: collections[id].query,
+    imageLimit: collections[id].imageLimit,
+    minX: collections[id].minX,
+    minY: collections[id].minY,
+    gsPath: preferences.gsPath,
+    pdftotextPath: preferences.pdftotextPath,
+    unrarPath: preferences.unrarPath,
+    distillationEnabled: collections[id].distillationEnabled,
+    regexDistillationEnabled: collections[id].regexDistillationEnabled,
+    md5Enabled: collections[id].md5Enabled,
+    sha1Enabled: collections[id].sha1Enabled,
+    sha256Enabled: collections[id].sha256Enabled,
+    collectionsDir: collectionsDir
   };
-  
-  if (firstRun) {
-  winston.debug("got firstRun");
-    //set timeEnd as beginning of the minute before last minus one second, to give time for sessions to leave the assembler
-    cfg['timeEnd'] = moment().startOf('minute').unix() - 61;
-    cfg['timeBegin'] = ( cfg['timeEnd'] - (collections[id].lastHours * 60 * 60) ) + 1;
-  }
-  else if (collections[id].type === 'monitoring') {
+
+  if (collections[id].type === 'monitoring') {
+    // If this is a monitoring collection, then set timeEnd and timeBegin to be a one minute window
     cfg['timeEnd'] = moment().startOf('minute').unix() - 61;
     cfg['timeBegin'] = ( cfg['timeEnd'] - 60) + 1;
   }
-  else { //this is a non-first run
-    cfg['timeBegin'] = collections[id]['lastRun'] + 1;
+  
+  else if (firstRun) {
+    // This is a first run of a rolling collection
+    // Set timeEnd as beginning of the minute before last minus one second, to give time for sessions to leave the assembler
+    cfg['timeEnd'] = moment().startOf('minute').unix() - 61;
+    cfg['timeBegin'] = ( cfg['timeEnd'] - (collections[id].lastHours * 60 * 60) ) + 1;
+  }  
+
+  else {
+    // This is a non-first run of a rolling collection
+    // cfg['timeBegin'] = collections[id]['lastRun'] + 1;
+    cfg['timeBegin'] = rollingCollectionSubjects[rollingId]['lastRun'] + 1;
     cfg['timeEnd'] = cfg['timeBegin'] + 60; //add one minute to cfg[timeBegin]
   }
-  collections[id]['lastRun'] = cfg['timeEnd']; //store the time of last run so that we can reference it the next time we loop
 
-  if (collections[id].distillationTerms) {
+  // collections[id]['lastRun'] = cfg['timeEnd']; //store the time of last run so that we can reference it the next time we loop
+  rollingCollectionSubjects[rollingId]['lastRun'] = cfg['timeEnd']; //store the time of last run so that we can reference it the next time we loop
+
+  if ('distillationTerms' in collections[id]) {
     cfg['distillationTerms'] = collections[id].distillationTerms;
   }
-  if (collections[id].regexDistillationTerms) {
+  if ('regexDistillationTerms' in collections[id]) {
     cfg['regexDistillationTerms'] = collections[id].regexDistillationTerms;
   }
-  if (collections[id].md5Hashes) {
+  if ('md5Hashes' in collections[id]) {
     cfg['md5Hashes'] = collections[id].md5Hashes;
   }
-  if (collections[id].sha1Hashes) {
-    cfg['sha1Hashes'] = collections[id].sha1Hashes;
+  if ('sha1Hashes' in collections[id]) {
+   cfg['sha1Hashes'] = collections[id].sha1Hashes;
   }
-  if (collections[id].sha256Hashes) {
-    cfg['sha256Hashes'] = collections[id].sha256Hashes;
+  if ('sha256Hashes' in collections[id]) {
+   cfg['sha256Hashes'] = collections[id].sha256Hashes;
   }
 
   let nwserver = nwservers[collections[id].nwserver];
   for (var k in nwserver) {
     if (k != 'id') {
-      cfg[k] = nwserver[k];
+      cfg[k] = nwserver[k]; // assign an nwserver to the collection cfg
     }
   }
   let outerCfg = { workerConfig: cfg };
-  //Send configuration to worker.  After this, we should start receiving data on the socket
+
+
+
+  ////////////////////////
+  //DEAL WITH THE SOCKET//
+  ////////////////////////
+
+  // Buffer for worker data
+  var data = '';
+
+  //Set socket options
+  socket.setEncoding('utf8');
+  
+  // Handle data received from the worker over the socket (this really builds the collection)
+  socket.on('data', chunk => data = chunkHandler(rollingCollections, id, subject, data, chunk, sessionId) );
+                              
+                              
+  // Once the worker has exited, delete the socket temporary file
+  socket.on('end', () => {
+    winston.debug('Worker disconnected.  Rolling collection update cycle complete.');
+    fs.unlink(tempName, () => {});
+  });
+
+  // Send configuration to worker.  This officially kicks off the work.  After this, we should start receiving data on the socket
   socket.write(JSON.stringify(outerCfg) + '\n'); 
   
 }
 
-function runRollingCollection(id, firstRun) {
+
+
+
+
+function runRollingCollection(id, firstRun, sessionId='') {
+  // Executes the building of a rolling or monitoring collection
+
   winston.debug("runRollingCollection(id)");
-  var subject = rollingCollectionSubjects[id].subject;
-  rollingCollections[id] = {
+
+  let rollingId = id;
+  if (collections[id].type === 'monitoring') {
+    rollingId = sessionId;
+  }
+
+  var subject = rollingCollectionSubjects[rollingId].subject;
+  rollingCollections[rollingId] = {
     images: [],
     sessions: [],
     search: []
   };
 
   var work = ( () => {
-    //main body of execution
+    // Main body of worker execution
+    // This is wrapped in an arrow function so that it will retain the local scope of 'id' and 'firstRun'
+    // We also want to be able to call this body from a timer, so that's another reason we wrap it
+
     try {
-      winston.debug("Starting run for id", id);
+
+      winston.debug("runRollingCollection(): work(): Starting run for rollingId", rollingId);
+
+      if ( rollingId in rollingCollectionSubjects && 'worker' in rollingCollectionSubjects[rollingId] ) {
+        // Check if there's already a worker process already running which has overrun the 60 second mark, and if so, kill it
+        winston.info('Timer expired for running worker.  Terminating worker');
+        let oldWorker = rollingCollectionSubjects[rollingId]['worker'];
+        oldWorker.kill('SIGINT');
+        // delete rollingCollectionSubjects[rollingId]['worker']; // we don't want to do this here as it will be handled when the worker exits
+      }
+
+      // Create temp file to be used as our UNIX domain socket
       var tempName = temp.path({suffix: '.socket'});
-      //open UNIX domain socket to talk to worker script
-      var socketServer = net.createServer( (socket) => {rollingCollectionSocketConnectionWorker(id, socket, tempName, subject, firstRun);} );
+
+      // Now open the UNIX domain socket that will talk to worker script by creating a handler (or server) to handle communications
+      var socketServer = net.createServer( (socket) => { rollingCollectionSocketConnectionHandler(id, socket, tempName, subject, firstRun, sessionId); });
+
+      
       socketServer.listen(tempName, () => {
-                      winston.debug('Rolling Collection: Listening for worker communication');
-                      winston.debug("Rolling Collection: Spawning worker with socket file " + tempName);
-                      var worker = spawn('./221b_worker.py ',[tempName], {shell:true, stdio: 'inherit'});
-                      rollingCollectionSubjects[id]['worker'] = worker;
-                      worker.on('exit', (code) => {
-                                                    //winston.debug('worker.onexit');
-                                                    if (typeof code === 'undefined') {
-                                                      winston.debug('Worker process exited abnormally without an exit code');
-                                                      collections[id]['state'] = 'error';
-                                                      subject.next({collection: { id: id, state: 'error'}});
-                                                      if (id in rollingCollectionSubjects && 'worker' in rollingCollectionSubjects[id]) delete rollingCollectionSubjects[id].worker;
-                                                    }
-                                                    else if (code != 0) {
-                                                      winston.debug('Worker process exited in bad state with non-zero exit code',code.toString());
-                                                      collections[id]['state'] = 'error';
-                                                      subject.next({collection: { id: id, state: 'error'}});
-                                                      if (id in rollingCollectionSubjects && 'worker' in rollingCollectionSubjects[id]) delete rollingCollectionSubjects[id].worker;
-                                                    }
-                                                    else {
-                                                      winston.debug('Worker process exited normally with exit code', code.toString());
-                                                      subject.next({collection: { id: id, state: 'resting'}});
-                                                      db.collection('collections').update( {'id': id }, collections[id], (err, res) => {
-                                                        if (err) throw err;
-                                                      });
-                                                      db.collection('collectionsData').update( {'id': id }, {'id': id, 'data': JSON.stringify(collectionsData[id])}, (err, res) => {
-                                                        if (err) throw err;
-                                                      });
-                                                      firstRun = false;
-                                                      if (id in rollingCollectionSubjects && 'worker' in rollingCollectionSubjects[id]) delete rollingCollectionSubjects[id].worker;
-                                                    }
-                                                    //subject.complete();
-                                                  });
-                    });
+        // Tell the server to listen for communication from the not-yet-started worker
+
+        winston.debug('runRollingCollection(): work(): listen(): Rolling Collection: Listening for worker communication');
+        winston.debug("runRollingCollection(): work(): listen(): Rolling Collection: Spawning worker with socket file " + tempName);
+        
+        // Start the worker process and assign a reference to it to 'worker'
+        var worker = spawn('./221b_worker.py ',[tempName], {shell:true, stdio: 'inherit'});
+        // Notice that we don't pass any configuration to the worker on the command line.  It's all done through the UNIX socket for security.
+        
+        // Add the worker reference to rollingCollectionSubjects so we can work with it later
+        rollingCollectionSubjects[rollingId]['worker'] = worker;
+
+        
+        worker.on('exit', (code) => {
+          // This is where we handle the exiting of the worker process
+
+          if (typeof code === 'undefined') {
+            // Handle really bad worker exit with no error code - maybe because we couldn't spawn it at all?
+            winston.debug('runRollingCollection(): work(): listen(): onExit(): Worker process exited abnormally without an exit code');
+            collections[id]['state'] = 'error';
+            subject.next({collection: { id: id, state: 'error'}});
+            if (rollingId in rollingCollectionSubjects && 'worker' in rollingCollectionSubjects[rollingId]) delete rollingCollectionSubjects[rollingId].worker;
+          }
+
+          else if (code != 0) {
+            // Handle worker exit with error code
+            winston.debug('runRollingCollection(): work(): listen(): onExit(): Worker process exited in bad state with non-zero exit code',code.toString());
+            collections[id]['state'] = 'error';
+            subject.next({collection: { id: id, state: 'error'}});
+            if (rollingId in rollingCollectionSubjects && 'worker' in rollingCollectionSubjects[rollingId]) delete rollingCollectionSubjects[rollingId].worker;
+          }
+
+          else {
+            // Handle normal worker exit
+            winston.debug('runRollingCollection(): work(): listen(): onExit(): Worker process exited normally with exit code', code.toString());
+
+            // Tell client that we're resting
+            subject.next({collection: { id: id, state: 'resting'}});
+
+            // Save the collection to the DB
+            db.collection('collections').update( {'id': id }, collections[id], (err, res) => {
+              if (err) throw err;
+            });
+            
+            /*// Save the collection data to the DB -- WE SHOULDN'T HAVE TO DO THIS AS THESE DON'T PERSIST!!!!!!!
+            db.collection('collectionsData').update( {'id': id }, {'id': id, 'data': JSON.stringify(collectionsData[id])}, (err, res) => {
+              if (err) throw err;
+            });*/
+            
+            firstRun = false;
+            
+            if (rollingId in rollingCollectionSubjects && 'worker' in rollingCollectionSubjects[rollingId]) {
+              delete rollingCollectionSubjects[rollingId].worker;
+            }
+          }
+        });
+      });
     }
+
     catch(e) {
-      winston.error("runRollingCollection(): Caught error:",e);
+      winston.error("runRollingCollection(): work(): Caught unhandled error:", e);
     }
     
   });
+
+  // Start the work() function (the main body of worker execution)
   work();
-  rollingCollectionSubjects[id]['interval'] = setInterval( () => work(), 60000); //run every minute
+
+  // Now schedule work() to run every 60 seconds and store a reference to it in rollingCollectionSubjects[rollingId]['interval'],
+  // which we can later use to terminate the timer and prevent future execution.
+  // This will not initially execute work() until the first 60 seconds have elapsed, which is why we run work() once before this
+  rollingCollectionSubjects[rollingId]['interval'] = setInterval( () => work(), 60000);
 }
 
 
 
 
-app.get('/api/getrollingcollection/:id', passport.authenticate('jwt', { session: false } ), (req, res)=>{
+app.get('/api/pausemonitoringcollection/:id', passport.authenticate('jwt', { session: false } ), (req, res) => {
+  let id = req.headers['twosessionid'];
+  winston.info('GET /api/pausemonitoringcollection/:id', id);
+  rollingCollectionSubjects[id]['paused'] = true;
+  res.sendStatus(202);
+});
+
+
+app.get('/api/getrollingcollection/:id', passport.authenticate('jwt', { session: false } ), (req, res) => {
+  // Builds and streams a rolling or monitoring collection back to the client.  Handles the client connection and kicks off the process
+
   let id = req.params.id;
+  let sessionId = req.headers['twosessionid'];
   winston.info('GET /api/getrollingcollection/:id', id);
+  // winston.debug('GET /api/getrollingcollection/:id sessionId:', sessionId);
+
+  let rollingId = id;
+  if ( collections[id].type === 'monitoring' ) {
+    rollingId = sessionId;
+  }
+  
+  
+  ////////////////////////////////////////////////////
+  //////////////////RESPONSE HEADERS//////////////////
+  ////////////////////////////////////////////////////
+
   try {
+    // Write the response headers
     if (collections[id].type === 'rolling' || collections[id].type === 'monitoring') {
       res.writeHead(200, {'Content-Type': 'application/json','Content-Disposition': 'inline' });
       res.flush();
@@ -1213,42 +1395,124 @@ app.get('/api/getrollingcollection/:id', passport.authenticate('jwt', { session:
     return;
   }
 
+
+
+
+  ///////////////////////////////////////////////////////////////////////
+  ///////////////////////CLIENT DISCONNECT HANDLER///////////////////////
+  ///////////////////////////////////////////////////////////////////////
+
   req.on('close', () => {
-    if ( id in rollingCollectionSubjects) {
-      winston.debug("Client disconnected from rolling collection with id", id);
-      rollingCollectionSubjects[id].observers -= 1;
-      if (rollingCollectionSubjects[id].observers === 0) {
+    // Run this block when the client disconnects from the session
+
+    if ( rollingId in rollingCollectionSubjects) {
+      winston.debug("Client disconnected from rolling collection with rollingId", rollingId);
+      rollingCollectionSubjects[rollingId].observers -= 1;
+      if (rollingCollectionSubjects[rollingId].observers === 0) {
         //destroy subject
-        winston.debug("Last client disconnected from rolling collection with id " + id + '.  Destroying observable');
-        clearInterval(rollingCollectionSubjects[id].interval);
-        rollingCollectionSubjects[id].subject.complete();
+        winston.debug("Last client disconnected from rolling collection with rollingId " + rollingId + '.  Destroying observable');
+        clearInterval(rollingCollectionSubjects[rollingId].interval);
+        rollingCollectionSubjects[rollingId].subject.complete();
 
         try {
-          winston.debug("Deleting output directory for collection", id);
-          rimraf( collectionsDir + '/' + id, () => {} ); //delete output directory
+          winston.debug("Deleting output directory for collection", rollingId);
+          rimraf( collectionsDir + '/' + rollingId, () => {} ); //delete output directory
         }
         catch(exception) {
-          winston.error('ERROR deleting output directory collectionsDir + '/' + id', exception);
+          winston.error('ERROR deleting output directory collectionsDir + '/' + rollingId', exception);
         }
         
-        if ('worker' in rollingCollectionSubjects[id]) {
-          winston.debug("Killing worker for collection", id);
-          rollingCollectionSubjects[id].worker.kill('SIGINT');
+        if ('worker' in rollingCollectionSubjects[rollingId]) {
+          winston.debug("Killing worker for collection", rollingId);
+          rollingCollectionSubjects[rollingId].worker.kill('SIGINT');
         }
-        delete rollingCollectionSubjects[id];
+        delete rollingCollectionSubjects[rollingId];
         res.end();
         return;
       }
     }
   });
-  
-  if ( rollingCollectionSubjects[id] ) { //rolling collection is already running.  let's play back its contents and subscribe to its observable
-    rollingCollectionSubjects[id]['observers'] += 1;
+
+
+  /////////////////////////////////////////
+  /////////////NEW ROLLING RUN/////////////
+  /////////////////////////////////////////
+
+  if ( collections[id].type === 'rolling' && !(id in rollingCollectionSubjects) ) {
+    // This is a new rolling collection as there are no existing subscribers to it
+    // Let's start building it
+    let subject = new Subject(); // Create a new observable which will be used to pipe communication between the worker and the client
     
-    //play back the data already in rollingCollections. we must play back sessions and images separately as there are generally more images than sessions
+    let firstRun = true;
+     
+    // Populate rollingCollectionSubjects[id] with some initial values
+    rollingCollectionSubjects[id] = {
+      subject: subject,
+      observers: 1
+    }
+
+    // We now subscribe to the existing observable for the collection and pipe its output to rollingSubjectWatcher so it can be output to the http response stream
     rollingCollectionSubjects[id].subject.subscribe( (output) => rollingSubjectWatcher(req, res, output) );
+    
+    
+    // We don't run a while loop here because runRollingCollection will loop on its own
+    // Execute our collection building here
+    runRollingCollection(id, firstRun);
+  }
+
+
+
+  ////////////////////////////////////////////
+  /////////////NEW MONITORING RUN/////////////
+  ////////////////////////////////////////////
+  
+
+  else if ( collections[id].type === 'monitoring' ) {
+    // This is a new rolling collection as there are no existing subscribers to it
+    // Let's start building it
+    let subject = new Subject(); // Create a new observable which will be used to pipe communication between the worker and the client
+
+    let firstRun = false;
+    
+    // Populate rollingCollectionSubjects[rollingId] with some initial values
+    rollingCollectionSubjects[rollingId] = {
+      subject: subject,
+      observers: 1
+    }
+
+    // We now subscribe to the existing observable for the collection and pipe its output to rollingSubjectWatcher so it can be output to the http response stream
+    rollingCollectionSubjects[rollingId].subject.subscribe( (output) => rollingSubjectWatcher(req, res, output) );
+    
+    
+    // We don't run a while loop here because runRollingCollection will loop on its own
+    // Execute our collection building here
+    runRollingCollection(id, firstRun, rollingId);
+  }
+
+
+
+
+
+  //////////////////////////////////////////////////////////
+  ////////////ALREADY RUNNING ROLLING COLLECTION////////////
+  //////////////////////////////////////////////////////////
+  
+  else {
+    // We're not the first client connected to this collection, as the rolling collection is already running
+    // Let's play back its contents and subscribe to its observable
+
+    winston.info(`This is not the first client connected to rolling collection ${id}.  Playing back existing collection`);
+
+    rollingCollectionSubjects[id]['observers'] += 1;
+    // Increase the observers count so we know how many people are viewing the collection
+    
+    rollingCollectionSubjects[id].subject.subscribe( (output) => rollingSubjectWatcher(req, res, output) );
+    // We now subscribe to the existing observable for the collection and pipe its output to rollingSubjectWatcher so it can be output to the http response stream
+      
+    // Play back the data already in rollingCollections[id]
 
     for (var i=0; i < rollingCollections[id].sessions.length; i++) {
+      // Play back sessions
       let resp = {
         collectionUpdate: {
           session: rollingCollections[id].sessions[i]
@@ -1258,8 +1522,8 @@ app.get('/api/getrollingcollection/:id', passport.authenticate('jwt', { session:
       res.flush();
     }
     
-    //now play back images
     for (var i=0; i < rollingCollections[id].images.length; i++) {
+      // Play back images
       let resp = {
         collectionUpdate: {
           images: [ rollingCollections[id].images[i] ]
@@ -1269,41 +1533,57 @@ app.get('/api/getrollingcollection/:id', passport.authenticate('jwt', { session:
       res.flush();
     }
     
-    //now play back search text
-    winston.debug("playing back search");
     if (rollingCollections[id].search) {
+      // Play back search text
       for (var i=0; i < rollingCollections[id].search.length; i++) {
         let resp = {
           collectionUpdate: {
-            search: [ rollingCollections[id].search[i] ]  //we enclose this in an array to be consistent with the worker, which also does this when it sends search terms, in case there are more than one search term per update.
-                                                          //The client should only have to deal with one format
+            search: [ rollingCollections[id].search[i] ] 
+            // We enclose this in an array to be consistent with the worker, which also does this when it sends search terms, in case there are more than one search term per update.
+           // The client should only have to deal with one format
           }
         };
         res.write(JSON.stringify(resp));
         res.flush();
       }
     }
-    
 
-    //we don't need to wait as the connection will hold open until we call res.end()
+    // We don't need to wait as the connection will hold open until we call res.end()
   }
-  else {
-    var subject = new Subject(); //new rolling collection.  Subscribe to subject and run it.
-    var firstRun = true;
-    if (collections[id].type === 'monitoring') {
-      firstRun = false;
-    }
-    rollingCollectionSubjects[id] = {};
-    rollingCollectionSubjects[id]['subject'] = subject;
-    rollingCollectionSubjects[id]['observers'] = 1;
-    rollingCollectionSubjects[id].subject.subscribe( (output) => rollingSubjectWatcher(req, res, output) );
-    //we don't run while loop here because runRollingCollection will loop on its own
-    runRollingCollection(id, firstRun);
-  }
+
 });
 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+/////////////////////////////////////////////////////////UTILITY FUNCTIONS/////////////////////////////////////////////////////////
+///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+
 function connectToDB() {
-  mongo.connect(url, (err, database) => {
+  mongo.connect(mongoUrl, (err, database) => {
     if (err) throw err;
     db = database;
   
@@ -1406,5 +1686,107 @@ function sortNumber(a, b) {
   return b - a;
 }
 
+function chunkHandler(collectionRoot, id, subject, data, chunk, sessionId='') {
+  // Handles socket data received from the worker process
+  // This actually builds the collection data structures and sends updates to the client
+
+  let rollingId = id;
+  if (sessionId != '') {
+    rollingId = sessionId;
+  }
+
+  winston.debug('Processing update from worker');
+  data += chunk
+
+  var splt = data.split("\n").filter( (el) => {return el.length != 0}) ;
+  //winston.debug("length of split:", splt.length);
+
+  if ( splt.length == 1 && data.indexOf("\n") === -1 ) {
+    //this case means the split resulted in only one element and that doesn't contain the newline delimiter, which means we haven't received an entire update yet...
+    //we'll continue and wait for the next update which will hopefully contain the delimeter
+    return data;
+  }
+  var d = []
+  if ( splt.length == 1 && data.endsWith("\n") ) {
+    //this case means the split resulted in only one element and that it does contain the newline delimiter.  This means we received a single complete update.
+    d.push(splt.shift() );
+    data='';
+  }
+  else if ( splt.length > 1 ) {
+    //this case means the split resulted in multiple elements and that it does contain a newline delimiter...
+    //This means we have at least one complete update, and possibly more.
+    if (data.endsWith("\n")) {  //the last element is a full update as data ends with a newline
+      while (splt.length > 0) {
+        d.push(splt.shift());
+      }
+      //winston.debug("now the length of split is", splt.length);
+      data = '';
+    }
+    else { //the last element is only a partial update, meaning that more data must be coming
+      while (splt.length > 1) {
+        d.push(splt.shift());
+      }
+      data = splt.shift();  //this should be the last partial update, which should be appended to in the next update
+    }
+  }
+
+  while (d.length > 0) {
+    let u = d.shift();
+    let update = JSON.parse(u);
+    
+    collectionRoot[rollingId].sessions.push(update.collectionUpdate.session);
+    
+    if (update.collectionUpdate.search) {
+      if (!collectionRoot[rollingId].search) {
+        collectionRoot[rollingId].search = [];
+      }
+      for (var i = 0; i < update.collectionUpdate.search.length; i++) {
+        
+        collectionRoot[rollingId].search.push(update.collectionUpdate.search[i]);
+      }
+    }
+
+    //modify image paths to point to /collections/:collectionId
+    for (var i=0; i < update.collectionUpdate.images.length; i++) {
+      
+      update.collectionUpdate.images[i].contentFile = collectionsUrl + '/' + rollingId + '/' + update.collectionUpdate.images[i].contentFile;
+
+      if ('thumbnail' in update.collectionUpdate.images[i]) {
+        update.collectionUpdate.images[i].thumbnail = collectionsUrl + '/' + rollingId + '/' + update.collectionUpdate.images[i].thumbnail;
+      }
+      if ('pdfImage' in update.collectionUpdate.images[i]) {
+        update.collectionUpdate.images[i].pdfImage = collectionsUrl + '/' + rollingId + '/' + update.collectionUpdate.images[i].pdfImage;
+      }
+      if ('archiveFilename' in update.collectionUpdate.images[i]) {
+        update.collectionUpdate.images[i].archiveFilename = collectionsUrl + '/' + rollingId + '/' + update.collectionUpdate.images[i].archiveFilename;
+      }
+      collectionRoot[rollingId].images.push(update.collectionUpdate.images[i]);
+    }
+    
+    subject.next(update);
+  }
+
+  return data;
+
+}
+
+var transformUser = function(doc, ret, options) {
+  delete ret._id;
+  delete ret.id;
+  delete ret.email;
+  return ret;
+};
+
+
+
+
+
+
+
+///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////////LISTEN/////////////////////////////////////////////////////////////////
+///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+// Start listening for client traffic and away we go
 app.listen(listenPort);
 winston.info('Serving on localhost:' + listenPort);
