@@ -1,6 +1,6 @@
 'use strict';
 
-const version = '2017.08.18';
+const version = '2017.08.20';
 
 // Load dependencies
 const Observable = require('rxjs/Observable').Observable;
@@ -716,6 +716,8 @@ app.get('/api/getbuildingfixedcollection/:id', passport.authenticate('jwt', { se
     if (buildingFixedCollections[id]) {
       //winston.debug('playing back collection which is in the process of building');
       res.writeHead(200, {'Content-Type': 'application/json','Content-Disposition': 'inline' });
+      res.write('['); // Open the array so that oboe can see it
+      res.flush();
       var subject = buildingFixedCollections[id].observable; //get our observable
 
       //play back the data already in buildingFixedCollections. we must play back sessions and images separately as there are generally more images than sessions
@@ -725,7 +727,7 @@ app.get('/api/getbuildingfixedcollection/:id', passport.authenticate('jwt', { se
             session: buildingFixedCollections[id].sessions[i]
           }
         };
-        res.write(JSON.stringify(resp));
+        res.write(JSON.stringify(resp) + ',');
         res.flush();
       }
       
@@ -736,7 +738,7 @@ app.get('/api/getbuildingfixedcollection/:id', passport.authenticate('jwt', { se
             images: [ buildingFixedCollections[id].images[i] ]
           }
         };
-        res.write(JSON.stringify(resp));
+        res.write(JSON.stringify(resp) + ',');
         res.flush();
       }
       
@@ -744,22 +746,28 @@ app.get('/api/getbuildingfixedcollection/:id', passport.authenticate('jwt', { se
       winston.debug("Playing back search");
       if (buildingFixedCollections[id].search) {
         for (var i=0; i < buildingFixedCollections[id].search.length; i++) {
-          //winston.debug("loop", i);
           let resp = {
             collectionUpdate: {
               search: buildingFixedCollections[id].search[i]
             }
           };
-          res.write(JSON.stringify(resp));
+          res.write(JSON.stringify(resp) + ',');
           res.flush();
         }
       }
     
-      subject.subscribe( (o) => { res.write(JSON.stringify(o)); res.flush(); }, //data from observable
-                            (e) => { throw(e); }, //errors from observable
-                            ( ) => { winston.debug('ending observable'); //end of observable
-                                     res.end(); }
-                           );
+      subject.subscribe( (output) => { 
+        // data from observable
+        res.write(JSON.stringify(output) + ',');
+        res.flush();
+      }
+      ,(e) => { throw(e); } // errors from observable
+      ,( ) => { 
+        winston.debug('ending observable'); // end of observable
+        res.write('{"close":true}]'); // Close the array so that oboe knows we're done
+        res.flush();
+        res.end();
+      });
     }
 
 
@@ -776,7 +784,7 @@ app.get('/api/getbuildingfixedcollection/:id', passport.authenticate('jwt', { se
             session: collectionsData[id].sessions[sessionId],
           }
         };
-        res.write(JSON.stringify(resp));
+        res.write(JSON.stringify(resp) + ',');
         res.flush();
       }
 
@@ -787,10 +795,13 @@ app.get('/api/getbuildingfixedcollection/:id', passport.authenticate('jwt', { se
               search: [ collectionsData[id].search[i] ],
             }
           };
-          res.write(JSON.stringify(resp));
+          res.write(JSON.stringify(resp) + ',');
           res.flush();
         }
       }
+
+      res.write('{"close":true}]'); // Close the array so that oboe knows we're done
+      res.flush();
       res.end();
     }
     else {
@@ -999,7 +1010,8 @@ function rollingSubjectWatcher(req, res, output) {
   //The only job of this function is to take the output of our collection observable, and write it to the HTTP response stream so our client can see it
   
   //winston.debug("rollingSubjectWatcher()", output);
-  res.write(JSON.stringify(output));
+  //res.write(JSON.stringify(output));
+  res.write(JSON.stringify(output) + ',');
   res.flush();
 }
 
@@ -1012,8 +1024,9 @@ rollingCollectionSubjects = {
     worker: 'spawned worker object',
     interval: 'intervalObject for 60 second loop of worker',
     observers: 'the number of clients watching this rolling collection',
-    subject: 'rxjs observable for the collection which can be used to pipe output back to the client'
-    lastRun: 'the time it was last run'
+    subject: 'rxjs observable for the collection which can be used to pipe output back to the client',
+    lastRun: 'the time it was last run',
+    paused: boolean (paused state of a monitoring collection)
   },
   'collectionId2': ...
 }
@@ -1032,15 +1045,19 @@ function rollingCollectionSocketConnectionHandler(id, socket, tempName, subject,
   if (sessionId != '') {
     rollingId = sessionId;
   }
+
+  let thisRollingCollection =  rollingCollections[rollingId];
+  let thisRollingCollectionSubject = rollingCollectionSubjects[rollingId];
+  let thisCollection = collections[id];
   
   winston.debug("rollingCollectionSocketConnectionHandler(): Connection received from worker to build rolling or monitoring collection", rollingId);
   
     
   // Tell our subscribed clients that we're rolling, so they can start their spinny icon and whatnot
-  if (collections[id].type === 'monitoring') {
+  if (thisCollection.type === 'monitoring') {
     subject.next({collection: { id: id, state: 'refreshing'}});
   }
-  else if (collections[id].type === 'rolling') {
+  else if (thisCollection.type === 'rolling') {
     subject.next({collection: { id: id, state: 'rolling'}});
   }
 
@@ -1049,43 +1066,43 @@ function rollingCollectionSocketConnectionHandler(id, socket, tempName, subject,
   //PURGE AGED-OUT SESSIONS//
   ///////////////////////////
 
-  if (collections[id].type === 'monitoring') {
-    rollingCollections[rollingId].sessions = [];
-    rollingCollections[rollingId].images = [];
-    rollingCollections[rollingId].search = [];
+  if (thisCollection.type === 'monitoring') {
+    thisRollingCollection.sessions = [];
+    thisRollingCollection.images = [];
+    thisRollingCollection.search = [];
   }
-  else if (!firstRun && collections[id].type === 'rolling') {
-    // Purge events older than collections[id].lastHours
+  else if (!firstRun && thisCollection.type === 'rolling') {
+    // Purge events older than thisCollection.lastHours
 
     winston.debug('Running purge routine');
     let sessionsToPurge = [];
     let purgedSessionPositions = [];
 
     // Calculate the maximum age a given session is allowed to be
-    // let maxTime = collections[id].lastRun - collections[id].lastHours * 60 * 60;
-    // if (purgeHack) { maxTime = collections[id].lastRun - 60 * 5; } // 5 minute setting used for testing
-    let maxTime = rollingCollectionSubjects[rollingId].lastRun - collections[id].lastHours * 60 * 60;
-    if (purgeHack) { maxTime = rollingCollectionSubjects[rollingId].lastRun - 60 * 5; } // 5 minute setting used for testing
+    // let maxTime = thisCollection.lastRun - thisCollection.lastHours * 60 * 60;
+    // if (purgeHack) { maxTime = thisCollection.lastRun - 60 * 5; } // 5 minute setting used for testing
+    let maxTime = thisRollingCollectionSubject.lastRun - thisCollection.lastHours * 60 * 60;
+    if (purgeHack) { maxTime = thisRollingCollectionSubject.lastRun - 60 * 5; } // 5 minute setting used for testing
 
 
-    for (let i=0; i < rollingCollections[rollingId].sessions.length; i++) {
+    for (let i=0; i < thisRollingCollection.sessions.length; i++) {
       // Look at each session and determine whether it is older than maxtime
       // If so, add it to purgedSessionPositions and sessionsToPurge
-      let session = rollingCollections[rollingId].sessions[i];
+      let session = thisRollingCollection.sessions[i];
       let sid = session.id;
       if ( session.meta.time < maxTime ) {
         purgedSessionPositions.push(i);
         sessionsToPurge.push(sid);
-        //rollingCollections[rollingId].sessions.splice(i, 1);
+        //thisRollingCollection.sessions.splice(i, 1);
       }
     }
 
     // Sort sessionsToPurge
     purgedSessionPositions.sort(sortNumber);
     
-    //Now remove purged sessions from rollingCollections[rollingId]
+    //Now remove purged sessions from thisRollingCollection
     for (let i = 0; i < purgedSessionPositions.length; i++) {
-      rollingCollections[rollingId].sessions.splice(purgedSessionPositions[i], 1);
+      thisRollingCollection.sessions.splice(purgedSessionPositions[i], 1);
     }
 
     
@@ -1093,20 +1110,20 @@ function rollingCollectionSocketConnectionHandler(id, socket, tempName, subject,
 
     //Purge images
     for (let v = 0; v < sessionsToPurge.length; v++) {
-      for (let i = 0; i < rollingCollections[rollingId].images.length; i++) {
-        if ( rollingCollections[rollingId].images[i].session === sessionsToPurge[v]) {
+      for (let i = 0; i < thisRollingCollection.images.length; i++) {
+        if ( thisRollingCollection.images[i].session === sessionsToPurge[v]) {
           //delete files
           //winston.debug("deleting files for session", sessionsToPurge[v]);
-          if ('contentFile' in rollingCollections[rollingId].images[i]) {
-            fs.unlink(rollingCollections[rollingId].images[i].contentFile, () => {});
+          if ('contentFile' in thisRollingCollection.images[i]) {
+            fs.unlink(thisRollingCollection.images[i].contentFile, () => {});
           }
-          if ('thumbnail' in rollingCollections[rollingId].images[i]) {
-            fs.unlink(rollingCollections[rollingId].images[i].thumbnail, () => {});
+          if ('thumbnail' in thisRollingCollection.images[i]) {
+            fs.unlink(thisRollingCollection.images[i].thumbnail, () => {});
           }
-          if ('pdfImage' in rollingCollections[rollingId].images[i]) {
-            fs.unlink(rollingCollections[rollingId].images[i].pdfImage, () => {});
+          if ('pdfImage' in thisRollingCollection.images[i]) {
+            fs.unlink(thisRollingCollection.images[i].pdfImage, () => {});
           }
-          rollingCollections[rollingId].images.splice(i, 1);
+          thisRollingCollection.images.splice(i, 1);
         }
       }
     }
@@ -1114,16 +1131,16 @@ function rollingCollectionSocketConnectionHandler(id, socket, tempName, subject,
     // Purge search data
     let purgedSearchPositions = [];
     for (let v = 0; v < sessionsToPurge.length; v++) {
-      for (let i = 0; i < rollingCollections[rollingId].search.length; i++) {
-        if ( rollingCollections[rollingId].search[i].session === sessionsToPurge[v]) {
-          //rollingCollections[rollingId].search.splice(i, 1);
+      for (let i = 0; i < thisRollingCollection.search.length; i++) {
+        if ( thisRollingCollection.search[i].session === sessionsToPurge[v]) {
+          //thisRollingCollection.search.splice(i, 1);
           purgedSearchPositions.push(i);
         }
       }
     }
     purgedSearchPositions.sort(sortNumber);
     for (let i = 0; i < purgedSearchPositions.length; i++) {
-      rollingCollections[rollingId].search.splice(purgedSessionPositions[i], 1);
+      thisRollingCollection.search.splice(purgedSessionPositions[i], 1);
     }
     
     // Notify the client of our purged sessions
@@ -1141,22 +1158,22 @@ function rollingCollectionSocketConnectionHandler(id, socket, tempName, subject,
   let cfg = {
     // id: id,
     id: rollingId,
-    query: collections[id].query,
-    imageLimit: collections[id].imageLimit,
-    minX: collections[id].minX,
-    minY: collections[id].minY,
+    query: thisCollection.query,
+    imageLimit: thisCollection.imageLimit,
+    minX: thisCollection.minX,
+    minY: thisCollection.minY,
     gsPath: preferences.gsPath,
     pdftotextPath: preferences.pdftotextPath,
     unrarPath: preferences.unrarPath,
-    distillationEnabled: collections[id].distillationEnabled,
-    regexDistillationEnabled: collections[id].regexDistillationEnabled,
-    md5Enabled: collections[id].md5Enabled,
-    sha1Enabled: collections[id].sha1Enabled,
-    sha256Enabled: collections[id].sha256Enabled,
+    distillationEnabled: thisCollection.distillationEnabled,
+    regexDistillationEnabled: thisCollection.regexDistillationEnabled,
+    md5Enabled: thisCollection.md5Enabled,
+    sha1Enabled: thisCollection.sha1Enabled,
+    sha256Enabled: thisCollection.sha256Enabled,
     collectionsDir: collectionsDir
   };
 
-  if (collections[id].type === 'monitoring') {
+  if (thisCollection.type === 'monitoring') {
     // If this is a monitoring collection, then set timeEnd and timeBegin to be a one minute window
     cfg['timeEnd'] = moment().startOf('minute').unix() - 61;
     cfg['timeBegin'] = ( cfg['timeEnd'] - 60) + 1;
@@ -1166,36 +1183,36 @@ function rollingCollectionSocketConnectionHandler(id, socket, tempName, subject,
     // This is a first run of a rolling collection
     // Set timeEnd as beginning of the minute before last minus one second, to give time for sessions to leave the assembler
     cfg['timeEnd'] = moment().startOf('minute').unix() - 61;
-    cfg['timeBegin'] = ( cfg['timeEnd'] - (collections[id].lastHours * 60 * 60) ) + 1;
+    cfg['timeBegin'] = ( cfg['timeEnd'] - (thisCollection.lastHours * 60 * 60) ) + 1;
   }  
 
   else {
     // This is a non-first run of a rolling collection
-    // cfg['timeBegin'] = collections[id]['lastRun'] + 1;
-    cfg['timeBegin'] = rollingCollectionSubjects[rollingId]['lastRun'] + 1;
+    // cfg['timeBegin'] = thisCollection['lastRun'] + 1;
+    cfg['timeBegin'] = thisRollingCollectionSubject['lastRun'] + 1;
     cfg['timeEnd'] = cfg['timeBegin'] + 60; //add one minute to cfg[timeBegin]
   }
 
-  // collections[id]['lastRun'] = cfg['timeEnd']; //store the time of last run so that we can reference it the next time we loop
-  rollingCollectionSubjects[rollingId]['lastRun'] = cfg['timeEnd']; //store the time of last run so that we can reference it the next time we loop
+  // thisCollection['lastRun'] = cfg['timeEnd']; //store the time of last run so that we can reference it the next time we loop
+  thisRollingCollectionSubject['lastRun'] = cfg['timeEnd']; //store the time of last run so that we can reference it the next time we loop
 
-  if ('distillationTerms' in collections[id]) {
-    cfg['distillationTerms'] = collections[id].distillationTerms;
+  if ('distillationTerms' in thisCollection) {
+    cfg['distillationTerms'] = thisCollection.distillationTerms;
   }
-  if ('regexDistillationTerms' in collections[id]) {
-    cfg['regexDistillationTerms'] = collections[id].regexDistillationTerms;
+  if ('regexDistillationTerms' in thisCollection) {
+    cfg['regexDistillationTerms'] = thisCollection.regexDistillationTerms;
   }
-  if ('md5Hashes' in collections[id]) {
-    cfg['md5Hashes'] = collections[id].md5Hashes;
+  if ('md5Hashes' in thisCollection) {
+    cfg['md5Hashes'] = thisCollection.md5Hashes;
   }
-  if ('sha1Hashes' in collections[id]) {
-   cfg['sha1Hashes'] = collections[id].sha1Hashes;
+  if ('sha1Hashes' in thisCollection) {
+   cfg['sha1Hashes'] = thisCollection.sha1Hashes;
   }
-  if ('sha256Hashes' in collections[id]) {
-   cfg['sha256Hashes'] = collections[id].sha256Hashes;
+  if ('sha256Hashes' in thisCollection) {
+   cfg['sha256Hashes'] = thisCollection.sha256Hashes;
   }
 
-  let nwserver = nwservers[collections[id].nwserver];
+  let nwserver = nwservers[thisCollection.nwserver];
   for (var k in nwserver) {
     if (k != 'id') {
       cfg[k] = nwserver[k]; // assign an nwserver to the collection cfg
@@ -1222,7 +1239,7 @@ function rollingCollectionSocketConnectionHandler(id, socket, tempName, subject,
   // Once the worker has exited, delete the socket temporary file
   socket.on('end', () => {
     winston.debug('Worker disconnected.  Rolling collection update cycle complete.');
-    fs.unlink(tempName, () => {});
+    fs.unlink(tempName, () => {}); // Delete the temporary UNIX socket file
   });
 
   // Send configuration to worker.  This officially kicks off the work.  After this, we should start receiving data on the socket
@@ -1234,7 +1251,7 @@ function rollingCollectionSocketConnectionHandler(id, socket, tempName, subject,
 
 
 
-function runRollingCollection(id, firstRun, sessionId='') {
+function runRollingCollection(id, firstRun, res, sessionId='') {
   // Executes the building of a rolling or monitoring collection
 
   winston.debug("runRollingCollection(id)");
@@ -1251,6 +1268,10 @@ function runRollingCollection(id, firstRun, sessionId='') {
     search: []
   };
 
+  let thisRollingCollection =  rollingCollections[rollingId];
+  let thisRollingCollectionSubject = rollingCollectionSubjects[rollingId];
+  let thisCollection = collections[id];
+
   var work = ( () => {
     // Main body of worker execution
     // This is wrapped in an arrow function so that it will retain the local scope of 'id' and 'firstRun'
@@ -1260,19 +1281,33 @@ function runRollingCollection(id, firstRun, sessionId='') {
 
       winston.debug("runRollingCollection(): work(): Starting run for rollingId", rollingId);
 
-      if ( rollingId in rollingCollectionSubjects && 'worker' in rollingCollectionSubjects[rollingId] ) {
+      if ( rollingId in rollingCollectionSubjects && 'worker' in thisRollingCollectionSubject ) {
         // Check if there's already a worker process already running which has overrun the 60 second mark, and if so, kill it
-        winston.info('Timer expired for running worker.  Terminating worker');
-        let oldWorker = rollingCollectionSubjects[rollingId]['worker'];
+        winston.info('runRollingCollection(): work(): Timer expired for running worker.  Terminating worker');
+        let oldWorker = thisRollingCollectionSubject['worker'];
         oldWorker.kill('SIGINT');
-        // delete rollingCollectionSubjects[rollingId]['worker']; // we don't want to do this here as it will be handled when the worker exits
+        // delete thisRollingCollectionSubject['worker']; // we don't want to do this here as it will be handled when the worker exits
+      }
+
+      if (thisCollection.type === 'monitoring' && thisRollingCollectionSubject.paused === true) {
+        // Monitoring collection is paused
+        // Now we end and delete this monitoring collection, except for its files (which still may be in use on the client)
+        winston.debug('runRollingCollection(): work(): Ending work for paused monitoring collection', rollingId);
+        clearInterval(thisRollingCollectionSubject.interval); // stop work() from being called again
+        thisRollingCollectionSubject.subject.complete(); // end observable
+        res.write('{"close":true}]'); // Close the array so that oboe knows we're done
+        res.flush();
+        res.end();
+        delete rollingCollectionSubjects[rollingId];
+        delete rollingCollections[rollingId];
+        return;
       }
 
       // Create temp file to be used as our UNIX domain socket
-      var tempName = temp.path({suffix: '.socket'});
+      let tempName = temp.path({suffix: '.socket'});
 
       // Now open the UNIX domain socket that will talk to worker script by creating a handler (or server) to handle communications
-      var socketServer = net.createServer( (socket) => { rollingCollectionSocketConnectionHandler(id, socket, tempName, subject, firstRun, sessionId); });
+      let socketServer = net.createServer( (socket) => { rollingCollectionSocketConnectionHandler(id, socket, tempName, subject, firstRun, sessionId); });
 
       
       socketServer.listen(tempName, () => {
@@ -1282,11 +1317,11 @@ function runRollingCollection(id, firstRun, sessionId='') {
         winston.debug("runRollingCollection(): work(): listen(): Rolling Collection: Spawning worker with socket file " + tempName);
         
         // Start the worker process and assign a reference to it to 'worker'
-        var worker = spawn('./221b_worker.py ',[tempName], {shell:true, stdio: 'inherit'});
+        let worker = spawn('./221b_worker.py ',[tempName], {shell:true, stdio: 'inherit'});
         // Notice that we don't pass any configuration to the worker on the command line.  It's all done through the UNIX socket for security.
         
         // Add the worker reference to rollingCollectionSubjects so we can work with it later
-        rollingCollectionSubjects[rollingId]['worker'] = worker;
+        thisRollingCollectionSubject['worker'] = worker;
 
         
         worker.on('exit', (code) => {
@@ -1295,17 +1330,21 @@ function runRollingCollection(id, firstRun, sessionId='') {
           if (typeof code === 'undefined') {
             // Handle really bad worker exit with no error code - maybe because we couldn't spawn it at all?
             winston.debug('runRollingCollection(): work(): listen(): onExit(): Worker process exited abnormally without an exit code');
-            collections[id]['state'] = 'error';
+            thisCollection['state'] = 'error';
             subject.next({collection: { id: id, state: 'error'}});
-            if (rollingId in rollingCollectionSubjects && 'worker' in rollingCollectionSubjects[rollingId]) delete rollingCollectionSubjects[rollingId].worker;
+            if (rollingId in rollingCollectionSubjects && 'worker' in thisRollingCollectionSubject) {
+              delete thisRollingCollectionSubject.worker;
+            }
           }
 
           else if (code != 0) {
             // Handle worker exit with error code
             winston.debug('runRollingCollection(): work(): listen(): onExit(): Worker process exited in bad state with non-zero exit code',code.toString());
-            collections[id]['state'] = 'error';
+            thisCollection['state'] = 'error';
             subject.next({collection: { id: id, state: 'error'}});
-            if (rollingId in rollingCollectionSubjects && 'worker' in rollingCollectionSubjects[rollingId]) delete rollingCollectionSubjects[rollingId].worker;
+            if (rollingId in rollingCollectionSubjects && 'worker' in thisRollingCollectionSubject) {
+              delete thisRollingCollectionSubject.worker;
+            }
           }
 
           else {
@@ -1316,7 +1355,7 @@ function runRollingCollection(id, firstRun, sessionId='') {
             subject.next({collection: { id: id, state: 'resting'}});
 
             // Save the collection to the DB
-            db.collection('collections').update( {'id': id }, collections[id], (err, res) => {
+            db.collection('collections').update( {'id': id }, thisCollection, (err, res) => {
               if (err) throw err;
             });
             
@@ -1327,8 +1366,8 @@ function runRollingCollection(id, firstRun, sessionId='') {
             
             firstRun = false;
             
-            if (rollingId in rollingCollectionSubjects && 'worker' in rollingCollectionSubjects[rollingId]) {
-              delete rollingCollectionSubjects[rollingId].worker;
+            if (rollingId in rollingCollectionSubjects && 'worker' in thisRollingCollectionSubject) {
+              delete thisRollingCollectionSubject.worker;
             }
           }
         });
@@ -1344,10 +1383,10 @@ function runRollingCollection(id, firstRun, sessionId='') {
   // Start the work() function (the main body of worker execution)
   work();
 
-  // Now schedule work() to run every 60 seconds and store a reference to it in rollingCollectionSubjects[rollingId]['interval'],
+  // Now schedule work() to run every 60 seconds and store a reference to it in thisRollingCollectionSubject['interval'],
   // which we can later use to terminate the timer and prevent future execution.
   // This will not initially execute work() until the first 60 seconds have elapsed, which is why we run work() once before this
-  rollingCollectionSubjects[rollingId]['interval'] = setInterval( () => work(), 60000);
+  thisRollingCollectionSubject['interval'] = setInterval( () => work(), 60000);
 }
 
 
@@ -1355,8 +1394,17 @@ function runRollingCollection(id, firstRun, sessionId='') {
 
 app.get('/api/pausemonitoringcollection/:id', passport.authenticate('jwt', { session: false } ), (req, res) => {
   let id = req.headers['twosessionid'];
-  winston.info('GET /api/pausemonitoringcollection/:id', id);
+  winston.info(`GET /api/pausemonitoringcollection/:id: Pausing monitoring collection ${id}`);
   rollingCollectionSubjects[id]['paused'] = true;
+  res.sendStatus(202);
+});
+
+app.get('/api/unpausemonitoringcollection/:id', passport.authenticate('jwt', { session: false } ), (req, res) => {
+  // This only gets used by the client if a monitoring collection is paused and then resumed within the minute the run is permitted to continue executing
+  // Otherwise, the client will simply call /api/getrollingcollection/:id again
+  let id = req.headers['twosessionid'];
+  winston.info(`GET /api/unpausemonitoringcollection/:id: Resuming monitoring collection ${id}`);
+  rollingCollectionSubjects[id]['paused'] = false;
   res.sendStatus(202);
 });
 
@@ -1373,6 +1421,7 @@ app.get('/api/getrollingcollection/:id', passport.authenticate('jwt', { session:
   if ( collections[id].type === 'monitoring' ) {
     rollingId = sessionId;
   }
+  let thisCollection = collections[id];
   
   
   ////////////////////////////////////////////////////
@@ -1381,9 +1430,11 @@ app.get('/api/getrollingcollection/:id', passport.authenticate('jwt', { session:
 
   try {
     // Write the response headers
-    if (collections[id].type === 'rolling' || collections[id].type === 'monitoring') {
+    if (thisCollection.type === 'rolling' || thisCollection.type === 'monitoring') {
       res.writeHead(200, {'Content-Type': 'application/json','Content-Disposition': 'inline' });
+      res.write('['); // Open the array so that oboe can see it
       res.flush();
+
     }
     else {
       throw("Collection " + id + " is not of type 'rolling' or 'monitoring'");
@@ -1408,15 +1459,19 @@ app.get('/api/getrollingcollection/:id', passport.authenticate('jwt', { session:
     if ( rollingId in rollingCollectionSubjects) {
       winston.debug("Client disconnected from rolling collection with rollingId", rollingId);
       rollingCollectionSubjects[rollingId].observers -= 1;
+
       if (rollingCollectionSubjects[rollingId].observers === 0) {
-        //destroy subject
         winston.debug("Last client disconnected from rolling collection with rollingId " + rollingId + '.  Destroying observable');
+        
+        // end execution of work() for this collection
         clearInterval(rollingCollectionSubjects[rollingId].interval);
+
+        // destroy subject
         rollingCollectionSubjects[rollingId].subject.complete();
 
         try {
           winston.debug("Deleting output directory for collection", rollingId);
-          rimraf( collectionsDir + '/' + rollingId, () => {} ); //delete output directory
+          rimraf( collectionsDir + '/' + rollingId, () => {} ); // Delete output directory
         }
         catch(exception) {
           winston.error('ERROR deleting output directory collectionsDir + '/' + rollingId', exception);
@@ -1438,7 +1493,7 @@ app.get('/api/getrollingcollection/:id', passport.authenticate('jwt', { session:
   /////////////NEW ROLLING RUN/////////////
   /////////////////////////////////////////
 
-  if ( collections[id].type === 'rolling' && !(id in rollingCollectionSubjects) ) {
+  if ( thisCollection.type === 'rolling' && !(id in rollingCollectionSubjects) ) {
     // This is a new rolling collection as there are no existing subscribers to it
     // Let's start building it
     let subject = new Subject(); // Create a new observable which will be used to pipe communication between the worker and the client
@@ -1457,7 +1512,7 @@ app.get('/api/getrollingcollection/:id', passport.authenticate('jwt', { session:
     
     // We don't run a while loop here because runRollingCollection will loop on its own
     // Execute our collection building here
-    runRollingCollection(id, firstRun);
+    runRollingCollection(id, firstRun, res);
   }
 
 
@@ -1467,7 +1522,7 @@ app.get('/api/getrollingcollection/:id', passport.authenticate('jwt', { session:
   ////////////////////////////////////////////
   
 
-  else if ( collections[id].type === 'monitoring' ) {
+  else if ( thisCollection.type === 'monitoring' ) {
     // This is a new rolling collection as there are no existing subscribers to it
     // Let's start building it
     let subject = new Subject(); // Create a new observable which will be used to pipe communication between the worker and the client
@@ -1477,7 +1532,8 @@ app.get('/api/getrollingcollection/:id', passport.authenticate('jwt', { session:
     // Populate rollingCollectionSubjects[rollingId] with some initial values
     rollingCollectionSubjects[rollingId] = {
       subject: subject,
-      observers: 1
+      observers: 1,
+      paused: false
     }
 
     // We now subscribe to the existing observable for the collection and pipe its output to rollingSubjectWatcher so it can be output to the http response stream
@@ -1486,7 +1542,7 @@ app.get('/api/getrollingcollection/:id', passport.authenticate('jwt', { session:
     
     // We don't run a while loop here because runRollingCollection will loop on its own
     // Execute our collection building here
-    runRollingCollection(id, firstRun, rollingId);
+    runRollingCollection(id, firstRun, res, rollingId);
   }
 
 
@@ -1518,7 +1574,7 @@ app.get('/api/getrollingcollection/:id', passport.authenticate('jwt', { session:
           session: rollingCollections[id].sessions[i]
         }
       };
-      res.write(JSON.stringify(resp));
+      res.write(JSON.stringify(resp) + ',');
       res.flush();
     }
     
@@ -1529,7 +1585,7 @@ app.get('/api/getrollingcollection/:id', passport.authenticate('jwt', { session:
           images: [ rollingCollections[id].images[i] ]
         }
       };
-      res.write(JSON.stringify(resp));
+      res.write(JSON.stringify(resp) + ',');
       res.flush();
     }
     
@@ -1543,7 +1599,7 @@ app.get('/api/getrollingcollection/:id', passport.authenticate('jwt', { session:
            // The client should only have to deal with one format
           }
         };
-        res.write(JSON.stringify(resp));
+        res.write(JSON.stringify(resp) + ',');
         res.flush();
       }
     }
@@ -1694,6 +1750,7 @@ function chunkHandler(collectionRoot, id, subject, data, chunk, sessionId='') {
   if (sessionId != '') {
     rollingId = sessionId;
   }
+  let thisCollection = collectionRoot[rollingId];
 
   winston.debug('Processing update from worker');
   data += chunk
@@ -1734,15 +1791,15 @@ function chunkHandler(collectionRoot, id, subject, data, chunk, sessionId='') {
     let u = d.shift();
     let update = JSON.parse(u);
     
-    collectionRoot[rollingId].sessions.push(update.collectionUpdate.session);
+    thisCollection.sessions.push(update.collectionUpdate.session);
     
     if (update.collectionUpdate.search) {
-      if (!collectionRoot[rollingId].search) {
-        collectionRoot[rollingId].search = [];
+      if (!thisCollection.search) {
+        thisCollection.search = [];
       }
       for (var i = 0; i < update.collectionUpdate.search.length; i++) {
         
-        collectionRoot[rollingId].search.push(update.collectionUpdate.search[i]);
+        thisCollection.search.push(update.collectionUpdate.search[i]);
       }
     }
 
@@ -1760,7 +1817,7 @@ function chunkHandler(collectionRoot, id, subject, data, chunk, sessionId='') {
       if ('archiveFilename' in update.collectionUpdate.images[i]) {
         update.collectionUpdate.images[i].archiveFilename = collectionsUrl + '/' + rollingId + '/' + update.collectionUpdate.images[i].archiveFilename;
       }
-      collectionRoot[rollingId].images.push(update.collectionUpdate.images[i]);
+      thisCollection.images.push(update.collectionUpdate.images[i]);
     }
     
     subject.next(update);
