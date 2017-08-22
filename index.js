@@ -1,6 +1,6 @@
 'use strict';
 
-const version = '2017.08.20';
+const version = '2017.08.21';
 
 // Load dependencies
 const Observable = require('rxjs/Observable').Observable;
@@ -1026,7 +1026,8 @@ rollingCollectionSubjects = {
     observers: 'the number of clients watching this rolling collection',
     subject: 'rxjs observable for the collection which can be used to pipe output back to the client',
     lastRun: 'the time it was last run',
-    paused: boolean (paused state of a monitoring collection)
+    paused: boolean (paused state of a monitoring collection),
+    runs: 'number of times rollingCollectionSocketConnectionHandler() has run'
   },
   'collectionId2': ...
 }
@@ -1036,7 +1037,7 @@ rollingCollectionSubjects = {
 var rollingCollections = {}; // This houses collection data for rolling and monitoring collections.  It is never committed to the DB as these collections are intended to be temporary only
 
 
-function rollingCollectionSocketConnectionHandler(id, socket, tempName, subject, firstRun, sessionId) {
+function rollingCollectionSocketConnectionHandler(id, socket, tempName, subject, sessionId) {
   // For rolling and monitoring collections
   // Handles all dealings with the worker process after it has been spawned, including sending it its configuration, and sending data received from it to the chunkHandler() function
   // It also purges old data from the collection as defined by the type of collection and number of hours back to retain
@@ -1049,6 +1050,8 @@ function rollingCollectionSocketConnectionHandler(id, socket, tempName, subject,
   let thisRollingCollection =  rollingCollections[rollingId];
   let thisRollingCollectionSubject = rollingCollectionSubjects[rollingId];
   let thisCollection = collections[id];
+
+  thisRollingCollectionSubject.runs++;
   
   winston.debug("rollingCollectionSocketConnectionHandler(): Connection received from worker to build rolling or monitoring collection", rollingId);
   
@@ -1071,7 +1074,7 @@ function rollingCollectionSocketConnectionHandler(id, socket, tempName, subject,
     thisRollingCollection.images = [];
     thisRollingCollection.search = [];
   }
-  else if (!firstRun && thisCollection.type === 'rolling') {
+  else if (thisRollingCollectionSubject.runs > 1 && thisCollection.type === 'rolling') {
     // Purge events older than thisCollection.lastHours
 
     winston.debug('Running purge routine');
@@ -1179,21 +1182,28 @@ function rollingCollectionSocketConnectionHandler(id, socket, tempName, subject,
     cfg['timeBegin'] = ( cfg['timeEnd'] - 60) + 1;
   }
   
-  else if (firstRun) {
-    // This is a first run of a rolling collection
-    // Set timeEnd as beginning of the minute before last minus one second, to give time for sessions to leave the assembler
-    cfg['timeEnd'] = moment().startOf('minute').unix() - 61;
+  else if (thisRollingCollectionSubject.runs == 1) {
+    // This is the first run of a rolling collection
+    winston.debug('rollingCollectionSocketConnectionHandler(): Got first run');
+    cfg['timeEnd'] = moment().startOf('minute').unix() - 61; // the beginning of the last minute minus one second, to give time for sessions to leave the assembler
     cfg['timeBegin'] = ( cfg['timeEnd'] - (thisCollection.lastHours * 60 * 60) ) + 1;
+  }
+  
+  else if (thisRollingCollectionSubject.runs == 2 && (moment().unix() - thisRollingCollectionSubject['lastRun'] >= 61) ) {
+    // This is the second run of a rolling collection - this allows the first run to exceed one minute of execution and will take up whatever excess time has elapsed
+    // It will only enter this block if more than 61 seconds have elapsed since the last run
+    winston.debug('rollingCollectionSocketConnectionHandler(): Got second run');
+    cfg['timeBegin'] = thisRollingCollectionSubject['lastRun'] + 1; // one second after the last run
+    cfg['timeEnd'] = moment().startOf('minute').unix() - 61; // the beginning of the last minute minus one second, to give time for sessions to leave the assembler
   }  
 
   else {
-    // This is a non-first run of a rolling collection
-    // cfg['timeBegin'] = thisCollection['lastRun'] + 1;
-    cfg['timeBegin'] = thisRollingCollectionSubject['lastRun'] + 1;
+    // This is the third or greater run of a rolling collection
+    winston.debug('rollingCollectionSocketConnectionHandler(): Got subsequent run');
+    cfg['timeBegin'] = thisRollingCollectionSubject['lastRun'] + 1; // one second after the last run
     cfg['timeEnd'] = cfg['timeBegin'] + 60; //add one minute to cfg[timeBegin]
   }
 
-  // thisCollection['lastRun'] = cfg['timeEnd']; //store the time of last run so that we can reference it the next time we loop
   thisRollingCollectionSubject['lastRun'] = cfg['timeEnd']; //store the time of last run so that we can reference it the next time we loop
 
   if ('distillationTerms' in thisCollection) {
@@ -1251,7 +1261,7 @@ function rollingCollectionSocketConnectionHandler(id, socket, tempName, subject,
 
 
 
-function runRollingCollection(id, firstRun, res, sessionId='') {
+function runRollingCollection(id, res, sessionId='') {
   // Executes the building of a rolling or monitoring collection
 
   winston.debug("runRollingCollection(id)");
@@ -1274,14 +1284,20 @@ function runRollingCollection(id, firstRun, res, sessionId='') {
 
   var work = ( () => {
     // Main body of worker execution
-    // This is wrapped in an arrow function so that it will retain the local scope of 'id' and 'firstRun'
+    // This is wrapped in an arrow function so that it will retain the local scope of 'id'
     // We also want to be able to call this body from a timer, so that's another reason we wrap it
 
     try {
 
       winston.debug("runRollingCollection(): work(): Starting run for rollingId", rollingId);
 
-      if ( rollingId in rollingCollectionSubjects && 'worker' in thisRollingCollectionSubject ) {
+      if ( collections[id].type === 'rolling' && rollingId in rollingCollectionSubjects && 'worker' in thisRollingCollectionSubject && thisRollingCollectionSubject.runs == 1) {
+        // If we're a rolling collection still on our first run, let it continue running until it completes
+        winston.info('runRollingCollection(): work(): First run of rolling collection is still running.  Delaying next run 60 seconds');
+        return;
+      }
+      
+      if ( rollingId in rollingCollectionSubjects && 'worker' in thisRollingCollectionSubject && thisRollingCollectionSubject.runs > 1) {
         // Check if there's already a worker process already running which has overrun the 60 second mark, and if so, kill it
         winston.info('runRollingCollection(): work(): Timer expired for running worker.  Terminating worker');
         let oldWorker = thisRollingCollectionSubject['worker'];
@@ -1307,7 +1323,7 @@ function runRollingCollection(id, firstRun, res, sessionId='') {
       let tempName = temp.path({suffix: '.socket'});
 
       // Now open the UNIX domain socket that will talk to worker script by creating a handler (or server) to handle communications
-      let socketServer = net.createServer( (socket) => { rollingCollectionSocketConnectionHandler(id, socket, tempName, subject, firstRun, sessionId); });
+      let socketServer = net.createServer( (socket) => { rollingCollectionSocketConnectionHandler(id, socket, tempName, subject, sessionId); });
 
       
       socketServer.listen(tempName, () => {
@@ -1363,8 +1379,6 @@ function runRollingCollection(id, firstRun, res, sessionId='') {
             db.collection('collectionsData').update( {'id': id }, {'id': id, 'data': JSON.stringify(collectionsData[id])}, (err, res) => {
               if (err) throw err;
             });*/
-            
-            firstRun = false;
             
             if (rollingId in rollingCollectionSubjects && 'worker' in thisRollingCollectionSubject) {
               delete thisRollingCollectionSubject.worker;
@@ -1498,12 +1512,12 @@ app.get('/api/getrollingcollection/:id', passport.authenticate('jwt', { session:
     // Let's start building it
     let subject = new Subject(); // Create a new observable which will be used to pipe communication between the worker and the client
     
-    let firstRun = true;
-     
+
     // Populate rollingCollectionSubjects[id] with some initial values
     rollingCollectionSubjects[id] = {
       subject: subject,
-      observers: 1
+      observers: 1,
+      runs: 0
     }
 
     // We now subscribe to the existing observable for the collection and pipe its output to rollingSubjectWatcher so it can be output to the http response stream
@@ -1512,7 +1526,7 @@ app.get('/api/getrollingcollection/:id', passport.authenticate('jwt', { session:
     
     // We don't run a while loop here because runRollingCollection will loop on its own
     // Execute our collection building here
-    runRollingCollection(id, firstRun, res);
+    runRollingCollection(id, res);
   }
 
 
@@ -1527,13 +1541,13 @@ app.get('/api/getrollingcollection/:id', passport.authenticate('jwt', { session:
     // Let's start building it
     let subject = new Subject(); // Create a new observable which will be used to pipe communication between the worker and the client
 
-    let firstRun = false;
     
     // Populate rollingCollectionSubjects[rollingId] with some initial values
     rollingCollectionSubjects[rollingId] = {
       subject: subject,
       observers: 1,
-      paused: false
+      paused: false,
+      runs: 0
     }
 
     // We now subscribe to the existing observable for the collection and pipe its output to rollingSubjectWatcher so it can be output to the http response stream
@@ -1542,7 +1556,7 @@ app.get('/api/getrollingcollection/:id', passport.authenticate('jwt', { session:
     
     // We don't run a while loop here because runRollingCollection will loop on its own
     // Execute our collection building here
-    runRollingCollection(id, firstRun, res, rollingId);
+    runRollingCollection(id, res, rollingId);
   }
 
 

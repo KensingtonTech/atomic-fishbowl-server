@@ -114,7 +114,6 @@ def configReceived(cfgObj):
 
     log.info("Pulling files from sessions")
     time0 = time.time()
-    #fetcher.pullFiles(distillationTerms, ignoredSessions, md5Hashes=md5Hashes)
     fetcher.pullFiles(distillationTerms, regexDistillationTerms, ignoredSessions, md5Hashes=md5Hashes, sha1Hashes=sha1Hashes, sha256Hashes=sha256Hashes)
     time1 = time.time()
     log.debug("Pulled files in " + str(time1 - time0) + " seconds")

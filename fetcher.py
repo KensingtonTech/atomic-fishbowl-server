@@ -45,6 +45,9 @@ class Fetcher:
     self.imageCount = 0
     self.thumbnailSize = 350, 350
     self.devmode = True
+    self.timeout = 5
+    self.maxContentRetries = 6
+    self.contentRetries = 0
     log.info("Minimum dimensions are: " + str(minX) + " x " + str(minY))
 
   """curl "http://admin:netwitness@172.16.0.55:50104/sdk?msg=query&query=$query&force-content-type=application/json"""
@@ -55,7 +58,7 @@ class Fetcher:
     request.add_header("Authorization", "Basic %s" % base64string)
     request.add_header('Content-type', 'application/json')
     request.add_header('Accept', 'application/json')
-    summaryResult = json.load(urllib2.urlopen(request, timeout=5))
+    summaryResult = json.load(urllib2.urlopen(request, timeout=self.timeout))
     for e in summaryResult['string'].split():
       (k, v) = e.split('=')
       self.summary[k] = v
@@ -73,7 +76,7 @@ class Fetcher:
     request.add_header('Content-type', 'application/json')
     request.add_header('Accept', 'application/json')
     try:
-      rawQueryRes = json.load(urllib2.urlopen(request, context=ctx, timeout=5))
+      rawQueryRes = json.load(urllib2.urlopen(request, context=ctx, timeout=self.timeout))
       #pprint(rawQueryRes)
       #print "length of rawQueryRes", len(rawQueryRes)
       for field in rawQueryRes:
@@ -108,7 +111,6 @@ class Fetcher:
 
     for sessionId in self.sessions:
       if not sessionId in ignoredSessions:
-        try:
           if not self.imageCount >= self.imageLimit:
             ctx = ssl.create_default_context()
             ctx.check_hostname = False
@@ -118,7 +120,25 @@ class Fetcher:
             request.add_header("Authorization", "Basic %s" % base64string)
             request.add_header('Content-type', 'application/json')
             request.add_header('Accept', 'application/json')
-            res = urllib2.urlopen(request, context=ctx, timeout=5)
+            while self.contentRetries < self.maxContentRetries:
+              try:
+                res = urllib2.urlopen(request, context=ctx, timeout=self.timeout)
+                break
+              except urllib2.HTTPError as e:
+                if self.contentRetries == self.maxContentRetries:
+                  log.error("pullFiles(): Maximum retries reached whilst pulling content for session " + sessionId + ".  Exiting with code 1")
+                  sys.exit(1)
+                self.contentRetries += 1
+                log.error("pullFiles(): HTTP error pulling content for session " + sessionId + ".  Retrying")
+                continue
+              except urllib2.URLError as e:
+                if self.contentRetries == self.maxContentRetries:
+                  log.error("pullFiles(): Maximum retries reached whilst pulling content for session " + sessionId + ".  Exiting with code 1")
+                  sys.exit(1)
+                self.contentRetries += 1
+                log.error("pullFiles(): ERROR: URL error pulling content for session " + sessionId + ".  Retrying")
+                continue
+
             if res.info().getheader('Content-Type').startswith('multipart/mixed'):
               contentType = res.info().getheader('Content-Type')
               mimeVersion = res.info().getheader('Mime-Version')
@@ -131,13 +151,7 @@ class Fetcher:
             log.info("Image limit of " + str(self.imageLimit) + " has been reached.  Ending collection build.  You may want to narrow your result set with a more specific query")
             return
         
-        except urllib2.HTTPError as e:
-          log.error("HTTP error pulling content for session " + sessionId + ".  Exiting with code 1.")
-          sys.exit(1)
-        except urllib2.URLError as e:
-          log.error("ERROR: URL error pulling content for session " + sessionId + ".  Exiting with code 1.")
-          sys.exit(1)
-    
+  
     
     
 
