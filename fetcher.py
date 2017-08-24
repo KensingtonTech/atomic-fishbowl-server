@@ -21,33 +21,45 @@ import re
 import logging
 from ContentObj import ContentObj
 from copy import deepcopy, copy
+from multiprocessing import Pool, Manager, Value
 
 log = logging.getLogger(__name__)
 
+def unwrapExtractFilesFromMultipart(*arg, **kwarg):
+  #print "unwrapExtractFilesFromMultipart()"
+  return ContentProcessor.extractFilesFromMultipart(*arg, **kwarg)
+
+def unwrapPullFiles(*arg, **kwarg):
+  #print "unwrapExtractFilesFromMultipart()"
+  return ContentProcessor.pullFiles(*arg, **kwarg)
+
 class Fetcher:
 
-  def __init__(self, communicator, url, user, password, directory, minX, minY, gsPath, pdftotextPath, unrarPath, imageLimit):
+  def __init__(self, communicator, url, user, password, directory, minX, minY, gsPath, pdftotextPath, unrarPath, contentLimit):
+
+    self.pool = Pool()
+    self.manager = Manager()
+
     self.communicator = communicator
+
     self.url = url
     self.user = user
     self.password = password
     self.summary = {}
     self.sessions = {}
-    self.searchContent = []
     self.directory = directory
     self.minX = int(minX)
     self.minY = int(minY)
     self.gsPath = gsPath
     self.pdftotextPath = pdftotextPath
-    #self.unrarPath = unrarPath
     rarfile.UNRAR_TOOL = unrarPath
-    self.imageLimit = imageLimit
-    self.imageCount = 0
+    self.contentLimit = contentLimit
+    self.contentCount = self.manager.Value('I', 0)
     self.thumbnailSize = 350, 350
     self.devmode = True
     self.timeout = 5
     self.maxContentRetries = 6
-    self.contentRetries = 0
+    self.contentRetries = self.manager.Value('I', 0)
     log.info("Minimum dimensions are: " + str(minX) + " x " + str(minY))
 
   """curl "http://admin:netwitness@172.16.0.55:50104/sdk?msg=query&query=$query&force-content-type=application/json"""
@@ -79,19 +91,37 @@ class Fetcher:
       rawQueryRes = json.load(urllib2.urlopen(request, context=ctx, timeout=self.timeout))
       #pprint(rawQueryRes)
       #print "length of rawQueryRes", len(rawQueryRes)
+      log.debug('runQuery(): Parsing query results')
       for field in rawQueryRes:
+        #print "loop"
         if 'results' in field and isinstance(field, dict):
           if 'fields' in field['results']:
             metaList = field['results']['fields']
             for meta in metaList:
-              key = meta['type']
-              value = meta['value']
+              
+              metaKey = meta['type']
+              metaValue = meta['value']
               sessionId = meta['group']
-              if not sessionId in self.sessions:
-                self.sessions[sessionId] = { 'images': [], 'session': { 'id': sessionId, 'meta': {} } }
-              if not key in self.sessions[sessionId]['session']['meta']:
-                self.sessions[sessionId]['session']['meta'][key] = []
-              self.sessions[sessionId]['session']['meta'][key].append(value)
+
+              if sessionId in self.sessions:
+                thisSession = self.sessions[sessionId]
+              else:
+                thisSession = { 'images': [], 'session': { 'id': sessionId, 'meta': {} } }
+
+              #if not sessionId in self.sessions:
+              #  self.sessions[sessionId] = { 'images': [], 'session': { 'id': sessionId, 'meta': {} } }
+              
+              #if not key in self.sessions[sessionId]['session']['meta']:
+              #  self.sessions[sessionId]['session']['meta'][key] = []
+              if not metaKey in thisSession['session']['meta']:
+                thisSession['session']['meta'][metaKey] = []
+              
+              #self.sessions[sessionId]['session']['meta'][key].append(value)
+              thisSession['session']['meta'][metaKey].append(metaValue)
+              
+              #Update dict
+              self.sessions[sessionId] = thisSession
+
     except urllib2.HTTPError as e:
       log.error("runQuery(): HTTP Error whilst running query.  Exiting with code 1: " + str(e))
       sys.exit(1)
@@ -100,61 +130,143 @@ class Fetcher:
       sys.exit(1)
     except Exception as e:
       log.exception("runQuery(): Unhandled exception whilst running query.  Exiting with code 1")
+      print 
       sys.exit(1)
     return len(self.sessions)
 
 
 
+  def sendResult(self, session):
+    #log.debug('sendResult()')
+    if len(session['images']) != 0:
+      log.debug("sendResult(): Worker sending update")
+      self.communicator.write_data(json.dumps( { 'collectionUpdate': session } ) + '\n')
 
 
-  def pullFiles(self, distillationTerms, regexDistillationTerms, ignoredSessions, md5Hashes=[], sha1Hashes=[], sha256Hashes=[]):
+  def pullFiles(self, distillationTerms, regexDistillationTerms, md5Hashes=[], sha1Hashes=[], sha256Hashes=[]):
 
     for sessionId in self.sessions:
-      if not sessionId in ignoredSessions:
-          if not self.imageCount >= self.imageLimit:
-            ctx = ssl.create_default_context()
-            ctx.check_hostname = False
-            ctx.verify_mode = ssl.CERT_NONE
-            request = urllib2.Request(self.url + '/sdk/content?render=107&session=' + str(sessionId))
-            base64string = base64.b64encode('%s:%s' % (self.user, self.password))
-            request.add_header("Authorization", "Basic %s" % base64string)
-            request.add_header('Content-type', 'application/json')
-            request.add_header('Accept', 'application/json')
-            while self.contentRetries < self.maxContentRetries:
-              try:
-                res = urllib2.urlopen(request, context=ctx, timeout=self.timeout)
-                break
-              except urllib2.HTTPError as e:
-                if self.contentRetries == self.maxContentRetries:
-                  log.error("pullFiles(): Maximum retries reached whilst pulling content for session " + sessionId + ".  Exiting with code 1")
-                  sys.exit(1)
-                self.contentRetries += 1
-                log.error("pullFiles(): HTTP error pulling content for session " + sessionId + ".  Retrying")
-                continue
-              except urllib2.URLError as e:
-                if self.contentRetries == self.maxContentRetries:
-                  log.error("pullFiles(): Maximum retries reached whilst pulling content for session " + sessionId + ".  Exiting with code 1")
-                  sys.exit(1)
-                self.contentRetries += 1
-                log.error("pullFiles(): ERROR: URL error pulling content for session " + sessionId + ".  Retrying")
-                continue
+      if not self.contentCount.value >= self.contentLimit:
+        ctx = ssl.create_default_context()
+        ctx.check_hostname = False
+        ctx.verify_mode = ssl.CERT_NONE
+        request = urllib2.Request(self.url + '/sdk/content?render=107&session=' + str(sessionId))
+        base64string = base64.b64encode('%s:%s' % (self.user, self.password))
+        request.add_header("Authorization", "Basic %s" % base64string)
+        request.add_header('Content-type', 'application/json')
+        request.add_header('Accept', 'application/json')
+        while self.contentRetries.value < self.maxContentRetries:
+          try:
+            res = urllib2.urlopen(request, context=ctx, timeout=self.timeout)
+            break
+          except urllib2.HTTPError as e:
+            if self.contentRetries.value == self.maxContentRetries:
+              log.error("pullFiles(): Maximum retries reached whilst pulling content for session " + sessionId + ".  Exiting with code 1")
+              sys.exit(1)
+            self.contentRetries.value += 1
+            log.error("pullFiles(): HTTP error pulling content for session " + sessionId + ".  Retrying")
+            continue
+          except urllib2.URLError as e:
+            if self.contentRetries.value == self.maxContentRetries:
+              log.error("pullFiles(): Maximum retries reached whilst pulling content for session " + sessionId + ".  Exiting with code 1")
+              sys.exit(1)
+            self.contentRetries.value += 1
+            log.error("pullFiles(): ERROR: URL error pulling content for session " + sessionId + ".  Retrying")
+            continue
 
-            if res.info().getheader('Content-Type').startswith('multipart/mixed'):
-              contentType = res.info().getheader('Content-Type')
-              mimeVersion = res.info().getheader('Mime-Version')
-              newFileStr = 'Content-Type: ' + contentType + '\n' + 'Mime-Version: ' + mimeVersion + '\n' + res.read()
-              self.extractFilesFromMultipart(newFileStr, sessionId, distillationTerms, regexDistillationTerms, md5Hashes, sha1Hashes, sha256Hashes)
-              if len(self.sessions[sessionId]['images']) != 0:
-                log.debug("pullFiles(): Worker sending update")
-                self.communicator.write_data(json.dumps( { 'collectionUpdate': self.sessions[sessionId] } ) + '\n')
-          else:
-            log.info("Image limit of " + str(self.imageLimit) + " has been reached.  Ending collection build.  You may want to narrow your result set with a more specific query")
-            return
+        if res.info().getheader('Content-Type').startswith('multipart/mixed'):
+          contentType = res.info().getheader('Content-Type')
+          mimeVersion = res.info().getheader('Mime-Version')
+          newFileStr = 'Content-Type: ' + contentType + '\n' + 'Mime-Version: ' + mimeVersion + '\n' + res.read()
+          
+          ##############EXTRACT FILES AND DO THE WORK##############
+          log.debug('Launching extractor from pool')
+          #processor = ContentProcessor(self.directory, self.minX, self.minY, self.gsPath, self.pdftotextPath, self.contentLimit, self.contentCount)
+          processor = ContentProcessor(self.url, self.user, self.password, self.directory, self.minX, self.minY, self.gsPath, self.pdftotextPath, self.contentLimit, self.contentCount, self.contentRetries, self.maxContentRetries, self.timeout)
+          self.pool.apply_async(unwrapExtractFilesFromMultipart, args=(processor, newFileStr, self.sessions[sessionId], sessionId, distillationTerms, regexDistillationTerms, md5Hashes, sha1Hashes, sha256Hashes), callback=self.sendResult )
+
+      else:
+        log.info("Image limit of " + str(self.contentLimit) + " has been reached.  Ending collection build.  You may want to narrow your result set with a more specific query")
+        return
+
+
+
+  def newpullFiles(self, distillationTerms, regexDistillationTerms, md5Hashes=[], sha1Hashes=[], sha256Hashes=[]):
+    #This tries to put every content call in its own process but this is actually slower than handling the content call in a single-threaded manner
+    for sessionId in self.sessions:
+      if not self.contentCount.value >= self.contentLimit:
+        processor = ContentProcessor(self.url, self.user, self.password, self.directory, self.minX, self.minY, self.gsPath, self.pdftotextPath, self.contentLimit, self.contentCount, self.contentRetries, self.maxContentRetries, self.timeout)
+
+        ##############PULL FILES AND PROCESS THEM##############
+        log.debug('Launching extractor from pool')
+        res = self.pool.apply_async(unwrapPullFiles, args=(processor, self.sessions[sessionId], sessionId, distillationTerms, regexDistillationTerms, md5Hashes, sha1Hashes, sha256Hashes), callback=self.sendResult )
+        res.get()
+
+      else:
+        log.info("Image limit of " + str(self.contentLimit) + " has been reached.  Ending collection build.  You may want to narrow your result set with a more specific query")
+        return
+    
+   
+
+class ContentProcessor:
+
+  def __init__(self, url, user, password, directory, minX, minY, gsPath, pdftotextPath, contentLimit, contentCount, contentRetries, maxContentRetries, timeout):
+    self.url = url
+    self.directory = directory
+    self.minX = int(minX)
+    self.minY = int(minY)
+    self.gsPath = gsPath
+    self.pdftotextPath = pdftotextPath
+    self.contentLimit = contentLimit
+    self.contentCount = contentCount # is a manager proxy
+    self.thumbnailSize = 350, 350
+    self.devmode = True
+    self.contentRetries = contentRetries # is a manager proxy
+    self.maxContentRetries = maxContentRetries
+    self.timeout = timeout
+    self.user = user
+    self.password = password
+
+
+  def pullFiles(self, session, sessionId, distillationTerms, regexDistillationTerms, md5Hashes=[], sha1Hashes=[], sha256Hashes=[]):
+    ctx = ssl.create_default_context()
+    ctx.check_hostname = False
+    ctx.verify_mode = ssl.CERT_NONE
+    request = urllib2.Request(self.url + '/sdk/content?render=107&session=' + str(sessionId))
+    base64string = base64.b64encode('%s:%s' % (self.user, self.password))
+    request.add_header("Authorization", "Basic %s" % base64string)
+    request.add_header('Content-type', 'application/json')
+    request.add_header('Accept', 'application/json')
+    while self.contentRetries.value < self.maxContentRetries:
+      try:
+        res = urllib2.urlopen(request, context=ctx, timeout=self.timeout)
+        break
+      except urllib2.HTTPError as e:
+        if self.contentRetries.value == self.maxContentRetries:
+          log.error("pullFiles(): Maximum retries reached whilst pulling content for session " + sessionId + ".  Exiting with code 1")
+          sys.exit(1)
+        self.contentRetries.value += 1
+        log.error("pullFiles(): HTTP error pulling content for session " + sessionId + ".  Retrying")
+        continue
+      except urllib2.URLError as e:
+        if self.contentRetries.value == self.maxContentRetries:
+          log.error("pullFiles(): Maximum retries reached whilst pulling content for session " + sessionId + ".  Exiting with code 1")
+          sys.exit(1)
+        self.contentRetries.value += 1
+        log.error("pullFiles(): ERROR: URL error pulling content for session " + sessionId + ".  Retrying")
+        continue
+
+    if res.info().getheader('Content-Type').startswith('multipart/mixed'):
+      contentType = res.info().getheader('Content-Type')
+      mimeVersion = res.info().getheader('Mime-Version')
+      newFileStr = 'Content-Type: ' + contentType + '\n' + 'Mime-Version: ' + mimeVersion + '\n' + res.read()
+      
+      ##############EXTRACT FILES AND DO THE WORK##############
+      #log.debug('Launching extractor from pool')
+      #processor = ContentProcessor(self.directory, self.minX, self.minY, self.gsPath, self.pdftotextPath, self.contentLimit, self.contentCount)
+      #self.pool.apply_async(unwrapExtractFilesFromMultipart, args=(processor, newFileStr, self.sessions[sessionId], sessionId, distillationTerms, regexDistillationTerms, md5Hashes, sha1Hashes, sha256Hashes), callback=self.sendResult )
+      return self.extractFilesFromMultipart(newFileStr, session, sessionId, distillationTerms, regexDistillationTerms, md5Hashes, sha1Hashes, sha256Hashes)
         
-  
-    
-    
-
 
   
   def processImage(self, contentObj): #must specify either part or stringFile
@@ -190,8 +302,12 @@ class Fetcher:
       
       im.save(os.path.join(self.directory, thumbnailName), im.format)
       contentObj.thumbnail = thumbnailName
-      self.sessions[contentObj.session]['images'].append( contentObj.get() )
-      self.imageCount += 1
+      
+      self.contentCount.value += 1
+
+      #self.sessions[contentObj.session]['images'].append( contentObj.get() )
+      self.thisSession['images'].append( contentObj.get() )
+      
 
     else:
       log.debug("processImage(): Discarding image " + contentObj.contentFile + " due to minimum size requirements")
@@ -252,15 +368,15 @@ class Fetcher:
 
           #set thumbnail to our generated thumbnail
           contentObj.thumbnail = thumbnailName
-          self.sessions[contentObj.session]['images'].append( contentObj.get() )
-          self.imageCount += 1
+          self.thisSession['images'].append( contentObj.get() )
+          self.contentCount.value += 1
           return True
         except Exception as e:
           log.exception("Error generating thumbnail for pdf " + contentObj.contentFile)
           #thumbnail generation failed, so set thumbnail to be the original image generated by gs
           contentObj.thumbnail = outputfile
-          self.sessions[contentObj.session]['images'].append( contentObj.get() )
-          self.imageCount += 1
+          self.thisSession['images'].append( contentObj.get() )
+          self.contentCount.value += 1
           return True
 
       if exit_code != 0:
@@ -332,10 +448,10 @@ class Fetcher:
         if returnObj['keep'] == True:
           log.debug("getPdfText(): keeping file " + contentObj.contentFile)
           searchObj = { 'id': contentObj.id, 'session': sessionId, 'contentFile': contentObj.contentFile, 'searchString': joinedText }
-          if not 'search' in self.sessions[sessionId]:
-            self.sessions[sessionId]['search'] = []
-          #pprint(self.sessions[sessionId]['search'])
-          self.sessions[sessionId]['search'].append(searchObj)
+          if not 'search' in self.thisSession:
+            self.thisSession['search'] = []
+          #pprint(self.thisSession['search'])
+          self.thisSession['search'].append(searchObj)
 
         return returnObj
         
@@ -376,15 +492,20 @@ class Fetcher:
         contentObj.hashValue = hash.hexdigest()
         if 'friendly' in h:
           contentObj.hashFriendly = h['friendly']
-        self.sessions[contentObj.session]['images'].append( contentObj.get() )
+        self.thisSession['images'].append( contentObj.get() )
 
         
 
 
-  def extractFilesFromMultipart(self, fileStr, sessionId, distillationTerms, regexDistillationTerms, md5Hashes, sha1Hashes, sha256Hashes):
+  def extractFilesFromMultipart(self, fileStr, session, sessionId, distillationTerms, regexDistillationTerms, md5Hashes, sha1Hashes, sha256Hashes):
     log.debug("extractFilesFromMultipart(): Extracting files of session ID " + str(sessionId) )
+    #print("extractFilesFromMultipart(): Extracting files of session ID " + str(sessionId) )
     msg = email.message_from_string(fileStr)
     counter = 1
+
+    self.thisSession = session
+
+
     for part in msg.walk():
 
       # multipart/* are just containers
@@ -421,8 +542,9 @@ class Fetcher:
       
       #print filename, part.get_content_maintype(), part.get_content_subtype()
 
-      if self.imageCount >= self.imageLimit:
-        return
+      if self.contentCount.value >= self.contentLimit:
+        #return
+        return self.thisSession
 
 
 
@@ -498,7 +620,7 @@ class Fetcher:
                 contentObj.contentType = 'encryptedZipEntry'
                 #contentObj.contentFile = filename #this is the zip file itself
                 contentObj.fromArchive = True
-                self.sessions[sessionId]['images'].append( contentObj.get() )
+                self.thisSession['images'].append( contentObj.get() )
                 continue
 
               elif unsupported_compression and len(distillationTerms) == 0 and len(regexDistillationTerms) == 0:
@@ -508,7 +630,7 @@ class Fetcher:
                 contentObj.contentFile = filename #this is the zip file itself
                 contentObj.fromArchive = False # if the file is unsupported, it becomes the content itself, not what's inside it,so it's not FROM an archive, it IS the archive
                 contentObj.isArchive = True
-                self.sessions[sessionId]['images'].append( contentObj.get() )
+                self.thisSession['images'].append( contentObj.get() )
                 break
               
               else: #identify archived file and save it permanently if a supported file type
@@ -571,7 +693,7 @@ class Fetcher:
             contentObj.contentFile = filename #this is the rar file itself
             contentObj.fromArchive = False # if the file is encrypted, it becomes the content itself, not what's inside it,so it's not FROM an archive, it IS the archive
             contentObj.isArchive = True
-            self.sessions[sessionId]['images'].append( contentObj.get() )
+            self.thisSession['images'].append( contentObj.get() )
 
           for rinfo in rarFileHandle.infolist():
             contentObj = copy(origContentObj)
@@ -586,7 +708,7 @@ class Fetcher:
               log.debug('extractFilesFromMultipart(): RAR contentFile %s from archive %s is encrypted!' % (archivedFilename,filename))
               contentObj.contentType = 'encryptedRarEntry'
               contentObj.fromArchive = True
-              self.sessions[sessionId]['images'].append( contentObj.get() )
+              self.thisSession['images'].append( contentObj.get() )
               continue
 
             else: #identify archived file and save it permanently if a supported file type
@@ -646,6 +768,8 @@ class Fetcher:
           fp.write(part.get_payload(decode=True))
           fp.close()
         continue
+
+    return self.thisSession
 
 
 

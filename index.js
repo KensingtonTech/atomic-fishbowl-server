@@ -1,6 +1,6 @@
 'use strict';
 
-const version = '2017.08.21';
+const version = '2017.08.23';
 
 // Load dependencies
 const Observable = require('rxjs/Observable').Observable;

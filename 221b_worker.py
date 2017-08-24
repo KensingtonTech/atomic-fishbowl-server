@@ -39,7 +39,6 @@ def configReceived(cfgObj):
 
     outputDir = cfg['collectionsDir']
 
-    ignoredSessions = [] #used by rolling collections
     #type=cfg['type']
     #if type == 'fixed':
     timeformatter='%Y-%B-%d %H:%M:%S'
@@ -114,7 +113,7 @@ def configReceived(cfgObj):
 
     log.info("Pulling files from sessions")
     time0 = time.time()
-    fetcher.pullFiles(distillationTerms, regexDistillationTerms, ignoredSessions, md5Hashes=md5Hashes, sha1Hashes=sha1Hashes, sha256Hashes=sha256Hashes)
+    fetcher.pullFiles(distillationTerms, regexDistillationTerms, md5Hashes=md5Hashes, sha1Hashes=sha1Hashes, sha256Hashes=sha256Hashes)
     time1 = time.time()
     log.debug("Pulled files in " + str(time1 - time0) + " seconds")
     #pprint(fetcher.sessions)
