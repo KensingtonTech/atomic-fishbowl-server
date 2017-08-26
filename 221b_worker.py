@@ -14,8 +14,6 @@ from pprint import pprint, pformat
 import logging
 import signal
 
-#sys.exit(1)
-
 def sigIntHandler(signal, frame):
   log.info("Worker terminated cleanly by interrupt")
   log.info("Exiting with code 0")
@@ -32,110 +30,115 @@ def configReceived(cfgObj):
     #query = '''select * where (time='%s'-'%s') && (vis.level exists)''' % (oneHourAgoStr, curtimeStr)
     #query = '''select sessionid where (time='%s'-'%s') && (vis.level exists)''' % (oneHourAgoStr, curtimeStr)
 
-    cfg = cfgObj['workerConfig']
-    password = cfg['password']
-    cfg.pop('password', None)
-    log.debug(pformat(cfg))
-
-    outputDir = cfg['collectionsDir']
-
-    #type=cfg['type']
-    #if type == 'fixed':
-    timeformatter='%Y-%B-%d %H:%M:%S'
-    timeBegin = time.gmtime( cfg['timeBegin'] )
-    timeBeginStr = time.strftime(timeformatter, timeBegin)
-    timeEnd = time.gmtime( cfg['timeEnd'] )
-    timeEndStr = time.strftime(timeformatter,timeEnd)
-    timeClause = "time='%s'-'%s'" % (timeBeginStr, timeEndStr)
-     
-    log.debug("timeClause: " + timeClause)
-
-    directory = outputDir + '/' + cfg['id']
     try:
-      os.makedirs(directory)
-    except Exception as e:
-      pass
-    query = 'select * where (%s) && (%s)' % (timeClause, cfg['query'])
-    queryEnc = urllib.quote_plus(query)
-    log.info("Query: " + query)
-    log.debug("queryEnc: " + queryEnc)
-    
-    #sys.exit(1)
+      cfg = cfgObj['workerConfig']
+      password = cfg['password']
+      cfg.pop('password', None)
+      log.debug(pformat(cfg))
 
-    proto='http://'
-    if 'ssl' in cfg and cfg['ssl'] == True:
-      proto='https://'
-    host = cfg['host']
-    port = str(cfg['port'])
-    user = cfg['user']
-    minX = cfg['minX']
-    minY = cfg['minY']
-    gsPath = cfg['gsPath']
-    pdftotextPath = cfg['pdftotextPath']
-    unrarPath = cfg['unrarPath']
-    imageLimit = int(cfg['imageLimit'])
-    
-    distillationEnabled = cfg['distillationEnabled']
-    distillationTerms = []
-    if distillationEnabled:
-      distillationTerms = cfg['distillationTerms']
-    
-    regexDistillationEnabled = cfg['regexDistillationEnabled']
-    regexDistillationTerms = []
-    if regexDistillationEnabled:
-      regexDistillationTerms = cfg['regexDistillationTerms']
+      collectionId = cfg['collectionId']
+      id = cfg['id']
+      state = cfg['state']
+
+      outputDir = cfg['collectionsDir']
+
+      timeformatter='%Y-%B-%d %H:%M:%S'
+      timeBegin = time.gmtime( cfg['timeBegin'] )
+      timeBeginStr = time.strftime(timeformatter, timeBegin)
+      timeEnd = time.gmtime( cfg['timeEnd'] )
+      timeEndStr = time.strftime(timeformatter,timeEnd)
+      timeClause = "time='%s'-'%s'" % (timeBeginStr, timeEndStr)
       
-    md5Enabled = cfg['md5Enabled']
-    md5Hashes = []
-    if md5Enabled:
-      md5Hashes = cfg['md5Hashes']
-    
-    sha1Enabled = cfg['sha1Enabled']
-    sha1Hashes = []
-    if sha1Enabled:
-      sha1Hashes = cfg['sha1Hashes']
+      log.debug("timeClause: " + timeClause)
+
+      directory = outputDir + '/' + id
+      try:
+        os.makedirs(directory)
+      except Exception as e:
+        pass
+      query = 'select * where (%s) && (%s)' % (timeClause, cfg['query'])
+      queryEnc = urllib.quote_plus(query)
+      log.info("Query: " + query)
+      log.debug("queryEnc: " + queryEnc)
       
-    sha256Enabled = cfg['sha256Enabled']
-    sha256Hashes = []
-    if sha256Enabled:
-      sha256Hashes = cfg['sha256Hashes']
+      proto='http://'
+      if 'ssl' in cfg and cfg['ssl'] == True:
+        proto='https://'
+      host = cfg['host']
+      port = str(cfg['port'])
+      user = cfg['user']
+      minX = cfg['minX']
+      minY = cfg['minY']
+      gsPath = cfg['gsPath']
+      pdftotextPath = cfg['pdftotextPath']
+      unrarPath = cfg['unrarPath']
+      imageLimit = int(cfg['imageLimit'])
+      
+      distillationEnabled = cfg['distillationEnabled']
+      distillationTerms = []
+      if distillationEnabled:
+        distillationTerms = cfg['distillationTerms']
+      
+      regexDistillationEnabled = cfg['regexDistillationEnabled']
+      regexDistillationTerms = []
+      if regexDistillationEnabled:
+        regexDistillationTerms = cfg['regexDistillationTerms']
+        
+      md5Enabled = cfg['md5Enabled']
+      md5Hashes = []
+      if md5Enabled:
+        md5Hashes = cfg['md5Hashes']
+      
+      sha1Enabled = cfg['sha1Enabled']
+      sha1Hashes = []
+      if sha1Enabled:
+        sha1Hashes = cfg['sha1Hashes']
+        
+      sha256Enabled = cfg['sha256Enabled']
+      sha256Hashes = []
+      if sha256Enabled:
+        sha256Hashes = cfg['sha256Hashes']
+
+    except KeyError as e:
+      error = 'ERROR: Missing critical configuration data: ' + str(e)
+      exitWithError(error)
   
     baseUrl = proto + host + ':' + port
-
-    fetcher = Fetcher(client, baseUrl, user, password, directory, minX, minY, gsPath, pdftotextPath, unrarPath, imageLimit)
+    fetcher = Fetcher(client, collectionId, baseUrl, user, password, directory, minX, minY, gsPath, pdftotextPath, unrarPath, imageLimit)
+    
+    ###QUERY DATA###
     log.info("Executing query")
+    client.write_data(json.dumps( { 'collection': { 'id': collectionId, 'state': 'querying' }} ) + '\n') #Tell client that we're querying
     time0 = time.time()
     numResults = fetcher.runQuery(queryEnc)
     log.info(str(numResults) + " sessions returned from query")
     time1 = time.time()
     log.debug("Query completed in " + str(time1 - time0) + " seconds")
-    #pprint(fetcher.sessions)
 
-    log.info("Pulling files from sessions")
-    time0 = time.time()
-    fetcher.pullFiles(distillationTerms, regexDistillationTerms, md5Hashes=md5Hashes, sha1Hashes=sha1Hashes, sha256Hashes=sha256Hashes)
-    time1 = time.time()
-    log.debug("Pulled files in " + str(time1 - time0) + " seconds")
-    #pprint(fetcher.sessions)
-    #client.close()
-    #asyncore.close_all()
-    #asyncore.close_all()
-    log.debug("Handling close")
+    ###PULL FILES###
+    if (numResults > 0):
+      log.info("Pulling files from sessions")
+      client.write_data(json.dumps( { 'collection': { 'id': collectionId, 'state': state }} ) + '\n')
+      time0 = time.time()
+      fetcher.pullFiles(distillationTerms, regexDistillationTerms, md5Hashes=md5Hashes, sha1Hashes=sha1Hashes, sha256Hashes=sha256Hashes)
+      time1 = time.time()
+      log.debug("Pulled files in " + str(time1 - time0) + " seconds")
+
     client.handle_close()
-    #client.close_when_done()
 
   except Exception as e:
-    log.exception("Exception in configReceived() - exiting worker: " + str(e) )
-    #raise
-    #asyncore.close_all()
-    #client.close()
-    #asyncore.close_all()
-    log.debug("Handling close")
-    client.handle_close()
-    log.debug("Exiting")
-    #client.close_when_done()
-    sys.exit(1)
+    #log.exception("Unhandled exception in configReceived() - exiting worker with code 1: " + str(e) )
+    #client.handle_close()
+    #sys.exit(1)
+    error = "Unhandled exception in configReceived() - exiting worker with code 1: " + str(e)
+    exitWithError(error)
 
+
+def exitWithError(message):
+  log.error(message)
+  client.write_data(json.dumps( { 'error': message} ) + '\n')
+  client.handle_close()
+  sys.exit(1)
  
 if __name__ == "__main__":
   if len(sys.argv) == 1:

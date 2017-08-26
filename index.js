@@ -1,6 +1,6 @@
 'use strict';
 
-const version = '2017.08.23';
+const version = '2017.08.25';
 
 // Load dependencies
 const Observable = require('rxjs/Observable').Observable;
@@ -571,7 +571,7 @@ app.post('/api/addnwserver', passport.authenticate('jwt', { session: false } ), 
   try {
     //winston.debug(req.body);
     let nwserver = req.body;
-    winston.debug(nwserver);
+    // winston.debug(nwserver);
     let id = uuidV4();
     nwserver['id'] = id;
     if (!nwserver.friendlyName) {
@@ -625,7 +625,7 @@ app.post('/api/setpreferences', passport.authenticate('jwt', { session: false } 
   winston.info("POST /api/setpreferences");
   try {
     let prefs = req.body;
-    winston.debug(prefs);
+    // winston.debug(prefs);
     preferences = prefs;
     res.sendStatus(201);
     writePreferences();
@@ -827,6 +827,8 @@ function fixedSocketConnectionHandler(id, socket, tempName, subject) {
 
   let cfg = { 
     id: id,
+    collectionId: id, // we include this to disambiguate a difference in monitoring collections between id and collectionId
+    state: 'building',
     query: collections[id].query,
     timeBegin: collections[id].timeBegin,
     timeEnd: collections[id].timeEnd,
@@ -1055,14 +1057,15 @@ function rollingCollectionSocketConnectionHandler(id, socket, tempName, subject,
   
   winston.debug("rollingCollectionSocketConnectionHandler(): Connection received from worker to build rolling or monitoring collection", rollingId);
   
-    
+  let ourState = '';
   // Tell our subscribed clients that we're rolling, so they can start their spinny icon and whatnot
   if (thisCollection.type === 'monitoring') {
-    subject.next({collection: { id: id, state: 'refreshing'}});
+    ourState = 'monitoring';
   }
   else if (thisCollection.type === 'rolling') {
-    subject.next({collection: { id: id, state: 'rolling'}});
+    ourState = 'rolling';
   }
+  subject.next({collection: { id: id, state: ourState}});
 
 
   ///////////////////////////
@@ -1079,7 +1082,6 @@ function rollingCollectionSocketConnectionHandler(id, socket, tempName, subject,
 
     winston.debug('Running purge routine');
     let sessionsToPurge = [];
-    let purgedSessionPositions = [];
 
     // Calculate the maximum age a given session is allowed to be
     // let maxTime = thisCollection.lastRun - thisCollection.lastHours * 60 * 60;
@@ -1094,59 +1096,14 @@ function rollingCollectionSocketConnectionHandler(id, socket, tempName, subject,
       let session = thisRollingCollection.sessions[i];
       let sid = session.id;
       if ( session.meta.time < maxTime ) {
-        purgedSessionPositions.push(i);
         sessionsToPurge.push(sid);
-        //thisRollingCollection.sessions.splice(i, 1);
       }
     }
 
-    // Sort sessionsToPurge
-    purgedSessionPositions.sort(sortNumber);
-    
-    //Now remove purged sessions from thisRollingCollection
-    for (let i = 0; i < purgedSessionPositions.length; i++) {
-      thisRollingCollection.sessions.splice(purgedSessionPositions[i], 1);
-    }
-
-    
-    //We now have sessionsToPurge.  let's purge them
-
-    //Purge images
-    for (let v = 0; v < sessionsToPurge.length; v++) {
-      for (let i = 0; i < thisRollingCollection.images.length; i++) {
-        if ( thisRollingCollection.images[i].session === sessionsToPurge[v]) {
-          //delete files
-          //winston.debug("deleting files for session", sessionsToPurge[v]);
-          if ('contentFile' in thisRollingCollection.images[i]) {
-            fs.unlink(thisRollingCollection.images[i].contentFile, () => {});
-          }
-          if ('thumbnail' in thisRollingCollection.images[i]) {
-            fs.unlink(thisRollingCollection.images[i].thumbnail, () => {});
-          }
-          if ('pdfImage' in thisRollingCollection.images[i]) {
-            fs.unlink(thisRollingCollection.images[i].pdfImage, () => {});
-          }
-          thisRollingCollection.images.splice(i, 1);
-        }
-      }
-    }
-
-    // Purge search data
-    let purgedSearchPositions = [];
-    for (let v = 0; v < sessionsToPurge.length; v++) {
-      for (let i = 0; i < thisRollingCollection.search.length; i++) {
-        if ( thisRollingCollection.search[i].session === sessionsToPurge[v]) {
-          //thisRollingCollection.search.splice(i, 1);
-          purgedSearchPositions.push(i);
-        }
-      }
-    }
-    purgedSearchPositions.sort(sortNumber);
-    for (let i = 0; i < purgedSearchPositions.length; i++) {
-      thisRollingCollection.search.splice(purgedSessionPositions[i], 1);
-    }
-    
+    purgeSessions(thisRollingCollection, sessionsToPurge.slice());
+   
     // Notify the client of our purged sessions
+    winston.log
     if (sessionsToPurge.length > 0) {
       let update = { collectionPurge: sessionsToPurge };
       subject.next(update);
@@ -1161,6 +1118,8 @@ function rollingCollectionSocketConnectionHandler(id, socket, tempName, subject,
   let cfg = {
     // id: id,
     id: rollingId,
+    collectionId: id, // original collection ID
+    state: ourState,
     query: thisCollection.query,
     imageLimit: thisCollection.imageLimit,
     minX: thisCollection.minX,
@@ -1805,33 +1764,37 @@ function chunkHandler(collectionRoot, id, subject, data, chunk, sessionId='') {
     let u = d.shift();
     let update = JSON.parse(u);
     
-    thisCollection.sessions.push(update.collectionUpdate.session);
     
-    if (update.collectionUpdate.search) {
-      if (!thisCollection.search) {
-        thisCollection.search = [];
-      }
-      for (var i = 0; i < update.collectionUpdate.search.length; i++) {
-        
-        thisCollection.search.push(update.collectionUpdate.search[i]);
-      }
-    }
+    if ('collectionUpdate' in update) {
 
-    //modify image paths to point to /collections/:collectionId
-    for (var i=0; i < update.collectionUpdate.images.length; i++) {
+      thisCollection.sessions.push(update.collectionUpdate.session);
       
-      update.collectionUpdate.images[i].contentFile = collectionsUrl + '/' + rollingId + '/' + update.collectionUpdate.images[i].contentFile;
+      if (update.collectionUpdate.search) {
+        if (!thisCollection.search) {
+          thisCollection.search = [];
+        }
+        for (var i = 0; i < update.collectionUpdate.search.length; i++) {
+          
+          thisCollection.search.push(update.collectionUpdate.search[i]);
+        }
+      }
 
-      if ('thumbnail' in update.collectionUpdate.images[i]) {
-        update.collectionUpdate.images[i].thumbnail = collectionsUrl + '/' + rollingId + '/' + update.collectionUpdate.images[i].thumbnail;
+      //modify image paths to point to /collections/:collectionId
+      for (var i=0; i < update.collectionUpdate.images.length; i++) {
+        
+        update.collectionUpdate.images[i].contentFile = collectionsUrl + '/' + rollingId + '/' + update.collectionUpdate.images[i].contentFile;
+
+        if ('thumbnail' in update.collectionUpdate.images[i]) {
+          update.collectionUpdate.images[i].thumbnail = collectionsUrl + '/' + rollingId + '/' + update.collectionUpdate.images[i].thumbnail;
+        }
+        if ('pdfImage' in update.collectionUpdate.images[i]) {
+          update.collectionUpdate.images[i].pdfImage = collectionsUrl + '/' + rollingId + '/' + update.collectionUpdate.images[i].pdfImage;
+        }
+        if ('archiveFilename' in update.collectionUpdate.images[i]) {
+          update.collectionUpdate.images[i].archiveFilename = collectionsUrl + '/' + rollingId + '/' + update.collectionUpdate.images[i].archiveFilename;
+        }
+        thisCollection.images.push(update.collectionUpdate.images[i]);
       }
-      if ('pdfImage' in update.collectionUpdate.images[i]) {
-        update.collectionUpdate.images[i].pdfImage = collectionsUrl + '/' + rollingId + '/' + update.collectionUpdate.images[i].pdfImage;
-      }
-      if ('archiveFilename' in update.collectionUpdate.images[i]) {
-        update.collectionUpdate.images[i].archiveFilename = collectionsUrl + '/' + rollingId + '/' + update.collectionUpdate.images[i].archiveFilename;
-      }
-      thisCollection.images.push(update.collectionUpdate.images[i]);
     }
     
     subject.next(update);
@@ -1847,6 +1810,76 @@ var transformUser = function(doc, ret, options) {
   delete ret.email;
   return ret;
 };
+
+function purgeSessions(thisRollingCollection, sessionsToPurge) {
+  // winston.debug('purgeSessions(): sessionsToPurge.length: ', sessionsToPurge.length)
+  while (sessionsToPurge.length > 0) {
+    let sessionToPurge = sessionsToPurge.shift();
+    // winston.debug('purgeSessions(): Trying to purge session', sessionToPurge);
+
+    for (let i = 0; i < thisRollingCollection.sessions.length; i++) {
+      // Purge session
+      let session = thisRollingCollection.sessions[i];
+      if (session.id == sessionToPurge) {
+        // winston.debug('purgeSessions(): purging session', session.id);
+        thisRollingCollection.sessions.splice(i, 1);
+        break;
+      }
+    }
+
+    let searchesToPurge = [];
+    for (let i = 0; i < thisRollingCollection.search.length; i++) {
+      let search = thisRollingCollection.search[i];
+      if (search.session == sessionToPurge) {
+        searchesToPurge.push(search);
+      }
+    }
+    while (searchesToPurge.length != 0) {
+      let searchToPurge = searchesToPurge.shift();
+      for (let i = 0; i < thisRollingCollection.search.length; i++) {
+        let search = thisRollingCollection.search[i];
+        if (searchToPurge.session == search.session && searchToPurge.contentFile == search.contentFile) {
+          // Purge search
+          winston.debug('purgeSessions(): purging search', search.session);
+          thisRollingCollection.search.splice(i, 1);
+          break;
+        }
+      }
+    }
+
+
+    let contentsToPurge = [];
+    for (let i = 0; i < thisRollingCollection.images.length; i++) {
+      // Purge content
+      let content = thisRollingCollection.images[i];
+      if (content.session == sessionToPurge) {
+        contentsToPurge.push(content);
+      }
+    }
+    while (contentsToPurge.length != 0) {
+      let contentToPurge = contentsToPurge.shift();
+      for (let i = 0; i < thisRollingCollection.images.length; i++) {
+        let content = thisRollingCollection.images[i];
+        if (contentToPurge.session == content.session && contentToPurge.contentFile == content.contentFile && contentToPurge.contentType == content.contentType) {
+          // Purge content
+          winston.debug('purgeSessions(): purging content', content.session);
+          thisRollingCollection.images.splice(i, 1);
+          if ('contentFile' in content) {
+            fs.unlink(content.contentFile, () => {});
+          }
+          if ('thumbnail' in content) {
+            fs.unlink(content.thumbnail, () => {});
+          }
+          if ('pdfImage' in content) {
+            fs.unlink(content.pdfImage, () => {});
+          }
+          break;
+        }
+      }
+    }
+
+  }
+}
 
 
 

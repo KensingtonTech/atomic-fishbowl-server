@@ -21,16 +21,10 @@ class communicator(asynchat.async_chat):
     
   def collect_incoming_data(self, data):
     self.in_buffer.append(data)
-    #self.in_buffer += data
     
   def found_terminator(self):
-    #print "got terminator"
     msg = ''.join(self.in_buffer)
-    #msg = self.in_buffer
-    #print 'Received:', msg
     self.in_buffer = []
-    #self.in_buffer = ''
-    #print self.in_buffer
     try:
       obj = json.loads(msg)
     except Exception as e:
@@ -42,19 +36,6 @@ class communicator(asynchat.async_chat):
     else:
       log.error("No workerConfig found in received payload.  Exiting with code 1")  #this should in theory never happen
       sys.exit(1)
-  
-  """
-  def close(self):
-    #self.close()
-    self.close_when_done()
-  """
-      
-  """
-  def handle_read(self):
-    # Do something with data
-    data = self.recv(4096)
-    self.in_buffer += data
-  """
   
   def write_data(self, data):
     #print "communicator: write_data():", data
@@ -92,10 +73,4 @@ class communicator(asynchat.async_chat):
     while self.writable():
         self.handle_write()
     self.close()
-  
-      
-  #def handle_error(self, e, trace):
-  #  print "communicator exception",e
-    #print msg
-
   

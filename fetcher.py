@@ -22,6 +22,7 @@ import logging
 from ContentObj import ContentObj
 from copy import deepcopy, copy
 from multiprocessing import Pool, Manager, Value
+import shlex
 
 log = logging.getLogger(__name__)
 
@@ -35,12 +36,13 @@ def unwrapPullFiles(*arg, **kwarg):
 
 class Fetcher:
 
-  def __init__(self, communicator, url, user, password, directory, minX, minY, gsPath, pdftotextPath, unrarPath, contentLimit):
+  def __init__(self, communicator, collectionId, url, user, password, directory, minX, minY, gsPath, pdftotextPath, unrarPath, contentLimit):
 
     self.pool = Pool()
     self.manager = Manager()
 
     self.communicator = communicator
+    self.collectionId = collectionId
 
     self.url = url
     self.user = user
@@ -63,6 +65,12 @@ class Fetcher:
     log.info("Minimum dimensions are: " + str(minX) + " x " + str(minY))
 
   """curl "http://admin:netwitness@172.16.0.55:50104/sdk?msg=query&query=$query&force-content-type=application/json"""
+
+  def exitWithError(self, message):
+    log.error(message)
+    self.communicator.write_data(json.dumps( { 'error': message} ) + '\n')
+    self.communicator.handle_close()
+    sys.exit(1)
 
   def fetchSummary(self):
     request = urllib2.Request(self.url + '/sdk?msg=summary')
@@ -123,15 +131,23 @@ class Fetcher:
               self.sessions[sessionId] = thisSession
 
     except urllib2.HTTPError as e:
-      log.error("runQuery(): HTTP Error whilst running query.  Exiting with code 1: " + str(e))
-      sys.exit(1)
+      error = "runQuery(): HTTP Error whilst running query.  Exiting with code 1: " + str(e)
+      self.exitWithError(error)
     except urllib2.URLError as e:
-      log.error("runQuery(): URL Error whilst running query.  Exiting with code 1: "  + str(e))
-      sys.exit(1)
+      if 'Connection refused' in str(e):
+        error = "Connection refused whilst trying to query NetWitness service"
+      else:
+        error = "runQuery(): URL Error whilst running query.  Exiting with code 1: "  + str(e)
+      self.exitWithError(error)
     except Exception as e:
-      log.exception("runQuery(): Unhandled exception whilst running query.  Exiting with code 1")
-      print 
-      sys.exit(1)
+      
+      if ('timed out' in str(e)):
+        error = "Error running query: timed out during connection to NetWitness"
+      else:
+        error = "runQuery(): Unhandled exception whilst running query.  Exiting with code 1: " + str(e)
+      #log.exception("runQuery(): Unhandled exception whilst running query.  Exiting with code 1")
+      #sys.exit(1)
+      self.exitWithError(error)
     return len(self.sessions)
 
 
@@ -146,7 +162,10 @@ class Fetcher:
   def pullFiles(self, distillationTerms, regexDistillationTerms, md5Hashes=[], sha1Hashes=[], sha256Hashes=[]):
 
     for sessionId in self.sessions:
-      if not self.contentCount.value >= self.contentLimit:
+      if self.contentCount.value >= self.contentLimit:
+        log.info("Image limit of " + str(self.contentLimit) + " has been reached.  Ending collection build.  You may want to narrow your result set with a more specific query")
+        return
+      elif not self.contentCount.value >= self.contentLimit:
         ctx = ssl.create_default_context()
         ctx.check_hostname = False
         ctx.verify_mode = ssl.CERT_NONE
@@ -161,15 +180,19 @@ class Fetcher:
             break
           except urllib2.HTTPError as e:
             if self.contentRetries.value == self.maxContentRetries:
-              log.error("pullFiles(): Maximum retries reached whilst pulling content for session " + sessionId + ".  Exiting with code 1")
-              sys.exit(1)
+              error = "pullFiles(): Maximum retries reached whilst pulling content for session " + sessionId + ".  Exiting with code 1"
+              #log.error("pullFiles(): Maximum retries reached whilst pulling content for session " + sessionId + ".  Exiting with code 1")
+              #sys.exit(1)
+              self.exitWithError(error)
             self.contentRetries.value += 1
-            log.error("pullFiles(): HTTP error pulling content for session " + sessionId + ".  Retrying")
+            log.exception("pullFiles(): HTTP exception pulling content for session " + sessionId + ".  Retrying")
             continue
           except urllib2.URLError as e:
             if self.contentRetries.value == self.maxContentRetries:
-              log.error("pullFiles(): Maximum retries reached whilst pulling content for session " + sessionId + ".  Exiting with code 1")
-              sys.exit(1)
+              error = "pullFiles(): Maximum retries reached whilst pulling content for session " + sessionId + ".  Exiting with code 1"
+              #log.error("pullFiles(): Maximum retries reached whilst pulling content for session " + sessionId + ".  Exiting with code 1")
+              #sys.exit(1)
+              self.exitWithError(error)
             self.contentRetries.value += 1
             log.error("pullFiles(): ERROR: URL error pulling content for session " + sessionId + ".  Retrying")
             continue
@@ -185,9 +208,10 @@ class Fetcher:
           processor = ContentProcessor(self.url, self.user, self.password, self.directory, self.minX, self.minY, self.gsPath, self.pdftotextPath, self.contentLimit, self.contentCount, self.contentRetries, self.maxContentRetries, self.timeout)
           self.pool.apply_async(unwrapExtractFilesFromMultipart, args=(processor, newFileStr, self.sessions[sessionId], sessionId, distillationTerms, regexDistillationTerms, md5Hashes, sha1Hashes, sha256Hashes), callback=self.sendResult )
 
-      else:
-        log.info("Image limit of " + str(self.contentLimit) + " has been reached.  Ending collection build.  You may want to narrow your result set with a more specific query")
-        return
+    self.pool.close()
+    self.pool.join()
+
+
 
 
 
@@ -335,70 +359,100 @@ class ContentProcessor:
     contentObj.pdfImage = outputfile
     log.debug("processPdf(): Running gs on file " + contentObj.contentFile)
     
+    
+    gsCmd = self.gsPath + " -dNOPAUSE -sDEVICE=jpeg -r144 -sOutputFile='" + os.path.join(self.directory, outputfile) + "' -dPDFSTOPONERROR -dFirstPage=1 -dLastPage=1 -dBATCH '" +  os.path.join(self.directory, contentObj.contentFile) + "'"
+    log.debug("processPdf(): Ghostscript command line: " + gsCmd)
+    args = shlex.split(gsCmd)
     try:
-      gsCmd = self.gsPath + " -dNOPAUSE -sDEVICE=jpeg -r144 -sOutputFile='" + os.path.join(self.directory, outputfile) + "' -dPDFSTOPONERROR -dFirstPage=1 -dLastPage=1 -dBATCH '" +  os.path.join(self.directory, contentObj.contentFile) + "'"
-      log.debug("processPdf(): Ghostscript command line: " + gsCmd)
-      process = Popen(gsCmd, stdout=PIPE, stderr=PIPE, shell = True)
-      #print "process opened"
+      #process = Popen(gsCmd, stdout=PIPE, stderr=PIPE, shell = True)
+      process = Popen(args, stdout=PIPE, stderr=PIPE, shell = False)
       (output, err) = process.communicate()
       exit_code = process.wait()
+    
+    except OSError as e:
+      if ('No such file or directory' in str(e)):
+        log.error('ERROR: Could not run ghostscript command as ' + self.gsPath + ' was not found')
+      else:
+        log.exception(str(e))
+      return False
 
-      if exit_code == 0: #this means we successfully generated an image of the pdf and we want to keep it
-        keep = True
-        ###keep means we want to keep the file.  We choose to not keep the file (by making keep = False) on these conditions:
-        ###1: if an error is generated by gs whilst trying to render an image of the first page
-        ###2: if we have distillationTerms and/or regexDistillationTerms and they aren't matched
-
-        returnObj = self.getPdfText(contentObj, searchTerms=distillationTerms, regexSearchTerms=regexDistillationTerms)
-        keep = returnObj['keep']
-        contentObj = returnObj['contentObj']
-
-        if keep == False:
-          return False #return if we've chosen to not keep the file
-        
-        try:
-          #now let's try generating a thumbnail - if we already have an image, this should succeed.  If not, there's something screwy...
-          #but we'll keep it anyway and use the original image as the thumbnail and let the browser deal with any potential corruption
-          log.debug("processPdf(): Generating thumbnail for pdf " + outputfile)
-          thumbnailName = 'thumbnail_' + outputfile
-          pdfim = Image.open(os.path.join(self.directory, outputfile))
-          pdfim.thumbnail(self.thumbnailSize, Image.ANTIALIAS)
-          pdfim.save(os.path.join(self.directory, thumbnailName), pdfim.format)
-          #pdfim.close()
-
-          #set thumbnail to our generated thumbnail
-          contentObj.thumbnail = thumbnailName
-          self.thisSession['images'].append( contentObj.get() )
-          self.contentCount.value += 1
-          return True
-        except Exception as e:
-          log.exception("Error generating thumbnail for pdf " + contentObj.contentFile)
-          #thumbnail generation failed, so set thumbnail to be the original image generated by gs
-          contentObj.thumbnail = outputfile
-          self.thisSession['images'].append( contentObj.get() )
-          self.contentCount.value += 1
-          return True
-
-      if exit_code != 0:
-        #Ghostscript exited with a non-zero exit code, and thus was unsuccessful
-        log.warning("GhostScript exited abnormally with code " + str(exit_code) )
-        return False
-        
     except Exception as e:
       #Ghostscript couldn't even be run
-      log.exception("Could not run GhostScript command at " + self.gsPath )
+      log.exception("ERROR: Could not run GhostScript command at " + self.gsPath )
       return False
+
+    if exit_code != 0:
+      #Ghostscript exited with a non-zero exit code, and thus was unsuccessful
+      log.warning("WARNING: GhostScript exited abnormally with code " + str(exit_code) )
+      return False
+
+    if exit_code == 0: #this means we successfully generated an image of the pdf and we want to keep it
+      keep = True
+      ###keep means we want to keep the file.  We choose to not keep the file (by making keep = False) on these conditions:
+      ###1: if an error is generated by gs whilst trying to render an image of the first page
+      ###2: if we have distillationTerms and/or regexDistillationTerms and they aren't matched
+
+      returnObj = self.getPdfText(contentObj, searchTerms=distillationTerms, regexSearchTerms=regexDistillationTerms)
+      keep = returnObj['keep']
+      contentObj = returnObj['contentObj']
+
+      if keep == False:
+        return False #return if we've chosen to not keep the file
+      
+      try:
+        #now let's try generating a thumbnail - if we already have an image, this should succeed.  If not, there's something screwy...
+        #but we'll keep it anyway and use the original image as the thumbnail and let the browser deal with any potential corruption
+        log.debug("processPdf(): Generating thumbnail for pdf " + outputfile)
+        thumbnailName = 'thumbnail_' + outputfile
+        pdfim = Image.open(os.path.join(self.directory, outputfile))
+        pdfim.thumbnail(self.thumbnailSize, Image.ANTIALIAS)
+        pdfim.save(os.path.join(self.directory, thumbnailName), pdfim.format)
+        #pdfim.close()
+
+        #set thumbnail to our generated thumbnail
+        contentObj.thumbnail = thumbnailName
+        self.thisSession['images'].append( contentObj.get() )
+        self.contentCount.value += 1
+        return True
+      except Exception as e:
+        log.exception("Error generating thumbnail for pdf " + contentObj.contentFile)
+        #thumbnail generation failed, so set thumbnail to be the original image generated by gs
+        contentObj.thumbnail = outputfile
+        self.thisSession['images'].append( contentObj.get() )
+        self.contentCount.value += 1
+        return True
+        
+
 
 
   def getPdfText(self, contentObj, searchTerms=[], regexSearchTerms=[]):
     try: #now extract pdf text
       log.debug('getPdfText(): session: ' + str(contentObj.session))
       sessionId = contentObj.session
+
       pdftotextCmd = self.pdftotextPath + " -enc UTF-8 -eol unix -nopgbrk -q '" + os.path.join(self.directory, contentObj.contentFile) + "' -"
       log.debug("getPdfText(): pdftotextCmd: " + pdftotextCmd)
-      pdftotextProcess = Popen(pdftotextCmd, stdout=PIPE, stderr=PIPE, shell = True)
-      (output, err) = pdftotextProcess.communicate()
-      exit_code = pdftotextProcess.wait()
+      args = shlex.split(pdftotextCmd)
+      try:
+        #pdftotextProcess = Popen(pdftotextCmd, stdout=PIPE, stderr=PIPE, shell = True)
+        pdftotextProcess = Popen(args, stdout=PIPE, stderr=PIPE, shell = False)
+        (output, err) = pdftotextProcess.communicate()
+        exit_code = pdftotextProcess.wait()
+      
+      except OSError as e:
+        if ('No such file or directory' in str(e)):
+          log.error('ERROR: Could not run pdftotext command as ' + self.pdftotextPath + ' was not found')
+        else:
+          log.exception(str(e))
+        if len(searchTerms) == 0 and len(regexSearchTerms) == 0:
+          return { 'keep': True, 'contentObj': contentObj }
+        return { 'keep': False, 'contentObj': contentObj }
+
+      except Exception as e:
+        log.exception("Could not run pdftotext command at " + self.pdftotextPath )
+        if len(searchTerms) == 0 and len(regexSearchTerms) == 0:
+          return { 'keep': True, 'contentObj': contentObj }
+        return { 'keep': False, 'contentObj': contentObj }
 
       returnObj = { 'keep': False, 'contentObj': {} }
       
