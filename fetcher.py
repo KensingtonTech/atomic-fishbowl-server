@@ -232,6 +232,30 @@ class Fetcher:
     
    
 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 class ContentProcessor:
 
   def __init__(self, url, user, password, directory, minX, minY, gsPath, pdftotextPath, contentLimit, contentCount, contentRetries, maxContentRetries, timeout):
@@ -637,8 +661,10 @@ class ContentProcessor:
       
 
 
-
+      ######################################################
       #################Process ZIP ARCHIVES#################
+      ######################################################
+
       elif contentType == 'zip':
         log.debug("extractFilesFromMultipart(): Attempting to extract zip archive " + filename)
         contentObj.fromArchive = True
@@ -656,57 +682,56 @@ class ContentProcessor:
           log.exception("NotImplemented exception during zip open")
         except Exception as e:
           log.exception("Unhandled exception during zip file open")
+         
+        try:
+          for zinfo in zipFileHandle.infolist():
+            contentObj = copy(origContentObj)
+            
+            archivedFilename = zinfo.filename
+            contentObj.contentFile = archivedFilename
+            contentObj.archiveFilename = filename
+            is_encrypted = zinfo.flag_bits & 0x1
+            #print "DEBUG: zip compression type is",str(zinfo.compress_type)
+            unsupported_compression = zinfo.compress_type == 99
+            
+            if is_encrypted and len(distillationTerms) == 0 and len(regexDistillationTerms) == 0:
+              saveZipFile = True
+              log.debug('extractFilesFromMultipart(): ZIP contentFile %s from archive %s is encrypted!' % (archivedFilename, filename))
+              contentObj.contentType = 'encryptedZipEntry'
+              #contentObj.contentFile = filename #this is the zip file itself
+              contentObj.fromArchive = True
+              self.thisSession['images'].append( contentObj.get() )
+              continue
 
-          try:
-            for zinfo in zipFileHandle.infolist():
-              contentObj = copy(origContentObj)
-              
-              archivedFilename = zinfo.filename
-              contentObj.contentFile = archivedFilename
-              contentObj.archiveFilename = filename
-              is_encrypted = zinfo.flag_bits & 0x1
-              #print "DEBUG: zip compression type is",str(zinfo.compress_type)
-              unsupported_compression = zinfo.compress_type == 99
-              
-              if is_encrypted and len(distillationTerms) == 0 and len(regexDistillationTerms) == 0:
-                saveZipFile = True
-                log.debug('extractFilesFromMultipart(): ZIP contentFile %s from archive %s is encrypted!' % (archivedFilename, filename))
-                contentObj.contentType = 'encryptedZipEntry'
-                #contentObj.contentFile = filename #this is the zip file itself
-                contentObj.fromArchive = True
-                self.thisSession['images'].append( contentObj.get() )
-                continue
+            elif unsupported_compression and len(distillationTerms) == 0 and len(regexDistillationTerms) == 0:
+              saveZipFile = True
+              log.debug('extractFilesFromMultipart(): ZIP archive %s uses an unsupported compression type!' % filename)
+              contentObj.contentType = 'unsupportedZipEntry'
+              contentObj.contentFile = filename #this is the zip file itself
+              contentObj.fromArchive = False # if the file is unsupported, it becomes the content itself, not what's inside it,so it's not FROM an archive, it IS the archive
+              contentObj.isArchive = True
+              self.thisSession['images'].append( contentObj.get() )
+              break
+            
+            else: #identify archived file and save it permanently if a supported file type
+              extractedFileObj = StringIO.StringIO() #we will write the extracted file to this buffer
 
-              elif unsupported_compression and len(distillationTerms) == 0 and len(regexDistillationTerms) == 0:
-                saveZipFile = True
-                log.debug('extractFilesFromMultipart(): ZIP archive %s uses an unsupported compression type!' % filename)
-                contentObj.contentType = 'unsupportedZipEntry'
-                contentObj.contentFile = filename #this is the zip file itself
-                contentObj.fromArchive = False # if the file is unsupported, it becomes the content itself, not what's inside it,so it's not FROM an archive, it IS the archive
-                contentObj.isArchive = True
-                self.thisSession['images'].append( contentObj.get() )
-                break
-              
-              else: #identify archived file and save it permanently if a supported file type
-                #print("Got to 1")
-                extractedFileObj = StringIO.StringIO() #we will write the extracted file to this buffer
+              #extract the file to buffer
+              compressedFileHandle = zipFileHandle.open(archivedFilename) #compressedFileHandle is a handle to the file while it's still in the zip file.  we will extract from this object
+              extractedFileObj.write(compressedFileHandle.read() )  #this is where we extract the file into
+              compressedFileHandle.close()
 
-                #extract the file to buffer
-                compressedFileHandle = zipFileHandle.open(archivedFilename) #compressedFileHandle is a handle to the file while it's still in the zip file.  we will extract from this object
-                extractedFileObj.write(compressedFileHandle.read() )  #this is where we extract the file into
-                compressedFileHandle.close()
-
-                contentObj.setStringIOContent(extractedFileObj)
-                self.processExtractedFile(contentObj, distillationTerms, regexDistillationTerms, md5Hashes, sha1Hashes, sha256Hashes) #now let's process the extracted file
-                extractedFileObj.close()
-        
-          except RuntimeError as e:
-            if 'is encrypted, password required for extraction' in e.message:
-              pass # do nothing and let our own code take the lead
-            else:
-              log.exception('Unhandled RuntimeError')
-          except Exception as e:
-            log.exception("Unhandled exception during zip file extraction")
+              contentObj.setStringIOContent(extractedFileObj)
+              self.processExtractedFile(contentObj, distillationTerms, regexDistillationTerms, md5Hashes, sha1Hashes, sha256Hashes) #now let's process the extracted file
+              extractedFileObj.close()
+      
+        except RuntimeError as e:
+          if 'is encrypted, password required for extraction' in e.message:
+            pass # do nothing and let our own code take the lead
+          else:
+            log.exception('Unhandled RuntimeError')
+        except Exception as e:
+          log.exception("Unhandled exception during zip file extraction")
 
         if saveZipFile:
           fp = open(os.path.join(self.directory, filename), 'wb')
