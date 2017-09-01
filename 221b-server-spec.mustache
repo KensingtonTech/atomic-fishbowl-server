@@ -86,7 +86,7 @@ rm -rf %{buildroot}
 {{.}}
 {{/executableFiles}}
 {{/hasExecutableFiles}}
-%exclude %{buildroot}{{installDir}}/rpmbuild
-%exclude %{buildroot}{{installDir}}/package.json
-%exclude %{buildroot}{{installDir}}/package-lock.json
-%exclude %{buildroot}{{installDir}}/221b-server-spec.mustache
+%exclude {{installDir}}/rpmbuild
+%exclude {{installDir}}/package.json
+%exclude {{installDir}}/package-lock.json
+%exclude {{installDir}}/221b-server-spec.mustache
