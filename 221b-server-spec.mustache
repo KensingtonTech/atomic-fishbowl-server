@@ -1,0 +1,92 @@
+%define name {{name}}
+%define version {{version}}
+%define release {{release}}
+%define buildroot %(mktemp -ud %{_tmppath}/%{name}-%{version}-%{release}-XXXXXX)
+
+Name: %{name}
+Version: %{version}
+{{#dist}}
+%define dist {{dist}}
+Release: %{release}.%{?dist}
+{{/dist}}
+{{^dist}}
+Release: %{release}
+{{/dist}}
+Summary: {{name}}
+
+License: {{license}}
+Source: %{name}.tar.gz
+BuildRoot: %{buildroot}
+{{#noarch}}
+BuildArch: noarch
+%global __strip /bin/true
+%define __spec_build_post true
+{{/noarch}}
+Requires: nodejs{{#nodeVersion}} {{{nodeVersion}}}{{/nodeVersion}}
+{{#requires}}
+Requires: {{.}}
+{{/requires}}
+{{#buildRequires}}
+BuildRequires: {{.}}
+{{/buildRequires}}
+AutoReqProv: no
+
+%description
+{{description}}
+
+%prep
+%setup -q -c -n %{name}
+
+%build
+{{#buildCommands}}
+{{.}}
+{{/buildCommands}}
+{{#prune}}
+npm prune --production
+{{/prune}}
+{{#noarch}}
+# skip npm rebuild
+{{/noarch}}
+{{^noarch}}
+npm rebuild
+{{/noarch}}
+
+%pre
+getent group {{username}} >/dev/null || groupadd -r {{username}}
+getent passwd {{username}} >/dev/null || useradd -r -g {{username}} -G {{username}} -d {{installDir}} -s /sbin/nologin {{username}}
+
+%install
+mkdir -p %{buildroot}{{installDir}}
+cp -r ./* %{buildroot}{{installDir}}
+
+%post
+{{#postInstallCommands}}
+{{.}}
+{{/postInstallCommands}}
+
+%preun
+systemctl stop 221b-server
+systemctl disable 221b-server
+
+%postun
+rm -f /usr/lib/systemd/system/{{name}}.service
+systemctl daemon-reload
+userdel -r {{username}}
+groupdel {{username}}
+
+%clean
+rm -rf %{buildroot}
+
+%files
+%defattr(644, {{username}}, {{username}}, 755)
+{{installDir}}    #{{installDir}}/{{name}}
+{{#hasExecutableFiles}}
+%defattr(755, {{username}}, {{username}}, 755)
+{{#executableFiles}}
+{{.}}
+{{/executableFiles}}
+{{/hasExecutableFiles}}
+%exclude %{buildroot}{{installDir}}/rpmbuild
+%exclude %{buildroot}{{installDir}}/package.json
+%exclude %{buildroot}{{installDir}}/package-lock.json
+%exclude %{buildroot}{{installDir}}/221b-server-spec.mustache
