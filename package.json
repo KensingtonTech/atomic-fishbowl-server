@@ -34,7 +34,7 @@
     "specTemplate": "221b-server-spec.mustache",
     "noarch": false,
     "post": [
-      "mv /opt/kentech/221b-server/bin/221b-server.service /usr/lib/systemd/system",
+      "mv /opt/kentech/221b-server/bin/221b-server.systemd /usr/lib/systemd/system/221b-server.service",
       "systemctl daemon-reload",
       "systemctl enable 221b-server",
       "systemctl start 221b-server"
