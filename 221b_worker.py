@@ -34,6 +34,7 @@ def configReceived(cfgObj):
       cfg = cfgObj['workerConfig']
       password = cfg['password']
       cfg.pop('password', None)
+
       log.debug(pformat(cfg))
 
       collectionId = cfg['collectionId']
@@ -113,16 +114,16 @@ def configReceived(cfgObj):
     numResults = fetcher.runQuery(queryEnc)
     log.info(str(numResults) + " sessions returned from query")
     time1 = time.time()
-    log.debug("Query completed in " + str(time1 - time0) + " seconds")
+    log.info("Query completed in " + str(time1 - time0) + " seconds")
 
     ###PULL FILES###
     if (numResults > 0):
-      log.info("Pulling files from sessions")
+      log.info("Extracting files from sessions")
       client.write_data(json.dumps( { 'collection': { 'id': collectionId, 'state': state }} ) + '\n')
       time0 = time.time()
       fetcher.pullFiles(distillationTerms, regexDistillationTerms, md5Hashes=md5Hashes, sha1Hashes=sha1Hashes, sha256Hashes=sha256Hashes)
       time1 = time.time()
-      log.debug("Pulled files in " + str(time1 - time0) + " seconds")
+      log.info("Pulled files in " + str(time1 - time0) + " seconds")
 
     client.handle_close()
 
@@ -130,7 +131,7 @@ def configReceived(cfgObj):
     #log.exception("Unhandled exception in configReceived() - exiting worker with code 1: " + str(e) )
     #client.handle_close()
     #sys.exit(1)
-    error = "Unhandled exception in configReceived() - exiting worker with code 1: " + str(e)
+    error = "configReceived(): Unhandled exception.  Exiting worker with code 1: " + str(e)
     exitWithError(error)
 
 
@@ -150,7 +151,16 @@ if __name__ == "__main__":
     handler = logging.StreamHandler()
     formatter = logging.Formatter('%(asctime)s 221b_worker     %(levelname)-10s %(message)s')
     handler.setFormatter(formatter)
+
     log.setLevel(logging.DEBUG)
+
+    try:
+      NODE_ENV = os.environ['NODE_ENV']
+      if NODE_ENV == 'production':
+        log.setLevel(logging.INFO)
+    except KeyError:
+      pass
+    
     log.addHandler(handler)
 
     #Register handler for SIGINT
@@ -164,5 +174,5 @@ if __name__ == "__main__":
     log.info("Exiting 221b_worker with code 0");
     sys.exit(0)
   except Exception as e:
-    log.exception("General exception: " + str(e) )
+    log.exception("Unhandled general exception: " + str(e) )
     

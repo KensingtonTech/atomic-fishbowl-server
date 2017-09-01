@@ -1,7 +1,5 @@
 'use strict';
 
-const version = '2017.08.28';
-
 // Load dependencies
 const Observable = require('rxjs/Observable').Observable;
 const Subject = require('rxjs/Subject').Subject;
@@ -29,11 +27,12 @@ const jwt = require('jsonwebtoken');
 const JwtStrategy = require('passport-jwt').Strategy;
 const ExtractJwt = require('passport-jwt').ExtractJwt;
 var mongo = require('mongodb').MongoClient;
+const buildProperties = require('./build-properties');
+const version = `${buildProperties.major}.${buildProperties.minor}.${buildProperties.patch}-${buildProperties.level} build ${buildProperties.build}`;
+var development = process.env.NODE_ENV !== 'production';
+// export NODE_ENV='production'
+// export NODE_ENV='development'
 var purgeHack = false; // causes sessions older than 5 minutes to be purged, if set to true.  Useful for testing purging without having to wait an hour
-
-
-
-
 
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -74,7 +73,13 @@ winston.add(winston.transports.Console, {'timestamp': () => {
           (options.meta && Object.keys(options.meta).length ? '\n\t'+ JSON.stringify(options.meta) : '' );;
                                                               }
                                          });
-winston.level = 'debug';
+if (development) {
+  winston.level = 'debug';
+  winston.debug('221b Server is running in development mode');
+}
+else {
+  winston.level = 'info';
+}
 
 
 winston.info('Starting 221B server version', version);
@@ -1314,7 +1319,7 @@ function runRollingCollection(id, res, sessionId='') {
 
           else if (code != 0) {
             // Handle worker exit with error code
-            winston.debug('runRollingCollection(): work(): listen(): onExit(): Worker process exited in bad state with non-zero exit code',code.toString());
+            winston.debug('runRollingCollection(): work(): listen(): onExit(): Worker process exited in bad state with non-zero exit code', code.toString() );
             thisCollection['state'] = 'error';
             subject.next({collection: { id: id, state: 'error'}});
             if (rollingId in rollingCollectionSubjects && 'worker' in thisRollingCollectionSubject) {

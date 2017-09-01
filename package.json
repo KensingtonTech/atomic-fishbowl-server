@@ -28,5 +28,22 @@
     "temp": "^0.8.3",
     "uuid": "^3.1.0",
     "winston": "^2.3.1"
+  },
+  "spec": {
+    "installDir": "/opt/221b-server/bin",
+    "executable": [
+      "./221b_worker.py"
+    ],
+    "environment": {
+      "NODE_ENV": "production"
+    },
+    "requires": [
+      "unrar",
+      "mongodb-org",
+      "mongodb-org-server"
+    ],
+    "engines": {
+      "node": "> 8.4.0"
+    }
   }
 }
