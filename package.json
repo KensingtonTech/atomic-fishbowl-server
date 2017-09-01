@@ -30,7 +30,7 @@
     "winston": "^2.3.1"
   },
   "spec": {
-    "installDir": "/opt/221b-server/bin",
+    "installDir": "/opt/kentech/221b-server/bin",
     "executable": [
       "./221b_worker.py"
     ],
