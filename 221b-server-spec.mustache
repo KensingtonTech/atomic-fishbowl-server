@@ -2,6 +2,8 @@
 %define version {{version}}
 %define release {{release}}
 %define buildroot %(mktemp -ud %{_tmppath}/%{name}-%{version}-%{release}-XXXXXX)
+%{?systemd_requires}
+BuildRequires: systemd
 
 Name: %{name}
 Version: %{version}
@@ -63,14 +65,13 @@ cp -r ./* %{buildroot}{{installDir}}
 {{#postInstallCommands}}
 {{.}}
 {{/postInstallCommands}}
+%systemd_post {{name}}.service
 
 %preun
-systemctl stop 221b-server
-systemctl disable 221b-server
+%systemd_preun {{name}}.service
 
 %postun
-rm -f /usr/lib/systemd/system/{{name}}.service
-systemctl daemon-reload
+%systemd_postun_with_restart {{name}}.service
 userdel -r {{username}}
 groupdel {{username}}
 

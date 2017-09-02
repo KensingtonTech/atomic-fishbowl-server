@@ -2,7 +2,7 @@ let buildProperties = {
   major: 1,
   minor: 0,
   patch: 0,
-  build: '2017.08.31',
+  build: '2017.09.02',
   level: 2
 };
 

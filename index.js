@@ -64,15 +64,18 @@ app.use(passport.initialize());
 ////////////////////////////////////////////////////////////////LOGGING////////////////////////////////////////////////////////////////
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
+let tOptions = {
+  'timestamp': () => moment().format('YYYY-MM-DD HH:mm:ss,SSS') + ' ',
+  'formatter': (options) => options.timestamp() + '221b_server     ' + sprintf('%-10s', options.level.toUpperCase()) + ' ' + (options.message ? options.message : '') +
+(options.meta && Object.keys(options.meta).length ? '\n\t'+ JSON.stringify(options.meta) : '' )
+};
+if ('SYSTEMD' in process.env) {
+  // systemd journal adds its own timestamp
+  tOptions.timestamp = () => '';
+}
 winston.remove(winston.transports.Console);
-winston.add(winston.transports.Console, {'timestamp': () => {
-                                                              return moment().format('YYYY-MM-DD HH:mm:ss,SSS')
-                                                            },
-                                          'formatter': (options) => {
-                                                                return options.timestamp() + ' 221b_server     ' + sprintf('%-10s', options.level.toUpperCase()) + ' ' + (options.message ? options.message : '') +
-          (options.meta && Object.keys(options.meta).length ? '\n\t'+ JSON.stringify(options.meta) : '' );;
-                                                              }
-                                         });
+winston.add(winston.transports.Console, tOptions);
+
 if (development) {
   winston.level = 'debug';
   winston.debug('221b Server is running in development mode');
@@ -80,7 +83,6 @@ if (development) {
 else {
   winston.level = 'info';
 }
-
 
 winston.info('Starting 221B server version', version);
 

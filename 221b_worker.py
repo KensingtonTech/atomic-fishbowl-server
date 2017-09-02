@@ -149,7 +149,11 @@ if __name__ == "__main__":
     #Set up logging
     log = logging.getLogger()
     handler = logging.StreamHandler()
-    formatter = logging.Formatter('%(asctime)s 221b_worker     %(levelname)-10s %(message)s')
+    formatStr = '%(asctime)s 221b_worker     %(levelname)-10s %(message)s'
+    if 'SYSTEMD' in os.environ:
+      formatStr = '221b_worker     %(levelname)-10s %(message)s'
+    formatter = logging.Formatter(formatStr)
+    #formatter = logging.Formatter('%(asctime)s 221b_worker     %(levelname)-10s %(message)s')
     handler.setFormatter(formatter)
 
     log.setLevel(logging.DEBUG)
