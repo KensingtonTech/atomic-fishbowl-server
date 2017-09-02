@@ -47,7 +47,7 @@
     },
     "requires": [
       "unrar",
-      "mongodb-org",
+      "mongodb-org"
     ],
     "engines": {
       "node": ">= 8.4.0"
