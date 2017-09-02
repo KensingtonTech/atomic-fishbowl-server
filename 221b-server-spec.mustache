@@ -79,6 +79,10 @@ groupdel {{username}}
 rm -rf %{buildroot}
 
 %files
+%exclude {{installDir}}/rpmbuild
+%exclude {{installDir}}/package.json
+%exclude {{installDir}}/package-lock.json
+%exclude {{installDir}}/221b-server-spec.mustache
 %defattr(644, {{username}}, {{username}}, 755)
 {{installDir}}
 {{#hasExecutableFiles}}
@@ -87,7 +91,3 @@ rm -rf %{buildroot}
 {{.}}
 {{/executableFiles}}
 {{/hasExecutableFiles}}
-%exclude {{installDir}}/rpmbuild
-%exclude {{installDir}}/package.json
-%exclude {{installDir}}/package-lock.json
-%exclude {{installDir}}/221b-server-spec.mustache
