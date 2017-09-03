@@ -82,6 +82,7 @@ rm -rf %{buildroot}
 %exclude {{installDir}}/package.json
 %exclude {{installDir}}/package-lock.json
 %exclude {{installDir}}/221b-server-spec.mustache
+/lib/systemd/system/221b-server.service
 %defattr(644, {{username}}, {{username}}, 755)
 {{installDir}}
 {{#hasExecutableFiles}}

@@ -33,18 +33,15 @@
     "installDir": "/opt/kentech/221b-server/bin",
     "specTemplate": "221b-server-spec.mustache",
     "noarch": false,
-    "post": [
-      "mv /opt/kentech/221b-server/bin/221b-server.systemd /lib/systemd/system/221b-server.service"
-    ],
     "executable": [
       "./221b_worker.py"
     ],
     "requires": [
       "unrar",
       "mongodb-org"
-    ],
-    "engines": {
-      "node": ">= 8.4.0"
-    }
+    ]
+  },
+  "engines": {
+    "node": ">= 8.4.0"
   }
 }
