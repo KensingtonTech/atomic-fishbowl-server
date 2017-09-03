@@ -57,6 +57,8 @@ getent group {{username}} >/dev/null || groupadd -r {{username}}
 getent passwd {{username}} >/dev/null || useradd -r -g {{username}} -G {{username}} -d {{installDir}} -s /sbin/nologin {{username}}
 
 %install
+mkdir -p %{buildroot}%{_unitdir}
+mv 221b-server.service %{buildroot}%{_unitdir}
 mkdir -p %{buildroot}{{installDir}}
 cp -r ./* %{buildroot}{{installDir}}
 
@@ -82,7 +84,8 @@ rm -rf %{buildroot}
 %exclude {{installDir}}/package.json
 %exclude {{installDir}}/package-lock.json
 %exclude {{installDir}}/221b-server-spec.mustache
-/lib/systemd/system/221b-server.service
+%{_unitdir}/221b-server.service
+%license 221b.license
 %defattr(644, {{username}}, {{username}}, 755)
 {{installDir}}
 {{#hasExecutableFiles}}
