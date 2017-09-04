@@ -41,9 +41,9 @@
       "mongodb-org",
       "poppler-utils",
       "ghostscript",
-      "python-magic",
-      "python-rarfile",
-      "python-Pillow"
+      "kta-python-magic",
+      "kta-python-rarfile",
+      "kta-python-Pillow"
     ]
   },
   "engines": {
