@@ -38,7 +38,12 @@
     ],
     "requires": [
       "unrar",
-      "mongodb-org"
+      "mongodb-org",
+      "poppler-utils",
+      "ghostscript",
+      "python-magic",
+      "python-rarfile",
+      "python-Pillow"
     ]
   },
   "engines": {
