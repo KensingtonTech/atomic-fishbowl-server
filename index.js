@@ -1,6 +1,7 @@
 'use strict';
 
 // Load dependencies
+require('source-map-support').install();
 const Observable = require('rxjs/Observable').Observable;
 const Subject = require('rxjs/Subject').Subject;
 const express = require('express');
@@ -28,7 +29,7 @@ const JwtStrategy = require('passport-jwt').Strategy;
 const ExtractJwt = require('passport-jwt').ExtractJwt;
 var mongo = require('mongodb').MongoClient;
 const buildProperties = require('./build-properties');
-const version = `${buildProperties.major}.${buildProperties.minor}.${buildProperties.patch}-${buildProperties.level} build ${buildProperties.build}`;
+const version = `${buildProperties.major}.${buildProperties.minor}.${buildProperties.patch}.${buildProperties.build}-${buildProperties.level}`;
 var development = process.env.NODE_ENV !== 'production';
 // export NODE_ENV='production'
 // export NODE_ENV='development'

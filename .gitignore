@@ -6,3 +6,5 @@ test.*
 SOURCES
 SPECS
 rpmbuild
+server.js
+server.js.map
