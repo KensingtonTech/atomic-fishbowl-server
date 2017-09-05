@@ -54,8 +54,8 @@ npm rebuild
 {{/noarch}}
 
 %pre
-getent group {{username}} >/dev/null || groupadd -r {{username}}
-getent passwd {{username}} >/dev/null || useradd -r -g {{username}} -G {{username}} -d {{installDir}} -s /sbin/nologin {{username}}
+getent group %{basename} >/dev/null || groupadd -r %{basename}
+getent passwd %{basename} >/dev/null || useradd -r -g %{basename} -G %{basename} -d {{installDir}} -s /sbin/nologin %{basename}
 
 %install
 mkdir -p %{buildroot}%{_unitdir}
@@ -74,7 +74,7 @@ cp -r ./* %{buildroot}{{installDir}}
 
 %postun
 %systemd_postun_with_restart %{basename}.service
-userdel {{username}}
+userdel %{basename}
 
 %clean
 rm -rf %{buildroot}
@@ -86,10 +86,10 @@ rm -rf %{buildroot}
 %exclude {{installDir}}/221b-server-spec.mustache
 %{_unitdir}/221b-server.service
 %license 221b.license
-%defattr(644, {{username}}, {{username}}, 755)
+%defattr(644, %{basename}, %{basename}, 755)
 {{installDir}}
 {{#hasExecutableFiles}}
-%defattr(755, {{username}}, {{username}}, 755)
+%defattr(755, %{basename}, %{basename}, 755)
 {{#executableFiles}}
 {{.}}
 {{/executableFiles}}
