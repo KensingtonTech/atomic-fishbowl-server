@@ -80,6 +80,7 @@ userdel %{basename}
 rm -rf %{buildroot}
 
 %files
+%define basename 221b-server
 %exclude {{installDir}}/rpmbuild
 %exclude {{installDir}}/package.json
 %exclude {{installDir}}/package-lock.json
