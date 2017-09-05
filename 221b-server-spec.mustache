@@ -1,10 +1,10 @@
-%define name {{name}}
+%define name kta-{{name}}
 %define release {{release}}
 %define buildroot %(mktemp -ud %{_tmppath}/%{name}-%{version}-%{release}-XXXXXX)
 %{?systemd_requires}
 BuildRequires: systemd
 
-Name: kta-%{name}
+Name: %{name}
 Version: %{version}
 {{#dist}}
 %define dist {{dist}}
