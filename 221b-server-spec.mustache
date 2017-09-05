@@ -81,6 +81,9 @@ rm -rf %{buildroot}
 
 %files
 %exclude {{installDir}}/index.js
+%exclude {{installDir}}/fetcher.py
+%exclude {{installDir}}/communicator.py
+%exclude {{installDir}}/ContentObj.py
 %exclude {{installDir}}/rpmbuild
 %exclude {{installDir}}/package.json
 %exclude {{installDir}}/package-lock.json
