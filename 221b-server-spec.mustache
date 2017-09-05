@@ -80,6 +80,7 @@ userdel %{username}
 rm -rf %{buildroot}
 
 %files
+%exclude {{installDir}}/index.js
 %exclude {{installDir}}/rpmbuild
 %exclude {{installDir}}/package.json
 %exclude {{installDir}}/package-lock.json

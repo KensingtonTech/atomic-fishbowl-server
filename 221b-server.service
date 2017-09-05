@@ -9,7 +9,7 @@ User=221b-server
 WorkingDirectory=/opt/kentech/221b-server/bin
 Environment="NODE_ENV=production"
 Environment="SYSTEMD=1"
-ExecStart=/usr/bin/node /opt/kentech/221b-server/bin/index.js
+ExecStart=/usr/bin/node /opt/kentech/221b-server/bin/server.js
 Restart=on-failure
 
 [Install]
