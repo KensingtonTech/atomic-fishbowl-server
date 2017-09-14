@@ -3,16 +3,17 @@ let buildProperties = {
   minor: 0,
   patch: 0,
   build: '9999',
-  level: 2
+  level: 1
 };
 
 /*
 build:
-  0: development
-  1: beta
-  2: release candidate
-  3: final release - debug build
-  4: final release
+  0: feature
+  1: development
+  2: beta
+  3: release candidate
+  4: final release - debug build
+  5: final release
 */
 
 module.exports = buildProperties;
