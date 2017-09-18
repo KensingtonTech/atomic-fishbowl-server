@@ -23,4 +23,4 @@ rm -rf /var/cache/yum;
 #Install the rest of our files
 COPY atomic-*.sh /bin/
 COPY atomic-221b-server.service /usr/lib/systemd/system/221b-server.service
-COPY *.js* models/ node_modules/ 221b-worker.py *.so 221b.license /opt/kentech/221b-server/bin/
+COPY *.js* models/ node_modules/ 221b_worker.py *.so 221b.license /opt/kentech/221b-server/bin/
