@@ -12,4 +12,4 @@ ExecReload=/usr/bin/docker kill -s HUP 221b-server
 ExecStop=/usr/bin/docker stop 221b-server
 
 [Install]
-WantedBy=local.target
+WantedBy=multi-user.target
