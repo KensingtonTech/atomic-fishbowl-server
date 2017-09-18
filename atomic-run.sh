@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# Stop existing container, if already running
+# Check if existing container is already running
 WASSTARTED=0
 chroot $HOST /usr/bin/docker ps -f name=$NAME | grep -q ${NAME}$
 if [ $? -eq 0 ]; then
