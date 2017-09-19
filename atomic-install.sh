@@ -1,5 +1,16 @@
 #!/bin/bash
 
+ETCDIR=/etc/kentech/221b
+CFGFILE=221b-server.conf
+
+# Create a .default version of our cfg file for reference
+cp -f /opt/kentech/221b-server/bin/$CFGFILE ${HOST}${ETCDIR}/${CFGFILE}.default
+if [ ! -f ${HOST}${ETCDIR}/$CFGFILE ]; then
+  # If our cfg file doesn't exist on the host, then create it
+  echo "Creating 221B server configuration file"
+  mv -f /opt/kentech/221b-server/bin/$CFGFILE ${HOST}${ETCDIR}/${CFGFILE}
+fi
+
 # Stop existing container, if already running
 WASSTARTED=0
 chroot $HOST /usr/bin/docker ps -f name=$NAME | grep -q ${NAME}$
@@ -18,7 +29,7 @@ fi
 
 # Create container
 echo Creating container $NAME from image $IMAGE
-chroot $HOST /usr/bin/docker create --name $NAME --net=host -p 127.0.0.1:3002:3002 -v /etc/kentech:/etc/kentech:ro -v /var/kentech:/var/kentech:rw -e SYSTEMD=1 $IMAGE
+chroot $HOST /usr/bin/docker create --name $NAME --network 221b-network -v /etc/kentech:/etc/kentech:ro -v /var/kentech:/var/kentech:rw -e SYSTEMD=1 $IMAGE
 
 # Copy systemd unit file to host OS
 echo Installing systemd unit file

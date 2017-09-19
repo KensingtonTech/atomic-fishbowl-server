@@ -1940,5 +1940,6 @@ function purgeSessions(thisRollingCollection, sessionsToPurge) {
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
 // Start listening for client traffic and away we go
-app.listen(listenPort, '127.0.0.1');
+// app.listen(listenPort, '127.0.0.1');
+app.listen(listenPort);
 winston.info('Serving on localhost:' + listenPort);
