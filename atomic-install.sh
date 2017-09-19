@@ -27,6 +27,13 @@ if [ $? -eq 0 ]; then
   chroot $HOST /usr/bin/docker rm $NAME
 fi
 
+# Create network '221b-network' if not already there
+chroot $HOST /usr/bin/docker network ls  | awk '{print $2}' | grep -q ^221b-network$
+if [ $? -ne 0 ]; then
+  echo Creating bridge network 221b-network
+  chroot $HOST /usr/bin/docker network create 221b-network >/dev/null
+fi
+
 # Create container
 echo Creating container $NAME from image $IMAGE
 chroot $HOST /usr/bin/docker create --name $NAME --network 221b-network -v /etc/kentech:/etc/kentech:ro -v /var/kentech:/var/kentech:rw -e SYSTEMD=1 $IMAGE
