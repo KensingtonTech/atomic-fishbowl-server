@@ -3,6 +3,11 @@
 ETCDIR=/etc/kentech/221b
 CFGFILE=221b-server.conf
 
+if [ ! -d ${HOST}${ETCDIR} ]; then
+  echo Creating $ETCDIR
+  mkdir -p ${HOST}${ETCDIR}
+fi
+
 # Create a .default version of our cfg file for reference
 cp -f /opt/kentech/221b-server/bin/$CFGFILE ${HOST}${ETCDIR}/${CFGFILE}.default
 if [ ! -f ${HOST}${ETCDIR}/$CFGFILE ]; then
