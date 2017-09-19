@@ -33,7 +33,7 @@ const version = `${buildProperties.major}.${buildProperties.minor}.${buildProper
 var development = process.env.NODE_ENV !== 'production';
 // export NODE_ENV='production'
 // export NODE_ENV='development'
-var purgeHack = false; // causes sessions older than 5 minutes to be purged, if set to true.  Useful for testing purging without having to wait an hour
+const purgeHack = false; // causes sessions older than 5 minutes to be purged, if set to true.  Useful for testing purging without having to wait an hour
 
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -103,18 +103,48 @@ var collectionsData = {};
 
 const cfgDir = '/etc/kentech/221b';
 const certDir = cfgDir + '/certificates';
+const cfgFile = cfgDir + '/221b-server.conf';
 const jwtPrivateKeyFile = certDir + '/221b.key';
 const jwtPublicKeyFile = certDir + '/221b.pem';
 const collectionsUrl = '/collections'
 var collectionsDir = '/var/kentech/221b/collections';
 
+try {
+  //  Read in config file
+  var config = JSON.parse( fs.readFileSync(cfgFile, 'utf8') );
+}
+catch(exception) {
+  winston.error(`Exception reading config file ${cfgFile}:` + exception);
+  process.exit(1);
+}
 
-
-
-
-
-
-
+if (! 'dbConfig' in config) {
+  winston.error(`'dbConfig' property not defined in ${cfgFile}`);
+  sys.exit(1);
+}
+if (! 'host' in config['dbConfig']) {
+  winston.error(`'dbConfig.host' property not defined in ${cfgFile}`);
+  sys.exit(1);
+}
+if (! 'port' in config['dbConfig']) {
+  winston.error(`'dbConfig.port' property not defined in ${cfgFile}`);
+  sys.exit(1);
+}
+if (! 'authentication' in config['dbConfig']) {
+  winston.error(`'dbConfig.authentication' property not defined in ${cfgFile}`);
+  sys.exit(1);
+}
+if (! 'enabled' in config['dbConfig']['authentication']) {
+  winston.error(`'dbConfig.authentication.enabled' property not defined in ${cfgFile}`);
+  sys.exit(1);
+}
+if ( config['dbConfig']['authentication']['enabled']
+      && ( ! 'user' in config['dbConfig']['authentication'] || ! 'password' in config['dbConfig']['authentication'])
+   ) {
+  winston.error(`Either 'dbConfig.authentication.username' or 'dbConfig.authentication.password' property not defined in ${cfgFile}`);
+  sys.exit(1);
+}
+winston.debug(config);
 
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -211,7 +241,11 @@ var jwtOpts = {
 
 //We use mongoose for auth, and MongoClient for everything else.  This is because Passport-Local Mongoose required it, and it is ill-suited to the free-formish objects which we want to use.
 
-var mongoUrl = "mongodb://localhost:27017/221b";
+// var mongoUrl = "mongodb://localhost:27017/221b";
+var mongoUrl = `mongodb://${config['dbConfig']['host']}:${config['dbConfig']['port']}/221b`;
+if (config.dbConfig.authentication.enabled) {
+  mongoUrl = `mongodb://${config.dbConfig.authentication.user}:${config.dbConfig.authentication.password}@${config['dbConfig']['host']}:${config['dbConfig']['port']}/221b?authSource=admin`;
+}
 connectToDB(); //this must come before mongoose user connection so that we know whether to create the default admin account
 
 var User = require('./models/user');
@@ -220,7 +254,13 @@ passport.serializeUser(User.serializeUser());
 passport.deserializeUser(User.deserializeUser());
 
 // Connect to Mongoose
-mongoose.connect("mongodb://localhost:27017/221b_users", { useMongoClient: true, promiseLibrary: global.Promise });
+// mongoose.connect("mongodb://localhost:27017/221b_users", { useMongoClient: true, promiseLibrary: global.Promise });
+var mongooseUrl = `mongodb://${config['dbConfig']['host']}:${config['dbConfig']['port']}/221b_users`
+var mongooseOptions = { useMongoClient: true, promiseLibrary: global.Promise };
+if (config.dbConfig.authentication.enabled) {
+  mongooseUrl = `mongodb://${config.dbConfig.authentication.user}:${config.dbConfig.authentication.password}@${config['dbConfig']['host']}:${config['dbConfig']['port']}/221b_users?authSource=admin`;
+}
+mongoose.connect(mongooseUrl, mongooseOptions );
 var db = mongoose.connection;
 //db.on('error', (err) => {winston.error("Error connecting to 221b_users DB:"), err} );
 //db.once('open', () => {winston.info("Connected to 221b_users DB")} );
