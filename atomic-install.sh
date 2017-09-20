@@ -22,14 +22,14 @@ chroot $HOST /usr/bin/docker ps -f name=$NAME | grep -q ${NAME}$
 if [ $? -eq 0 ]; then
   WASSTARTED=1
   echo Stopping container $NAME
-  chroot $HOST /usr/bin/docker stop $NAME
+  chroot $HOST /usr/bin/docker stop $NAME >/dev/null
 fi
 
 # Remove existing container, if present
 chroot $HOST /usr/bin/docker ps -a -f name=$NAME | grep -q ${NAME}$
 if [ $? -eq 0 ]; then
   echo Removing existing $NAME container
-  chroot $HOST /usr/bin/docker rm $NAME
+  chroot $HOST /usr/bin/docker rm $NAME >/dev/null
 fi
 
 # Create network '221b-network' if not already there
@@ -41,7 +41,7 @@ fi
 
 # Create container
 echo Creating container $NAME from image $IMAGE
-chroot $HOST /usr/bin/docker create --name $NAME --network 221b-network -v /etc/kentech:/etc/kentech:ro -v /var/kentech:/var/kentech:rw -e SYSTEMD=1 $IMAGE
+chroot $HOST /usr/bin/docker create --name $NAME --network 221b-network -v /etc/kentech:/etc/kentech:ro -v /var/kentech:/var/kentech:rw -e SYSTEMD=1 $IMAGE >/dev/null
 
 # Copy systemd unit file to host OS
 echo Installing systemd unit file

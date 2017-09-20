@@ -6,14 +6,14 @@ chroot $HOST /usr/bin/docker ps -f name=$NAME | grep -q ${NAME}$
 if [ $? -eq 0 ]; then
   WASSTARTED=1
   echo Stopping container $NAME
-  chroot $HOST /usr/bin/docker stop $NAME
+  chroot $HOST /usr/bin/docker stop $NAME >/dev/null
 fi
 
 # Remove existing container, if present
 chroot $HOST /usr/bin/docker ps -a -f name=$NAME | grep -q ${NAME}$
 if [ $? -eq 0 ]; then
   echo Removing existing $NAME container
-  chroot $HOST /usr/bin/docker rm $NAME
+  chroot $HOST /usr/bin/docker rm $NAME >/dev/null
 else
   echo Container $NAME was not found
 fi
