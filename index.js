@@ -96,7 +96,7 @@ winston.info('Starting 221B server version', version);
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
 process.on('SIGTERM', function() {
-  winston.info('Caught SIGTERM, stopping gracefully');
+  winston.info('Caught SIGTERM.  Exiting gracefully');
   process.exit(0);
 });
 
