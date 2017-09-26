@@ -10,13 +10,14 @@ if [ $? -eq 0 ]; then
 fi
 
 # Remove existing container, if present
-chroot $HOST /usr/bin/docker ps -a -f name=$NAME | grep -q ${NAME}$
-if [ $? -eq 0 ]; then
-  echo Removing existing $NAME container
-  chroot $HOST /usr/bin/docker rm $NAME >/dev/null
-else
-  echo Container $NAME was not found
-fi
+# We don't need the below code anymore, as atomic now deletes the container on its own for some daft reason
+#chroot $HOST /usr/bin/docker ps -a -f name=$NAME | grep -q ${NAME}$
+#if [ $? -eq 0 ]; then
+#  echo Removing existing $NAME container
+#  chroot $HOST /usr/bin/docker rm $NAME >/dev/null
+#else
+#  echo Container $NAME was not found
+#fi
 
 # Remove systemd unit file
 if [ -f "$HOST/etc/systemd/system/$NAME.service" ]; then
