@@ -24,8 +24,9 @@ COPY *.js* 221b_worker.py *.so 221b.license /opt/kentech/221b-server/bin/
 ARG CACHE_DATE=2016-01-01
 RUN yum clean all; \
 yum update -y; \
-curl http://kentechrepo/yumrepo/221b_1.0.0_release/221b-1.0.0-release.repo > /etc/yum.repos.d/221b-1.0.0-release.repo; \
+rpm --import http://kentechrepo/yumrepo/221b_1.0.0_signed/221b-1.x.key
+curl http://kentechrepo/yumrepo/221b_1.0.0_signed/221b-1.0.0-signed.repo > /etc/yum.repos.d/221b-1.0.0-signed.repo; \
 yum install -y nodejs kta-python-magic kta-python-Pillow kta-python-rarfile ghostscript poppler-utils libjpeg-turbo openjpeg unzip unrar; \
-rm -f /etc/yum.repos.d/221b-1.0.0-release.repo; \
+rm -f /etc/yum.repos.d/221b-1.0.0-signed.repo; \
 yum clean all; \
 rm -rf /var/cache/yum;
