@@ -41,7 +41,7 @@ fi
 
 # Create container
 echo Creating container $NAME from image $IMAGE
-chroot $HOST /usr/bin/docker create --name $NAME --network 221b-network --ip 172.31.255.243 --add-host 221b-mongo:172.31.255.242 -v /etc/kentech:/etc/kentech:ro -v /var/kentech:/var/kentech:rw -e SYSTEMD=1 $IMAGE >/dev/null
+chroot $HOST /usr/bin/docker create --name $NAME --network 221b-network --ip 172.31.255.243 --add-host 221b-mongo:172.31.255.242 -v /etc/kentech:/etc/kentech:ro -v /var/kentech:/var/kentech:rw,z -e SYSTEMD=1 $IMAGE >/dev/null
 
 # Copy systemd unit file to host OS
 echo Installing systemd unit file
