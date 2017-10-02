@@ -31,4 +31,5 @@ yum install -y nodejs kta-python-magic kta-python-Pillow kta-python-rarfile ghos
 rm -f /etc/yum.repos.d/221b-1.0.0-signed.repo; \
 yum clean all; \
 rm -rf /var/cache/yum; \
-grep -v kentechrepo /etc/hosts > /etc/hosts;
+H=`grep -v kentechrepo /etc/hosts`; \
+echo -n $H > /etc/hosts;
