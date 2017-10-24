@@ -22,7 +22,8 @@ COPY *.js* 221b_worker.py *.so 221b.license /opt/kentech/221b-server/bin/
 
 #install our rpm dependencies
 ARG CACHE_DATE=2016-01-01
-RUN echo 172.16.110.11 kentechrepo >> /etc/hosts; \
+RUN \
+#echo 172.16.110.11 kentechrepo >> /etc/hosts; \
 yum clean all; \
 yum update -y; \
 rpm --import http://kentechrepo/yumrepo/221b_1.0.0_signed/221b-1.x.key; \
