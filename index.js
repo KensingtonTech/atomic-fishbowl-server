@@ -34,7 +34,14 @@ var development = process.env.NODE_ENV !== 'production';
 // export NODE_ENV='production'
 // export NODE_ENV='development'
 const purgeHack = false; // causes sessions older than 5 minutes to be purged, if set to true.  Useful for testing purging without having to wait an hour
-
+var gsPath = '/usr/bin/gs';
+var pdftotextPath = '/usr/bin/pdftotext';
+var unrarPath = '/usr/bin/unrar';
+if (development) {
+  gsPath = '/opt/local/bin/gs';
+  pdftotextPath = '/opt/local/bin/pdftotext';
+  unrarPath = '/opt/local/bin/unrar';
+}
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////////EXPRESS////////////////////////////////////////////////////////////////
@@ -168,9 +175,6 @@ winston.debug(config);
 //Set default preferences
 var defaultPreferences = {
   nwInvestigateUrl: '',
-  gsPath: '/usr/bin/gs',
-  pdftotextPath: '/usr/bin/pdftotext',
-  unrarPath: '/usr/bin/unrar',
   defaultNwQuery: "filetype = 'jpg','gif','png','pdf','zip','rar','windows executable','apple executable (pef)','apple executable (mach-o)'",
   defaultQuerySelection : "All Supported File Types",
   defaultImageLimit: 1000,
@@ -524,6 +528,7 @@ app.delete('/api/user/:id', passport.authenticate('jwt', { session: false } ), (
 //login and return JWT
 
 app.get('/api/version', passport.authenticate('jwt', { session: false } ), (req,res)=>{
+  // Gets the server version
   winston.info('GET /api/version');
   try {
     res.json({version: version});
@@ -897,9 +902,9 @@ function fixedSocketConnectionHandler(id, socket, tempName, subject) {
     imageLimit: collections[id].imageLimit,
     minX: collections[id].minX,
     minY: collections[id].minY,
-    gsPath: preferences.gsPath,
-    pdftotextPath: preferences.pdftotextPath,
-    unrarPath: preferences.unrarPath,
+    gsPath: gsPath,
+    pdftotextPath: pdftotextPath,
+    unrarPath: unrarPath,
     distillationEnabled: collections[id].distillationEnabled,
     regexDistillationEnabled: collections[id].regexDistillationEnabled,
     md5Enabled: collections[id].md5Enabled,
@@ -1091,7 +1096,8 @@ rollingCollectionSubjects = {
     subject: 'rxjs observable for the collection which can be used to pipe output back to the client',
     lastRun: 'the time it was last run',
     paused: boolean (paused state of a monitoring collection),
-    runs: 'number of times rollingCollectionSocketConnectionHandler() has run'
+    runs: 'number of times rollingCollectionSocketConnectionHandler() has run',
+    socket: the unix socket
   },
   'collectionId2': ...
 }
@@ -1101,14 +1107,14 @@ rollingCollectionSubjects = {
 var rollingCollections = {}; // This houses collection data for rolling and monitoring collections.  It is never committed to the DB as these collections are intended to be temporary only
 
 
-function rollingCollectionSocketConnectionHandler(id, socket, tempName, subject, sessionId) {
+function rollingCollectionSocketConnectionHandler(id, socket, tempName, subject, clientSessionId) {
   // For rolling and monitoring collections
   // Handles all dealings with the worker process after it has been spawned, including sending it its configuration, and sending data received from it to the chunkHandler() function
   // It also purges old data from the collection as defined by the type of collection and number of hours back to retain
 
   let rollingId = id;
-  if (sessionId != '') {
-    rollingId = sessionId;
+  if (clientSessionId != '') {
+    rollingId = clientSessionId;
   }
 
   let thisRollingCollection =  rollingCollections[rollingId];
@@ -1186,9 +1192,9 @@ function rollingCollectionSocketConnectionHandler(id, socket, tempName, subject,
     imageLimit: thisCollection.imageLimit,
     minX: thisCollection.minX,
     minY: thisCollection.minY,
-    gsPath: preferences.gsPath,
-    pdftotextPath: preferences.pdftotextPath,
-    unrarPath: preferences.unrarPath,
+    gsPath: gsPath,
+    pdftotextPath: pdftotextPath,
+    unrarPath: unrarPath,
     distillationEnabled: thisCollection.distillationEnabled,
     regexDistillationEnabled: thisCollection.regexDistillationEnabled,
     md5Enabled: thisCollection.md5Enabled,
@@ -1264,7 +1270,7 @@ function rollingCollectionSocketConnectionHandler(id, socket, tempName, subject,
   socket.setEncoding('utf8');
   
   // Handle data received from the worker over the socket (this really builds the collection)
-  socket.on('data', chunk => data = chunkHandler(rollingCollections, id, subject, data, chunk, sessionId) );
+  socket.on('data', chunk => data = chunkHandler(rollingCollections, id, subject, data, chunk, clientSessionId) );
                               
                               
   // Once the worker has exited, delete the socket temporary file
@@ -1275,6 +1281,7 @@ function rollingCollectionSocketConnectionHandler(id, socket, tempName, subject,
 
   // Send configuration to worker.  This officially kicks off the work.  After this, we should start receiving data on the socket
   socket.write(JSON.stringify(outerCfg) + '\n'); 
+  socket.end();
   
 }
 
@@ -1282,14 +1289,14 @@ function rollingCollectionSocketConnectionHandler(id, socket, tempName, subject,
 
 
 
-function runRollingCollection(id, res, sessionId='') {
+function runRollingCollection(collectionId, res, clientSessionId='') {
   // Executes the building of a rolling or monitoring collection
 
-  winston.debug("runRollingCollection(id)");
+  winston.debug("runRollingCollection(collectionId)");
 
-  let rollingId = id;
-  if (collections[id].type === 'monitoring') {
-    rollingId = sessionId;
+  let rollingId = collectionId;
+  if (collections[collectionId].type === 'monitoring') {
+    rollingId = clientSessionId;
   }
 
   var subject = rollingCollectionSubjects[rollingId].subject;
@@ -1301,25 +1308,25 @@ function runRollingCollection(id, res, sessionId='') {
 
   let thisRollingCollection =  rollingCollections[rollingId];
   let thisRollingCollectionSubject = rollingCollectionSubjects[rollingId];
-  let thisCollection = collections[id];
+  let thisCollection = collections[collectionId];
 
   var work = ( () => {
     // Main body of worker execution
-    // This is wrapped in an arrow function so that it will retain the local scope of 'id'
+    // This is wrapped in an arrow function so that it will retain the local scope of 'collectionId'
     // We also want to be able to call this body from a timer, so that's another reason we wrap it
 
     try {
 
       winston.debug("runRollingCollection(): work(): Starting run for rollingId", rollingId);
 
-      if ( collections[id].type === 'rolling' && rollingId in rollingCollectionSubjects && 'worker' in thisRollingCollectionSubject && thisRollingCollectionSubject.runs == 1) {
+      if ( collections[collectionId].type === 'rolling' && rollingId in rollingCollectionSubjects && 'worker' in thisRollingCollectionSubject && thisRollingCollectionSubject.runs == 1) {
         // If we're a rolling collection still on our first run, let it continue running until it completes
         winston.info('runRollingCollection(): work(): First run of rolling collection is still running.  Delaying next run 60 seconds');
         return;
       }
       
       if ( rollingId in rollingCollectionSubjects && 'worker' in thisRollingCollectionSubject && thisRollingCollectionSubject.runs > 1) {
-        // Check if there's already a worker process already running which has overrun the 60 second mark, and if so, kill it
+        // Check if there's already a python worker process already running which has overrun the 60 second mark, and if so, kill it
         winston.info('runRollingCollection(): work(): Timer expired for running worker.  Terminating worker');
         let oldWorker = thisRollingCollectionSubject['worker'];
         oldWorker.kill('SIGINT');
@@ -1327,16 +1334,7 @@ function runRollingCollection(id, res, sessionId='') {
       }
 
       if (thisCollection.type === 'monitoring' && thisRollingCollectionSubject.paused === true) {
-        // Monitoring collection is paused
-        // Now we end and delete this monitoring collection, except for its files (which still may be in use on the client)
-        winston.debug('runRollingCollection(): work(): Ending work for paused monitoring collection', rollingId);
-        clearInterval(thisRollingCollectionSubject.interval); // stop work() from being called again
-        thisRollingCollectionSubject.subject.complete(); // end observable
-        res.write('{"close":true}]'); // Close the array so that oboe knows we're done
-        res.flush();
-        res.end();
-        delete rollingCollectionSubjects[rollingId];
-        delete rollingCollections[rollingId];
+        winston.debug(`runRollingCollection(): work(): Collection ${rollingId} is puased.  Returning`);
         return;
       }
 
@@ -1344,7 +1342,13 @@ function runRollingCollection(id, res, sessionId='') {
       let tempName = temp.path({suffix: '.socket'});
 
       // Now open the UNIX domain socket that will talk to worker script by creating a handler (or server) to handle communications
-      let socketServer = net.createServer( (socket) => { rollingCollectionSocketConnectionHandler(id, socket, tempName, subject, sessionId); });
+      let socketServer = net.createServer( (socket) => { 
+        // Add our socket to rollingCollectionSubjects[] so we can handle it later
+        thisRollingCollectionSubject['socket'] = socket;
+        rollingCollectionSocketConnectionHandler(collectionId, socket, tempName, subject, clientSessionId);
+        // We won't write any more data to the socket, so we will call close() on socketServer.  This prevents the server from accepting any new connections
+        socketServer.close();
+      });
 
       
       socketServer.listen(tempName, () => {
@@ -1361,43 +1365,66 @@ function runRollingCollection(id, res, sessionId='') {
         thisRollingCollectionSubject['worker'] = worker;
 
         
-        worker.on('exit', (code) => {
+        worker.on('exit', (code, signal) => {
           // This is where we handle the exiting of the worker process
 
           if (typeof code === 'undefined') {
-            // Handle really bad worker exit with no error code - maybe because we couldn't spawn it at all?
+            // Handle really abnormal worker exit with no error code - maybe because we couldn't spawn it at all?  We likely won't ever enter this block
             winston.debug('runRollingCollection(): work(): listen(): onExit(): Worker process exited abnormally without an exit code');
             thisCollection['state'] = 'error';
-            subject.next({collection: { id: id, state: 'error'}});
+            subject.next({collection: { id: collectionId, state: 'error'}});
             if (rollingId in rollingCollectionSubjects && 'worker' in thisRollingCollectionSubject) {
               delete thisRollingCollectionSubject.worker;
             }
           }
 
-          else if (code != 0) {
-            // Handle worker exit with error code
-            winston.debug('runRollingCollection(): work(): listen(): onExit(): Worker process exited in bad state with non-zero exit code', code.toString() );
-            thisCollection['state'] = 'error';
-            subject.next({collection: { id: id, state: 'error'}});
-            if (rollingId in rollingCollectionSubjects && 'worker' in thisRollingCollectionSubject) {
-              delete thisRollingCollectionSubject.worker;
+
+
+
+          else if (code !== null || signal !== null) {
+            // Handle normal worker exit code 0
+            if (code !== null && code === 0) {
+              winston.debug('runRollingCollection(): work(): listen(): onExit(): Worker process exited normally with exit code 0');
+              // Tell client that we're resting
+              subject.next({collection: { id: collectionId, state: 'resting'}});
+            
             }
-          }
-
-          else {
-            // Handle normal worker exit
-            winston.debug('runRollingCollection(): work(): listen(): onExit(): Worker process exited normally with exit code', code.toString());
-
-            // Tell client that we're resting
-            subject.next({collection: { id: id, state: 'resting'}});
+            else if (code !== null && code !== 0) {
+              // Handle worker exit with non-zero (error) exit code
+              winston.debug('runRollingCollection(): work(): listen(): onExit(): Worker process exited in bad state with non-zero exit code', code.toString() );
+              thisCollection['state'] = 'error';
+              subject.next({collection: { id: collectionId, state: 'error'}});
+              if (rollingId in rollingCollectionSubjects && 'worker' in thisRollingCollectionSubject) {
+                delete thisRollingCollectionSubject.worker;
+              }
+            }
+            else {
+              winston.debug('runRollingCollection(): work(): listen(): onExit(): Worker process was terminated by signal', signal);
+              // Tell client that we're resting
+              subject.next({collection: { id: collectionId, state: 'resting'}});
+            }
 
             // Save the collection to the DB
-            db.collection('collections').update( {'id': id }, thisCollection, (err, res) => {
+            db.collection('collections').update( {'id': collectionId }, thisCollection, (err, res) => {
               if (err) throw err;
             });
             
+            if (thisCollection.type === 'monitoring' && thisRollingCollectionSubject.paused === true) {
+              // Monitoring collection is paused
+              // Now we end and delete this monitoring collection, except for its files (which still may be in use on the client)
+              winston.debug('runRollingCollection(): work(): listen(): onExit(): Completing work for paused monitoring collection', rollingId);
+              clearInterval(thisRollingCollectionSubject.interval); // stop work() from being called again
+              thisRollingCollectionSubject.subject.complete(); // end observable
+              res.write('{"close":true}]'); // Close the array so that oboe knows we're done
+              res.flush();
+              res.end();
+              delete rollingCollectionSubjects[rollingId];
+              delete rollingCollections[rollingId];
+              return;
+            }
+            
             /*// Save the collection data to the DB -- WE SHOULDN'T HAVE TO DO THIS AS THESE DON'T PERSIST!!!!!!!
-            db.collection('collectionsData').update( {'id': id }, {'id': id, 'data': JSON.stringify(collectionsData[id])}, (err, res) => {
+            db.collection('collectionsData').update( {'id': collectionId }, {'id': collectionId, 'data': JSON.stringify(collectionsData[collectionId])}, (err, res) => {
               if (err) throw err;
             });*/
             
@@ -1405,6 +1432,7 @@ function runRollingCollection(id, res, sessionId='') {
               delete thisRollingCollectionSubject.worker;
             }
           }
+
         });
       });
     }
@@ -1428,35 +1456,46 @@ function runRollingCollection(id, res, sessionId='') {
 
 
 app.get('/api/pausemonitoringcollection/:id', passport.authenticate('jwt', { session: false } ), (req, res) => {
-  let id = req.headers['twosessionid'];
-  winston.info(`GET /api/pausemonitoringcollection/:id: Pausing monitoring collection ${id}`);
-  rollingCollectionSubjects[id]['paused'] = true;
+  let clientSessionId = req.headers['twosessionid'];
+  winston.info(`GET /api/pausemonitoringcollection/:id: Pausing monitoring collection ${clientSessionId}`);
+  // rollingCollectionSubjects[id]['paused'] = true;
+  rollingCollectionSubjects[clientSessionId]['paused'] = true;
   res.sendStatus(202);
 });
 
 app.get('/api/unpausemonitoringcollection/:id', passport.authenticate('jwt', { session: false } ), (req, res) => {
   // This only gets used by the client if a monitoring collection is paused and then resumed within the minute the run is permitted to continue executing
   // Otherwise, the client will simply call /api/getrollingcollection/:id again
-  let id = req.headers['twosessionid'];
-  winston.info(`GET /api/unpausemonitoringcollection/:id: Resuming monitoring collection ${id}`);
-  rollingCollectionSubjects[id]['paused'] = false;
+  let clientSessionId = req.headers['twosessionid'];
+  winston.info(`GET /api/unpausemonitoringcollection/:id: Resuming monitoring collection ${clientSessionId}`);
+  // rollingCollectionSubjects[id]['paused'] = false;
+  rollingCollectionSubjects[clientSessionId]['paused'] = false;
   res.sendStatus(202);
 });
 
 
-app.get('/api/getrollingcollection/:id', passport.authenticate('jwt', { session: false } ), (req, res) => {
+app.get('/api/getrollingcollection/:collectionId', passport.authenticate('jwt', { session: false } ), (req, res) => {
   // Builds and streams a rolling or monitoring collection back to the client.  Handles the client connection and kicks off the process
 
-  let id = req.params.id;
-  let sessionId = req.headers['twosessionid'];
-  winston.info('GET /api/getrollingcollection/:id', id);
-  // winston.debug('GET /api/getrollingcollection/:id sessionId:', sessionId);
+  let collectionId = req.params.collectionId;
+  let clientSessionId = req.headers['twosessionid'];
 
-  let rollingId = id;
-  if ( collections[id].type === 'monitoring' ) {
-    rollingId = sessionId;
+//DEBUG  
+  if (! 'clientSessionId' in req.headers ) {
+    console.error('clientSessionId missing from HTTP header!!!');
+    process.exit(1);
   }
-  let thisCollection = collections[id];
+  console.log(`clientSessionID: ${clientSessionId}`);
+//////
+
+  winston.info('GET /api/getrollingcollection/:id', collectionId);
+  // winston.debug('GET /api/getrollingcollection/:id clientSessionId:', clientSessionId);
+
+  let rollingId = collectionId;
+  if ( collections[collectionId].type === 'monitoring' ) {
+    rollingId = clientSessionId;
+  }
+  let thisCollection = collections[collectionId];
   
   
   ////////////////////////////////////////////////////
@@ -1472,7 +1511,7 @@ app.get('/api/getrollingcollection/:id', passport.authenticate('jwt', { session:
 
     }
     else {
-      throw("Collection " + id + " is not of type 'rolling' or 'monitoring'");
+      throw("Collection " + collectionId + " is not of type 'rolling' or 'monitoring'");
     }
   }
   catch (exception) {
@@ -1528,26 +1567,26 @@ app.get('/api/getrollingcollection/:id', passport.authenticate('jwt', { session:
   /////////////NEW ROLLING RUN/////////////
   /////////////////////////////////////////
 
-  if ( thisCollection.type === 'rolling' && !(id in rollingCollectionSubjects) ) {
+  if ( thisCollection.type === 'rolling' && !(collectionId in rollingCollectionSubjects) ) {
     // This is a new rolling collection as there are no existing subscribers to it
     // Let's start building it
     let subject = new Subject(); // Create a new observable which will be used to pipe communication between the worker and the client
     
 
-    // Populate rollingCollectionSubjects[id] with some initial values
-    rollingCollectionSubjects[id] = {
+    // Populate rollingCollectionSubjects[collectionId] with some initial values
+    rollingCollectionSubjects[collectionId] = {
       subject: subject,
       observers: 1,
       runs: 0
     }
 
     // We now subscribe to the existing observable for the collection and pipe its output to rollingSubjectWatcher so it can be output to the http response stream
-    rollingCollectionSubjects[id].subject.subscribe( (output) => rollingSubjectWatcher(req, res, output) );
+    rollingCollectionSubjects[collectionId].subject.subscribe( (output) => rollingSubjectWatcher(req, res, output) );
     
     
     // We don't run a while loop here because runRollingCollection will loop on its own
     // Execute our collection building here
-    runRollingCollection(id, res);
+    runRollingCollection(collectionId, res);
   }
 
 
@@ -1558,7 +1597,7 @@ app.get('/api/getrollingcollection/:id', passport.authenticate('jwt', { session:
   
 
   else if ( thisCollection.type === 'monitoring' ) {
-    // This is a new rolling collection as there are no existing subscribers to it
+    // This is a new monitoring collection as there are no existing subscribers to it
     // Let's start building it
     let subject = new Subject(); // Create a new observable which will be used to pipe communication between the worker and the client
 
@@ -1571,13 +1610,13 @@ app.get('/api/getrollingcollection/:id', passport.authenticate('jwt', { session:
       runs: 0
     }
 
-    // We now subscribe to the existing observable for the collection and pipe its output to rollingSubjectWatcher so it can be output to the http response stream
+    // We now subscribe to our new observable for the collection and pipe its output to rollingSubjectWatcher so it can be output to the http response stream
     rollingCollectionSubjects[rollingId].subject.subscribe( (output) => rollingSubjectWatcher(req, res, output) );
     
     
     // We don't run a while loop here because runRollingCollection will loop on its own
     // Execute our collection building here
-    runRollingCollection(id, res, rollingId);
+    runRollingCollection(collectionId, res, rollingId);
   }
 
 
@@ -1592,44 +1631,44 @@ app.get('/api/getrollingcollection/:id', passport.authenticate('jwt', { session:
     // We're not the first client connected to this collection, as the rolling collection is already running
     // Let's play back its contents and subscribe to its observable
 
-    winston.info(`This is not the first client connected to rolling collection ${id}.  Playing back existing collection`);
+    winston.info(`This is not the first client connected to rolling collection ${collectionId}.  Playing back existing collection`);
 
-    rollingCollectionSubjects[id]['observers'] += 1;
+    rollingCollectionSubjects[collectionId]['observers'] += 1;
     // Increase the observers count so we know how many people are viewing the collection
     
-    rollingCollectionSubjects[id].subject.subscribe( (output) => rollingSubjectWatcher(req, res, output) );
+    rollingCollectionSubjects[collectionId].subject.subscribe( (output) => rollingSubjectWatcher(req, res, output) );
     // We now subscribe to the existing observable for the collection and pipe its output to rollingSubjectWatcher so it can be output to the http response stream
       
-    // Play back the data already in rollingCollections[id]
+    // Play back the data already in rollingCollections[collectionId]
 
-    for (var i=0; i < rollingCollections[id].sessions.length; i++) {
+    for (var i=0; i < rollingCollections[collectionId].sessions.length; i++) {
       // Play back sessions
       let resp = {
         collectionUpdate: {
-          session: rollingCollections[id].sessions[i]
+          session: rollingCollections[collectionId].sessions[i]
         }
       };
       res.write(JSON.stringify(resp) + ',');
       res.flush();
     }
     
-    for (var i=0; i < rollingCollections[id].images.length; i++) {
+    for (var i=0; i < rollingCollections[collectionId].images.length; i++) {
       // Play back images
       let resp = {
         collectionUpdate: {
-          images: [ rollingCollections[id].images[i] ]
+          images: [ rollingCollections[collectionId].images[i] ]
         }
       };
       res.write(JSON.stringify(resp) + ',');
       res.flush();
     }
     
-    if (rollingCollections[id].search) {
+    if (rollingCollections[collectionId].search) {
       // Play back search text
-      for (var i=0; i < rollingCollections[id].search.length; i++) {
+      for (var i=0; i < rollingCollections[collectionId].search.length; i++) {
         let resp = {
           collectionUpdate: {
-            search: [ rollingCollections[id].search[i] ] 
+            search: [ rollingCollections[collectionId].search[i] ] 
             // We enclose this in an array to be consistent with the worker, which also does this when it sends search terms, in case there are more than one search term per update.
            // The client should only have to deal with one format
           }
@@ -1777,15 +1816,30 @@ function sortNumber(a, b) {
   return b - a;
 }
 
-function chunkHandler(collectionRoot, id, subject, data, chunk, sessionId='') {
+function chunkHandler(collectionRoot, id, subject, data, chunk, clientSessionId='') {
   // Handles socket data received from the worker process
   // This actually builds the collection data structures and sends updates to the client
 
   let rollingId = id;
-  if (sessionId != '') {
-    rollingId = sessionId;
+  if (clientSessionId != '') {
+    rollingId = clientSessionId;
   }
   let thisCollection = collectionRoot[rollingId];
+
+////DEBUG CODE//
+  if (thisCollection == undefined) {
+    console.error('ERROR: thisCollection is undefined');
+    console.error('id:', id);
+    console.error('clientSessionId:', clientSessionId);
+    console.error('collectionRoot:');
+    for (let i in collectionRoot) {
+      console.error(i);
+    }
+    data += chunk
+    console.error('data:', data);
+    process.exit(1);
+  }
+////
 
   winston.debug('Processing update from worker');
   data += chunk

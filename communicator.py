@@ -70,7 +70,14 @@ class communicator(asynchat.async_chat):
   def handle_close(self):
     #Flush the buffer
     #print "communicator: handle_close()"
-    while self.writable():
+    try:
+      while self.writable():
         self.handle_write()
+    except RuntimeError as e:
+      log.error('Exception raised whilst handle_close() on communicator.  This probably means the server crashed.  Exiting with code 1')
+      sys.exit(1)
+    except Exception as e:
+      log.exception('Unhandled exception raised whilst handle_close() on communicator.  Not sure what this means.  Exiting with code 1')
+      sys.exit(1)
     self.close()
   

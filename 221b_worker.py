@@ -132,7 +132,7 @@ def configReceived(cfgObj):
     #client.handle_close()
     #sys.exit(1)
     error = "configReceived(): Unhandled exception.  Exiting worker with code 1: " + str(e)
-    exitWithError(error)
+    exitWithException(error)
 
 
 def exitWithError(message):
@@ -140,7 +140,13 @@ def exitWithError(message):
   client.write_data(json.dumps( { 'error': message} ) + '\n')
   client.handle_close()
   sys.exit(1)
- 
+
+def exitWithException(message):
+  log.exception(message)
+  client.write_data(json.dumps( { 'error': message} ) + '\n')
+  client.handle_close()
+  sys.exit(1)
+
 if __name__ == "__main__":
   if len(sys.argv) == 1:
     print "Argument must be a path to a UNIX socket"
@@ -157,6 +163,7 @@ if __name__ == "__main__":
     handler.setFormatter(formatter)
 
     log.setLevel(logging.DEBUG)
+    #log.setLevel(logging.INFO) #for testing
 
     try:
       NODE_ENV = os.environ['NODE_ENV']

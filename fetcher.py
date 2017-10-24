@@ -169,35 +169,33 @@ class Fetcher:
         ctx = ssl.create_default_context()
         ctx.check_hostname = False
         ctx.verify_mode = ssl.CERT_NONE
-        request = urllib2.Request(self.url + '/sdk/content?render=107&session=' + str(sessionId))
+        uri = '/sdk/content?render=107&session=' + str(sessionId)
+        request = urllib2.Request(self.url + uri )
         base64string = base64.b64encode('%s:%s' % (self.user, self.password))
         request.add_header("Authorization", "Basic %s" % base64string)
         request.add_header('Content-type', 'application/json')
         request.add_header('Accept', 'application/json')
+        error = ''
         while self.contentRetries.value < self.maxContentRetries:
           try:
             res = urllib2.urlopen(request, context=ctx, timeout=self.timeout)
             break
           except urllib2.HTTPError as e:
-            if self.contentRetries.value == self.maxContentRetries:
-              error = "pullFiles(): Maximum retries reached whilst pulling content for session " + sessionId + ".  Exiting with code 1"
-              #log.error("pullFiles(): Maximum retries reached whilst pulling content for session " + sessionId + ".  Exiting with code 1")
-              #sys.exit(1)
-              self.exitWithError(error)
             self.contentRetries.value += 1
-            log.exception("pullFiles(): HTTP exception pulling content for session " + sessionId + ".  Retrying")
+            error = "HTTP exception pulling content for session " + str(sessionId) + ".  URI was '" + uri + " .  The HTTP status code was " + e.code
+            log.error("pullFiles(): " + error )
             continue
           except urllib2.URLError as e:
-            if self.contentRetries.value == self.maxContentRetries:
-              error = "pullFiles(): Maximum retries reached whilst pulling content for session " + sessionId + ".  Exiting with code 1"
-              #log.error("pullFiles(): Maximum retries reached whilst pulling content for session " + sessionId + ".  Exiting with code 1")
-              #sys.exit(1)
-              self.exitWithError(error)
             self.contentRetries.value += 1
-            log.error("pullFiles(): ERROR: URL error pulling content for session " + sessionId + ".  Retrying")
+            error = "URL error pulling content for session " + str(sessionId) + ".  The reason was " + e.reason
+            log.error("pullFiles(): " + error)
             continue
 
-        if res.info().getheader('Content-Type').startswith('multipart/mixed'):
+        if self.contentRetries.value == self.maxContentRetries:
+          e = "pullFiles(): Maximum retries reached whilst pulling content for session " + str(sessionId) + ".  The last error was " + error + ".  Exiting with code 1"
+          self.exitWithError(e)
+
+        if 'res' in locals() and res.info().getheader('Content-Type').startswith('multipart/mixed'):
           contentType = res.info().getheader('Content-Type')
           mimeVersion = res.info().getheader('Mime-Version')
           newFileStr = 'Content-Type: ' + contentType + '\n' + 'Mime-Version: ' + mimeVersion + '\n' + res.read()
@@ -207,6 +205,9 @@ class Fetcher:
           #processor = ContentProcessor(self.directory, self.minX, self.minY, self.gsPath, self.pdftotextPath, self.contentLimit, self.contentCount)
           processor = ContentProcessor(self.url, self.user, self.password, self.directory, self.minX, self.minY, self.gsPath, self.pdftotextPath, self.contentLimit, self.contentCount, self.contentRetries, self.maxContentRetries, self.timeout)
           self.pool.apply_async(unwrapExtractFilesFromMultipart, args=(processor, newFileStr, self.sessions[sessionId], sessionId, distillationTerms, regexDistillationTerms, md5Hashes, sha1Hashes, sha256Hashes), callback=self.sendResult )
+      
+
+
 
     self.pool.close()
     self.pool.join()
@@ -291,17 +292,17 @@ class ContentProcessor:
         break
       except urllib2.HTTPError as e:
         if self.contentRetries.value == self.maxContentRetries:
-          log.error("pullFiles(): Maximum retries reached whilst pulling content for session " + sessionId + ".  Exiting with code 1")
+          log.error("pullFiles(): Maximum retries reached whilst pulling content for session " + str(sessionId) + ".  Exiting with code 1")
           sys.exit(1)
         self.contentRetries.value += 1
-        log.error("pullFiles(): HTTP error pulling content for session " + sessionId + ".  Retrying")
+        log.error("pullFiles(): HTTP error pulling content for session " + str(sessionId) + ".  Retrying")
         continue
       except urllib2.URLError as e:
         if self.contentRetries.value == self.maxContentRetries:
-          log.error("pullFiles(): Maximum retries reached whilst pulling content for session " + sessionId + ".  Exiting with code 1")
+          log.error("pullFiles(): Maximum retries reached whilst pulling content for session " + str(sessionId) + ".  Exiting with code 1")
           sys.exit(1)
         self.contentRetries.value += 1
-        log.error("pullFiles(): ERROR: URL error pulling content for session " + sessionId + ".  Retrying")
+        log.error("pullFiles(): ERROR: URL error pulling content for session " + str(sessionId) + ".  Retrying")
         continue
 
     if res.info().getheader('Content-Type').startswith('multipart/mixed'):
@@ -534,7 +535,7 @@ class ContentProcessor:
         return returnObj
         
     except Exception as e:
-      log.exception("getPdfText(): Could not run pdftotext command at " + self.pdftotextPath)
+      log.exception("Unhandled exception in getPdfText()")
       #print "Error Message:", str(e)
       #continue
       #if searchForText:
