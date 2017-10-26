@@ -182,7 +182,7 @@ class Fetcher:
             break
           except urllib2.HTTPError as e:
             self.contentRetries.value += 1
-            error = "HTTP exception pulling content for session " + str(sessionId) + ".  URI was '" + uri + " .  The HTTP status code was " + e.code
+            error = "HTTP exception pulling content for session " + str(sessionId) + ".  URI was '" + uri + " .  The HTTP status code was " + str(e.code)
             log.error("pullFiles(): " + error )
             continue
           except urllib2.URLError as e:
