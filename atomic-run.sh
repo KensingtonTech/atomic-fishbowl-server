@@ -1,5 +1,8 @@
 #!/bin/bash
 
+ETCDIR=/etc/kentech/221b
+CERTDIR=$ETCDIR/certificates
+
 # Check if existing container is already running
 WASSTARTED=0
 chroot $HOST /usr/bin/docker ps -f name=$NAME | grep -q ${NAME}$
@@ -14,6 +17,33 @@ chroot $HOST /usr/bin/docker ps -a -f name=$NAME | grep -q ${NAME}$
 if [ $? -eq 0 ]; then
 
   # Our container is installed, so run the installed version (don't perform an upgrade)
+
+
+  if [ ! -d ${HOST}${CERTDIR} ]; then
+    echo Creating $CERTDIR
+    mkdir -p ${HOST}${CERTDIR}
+  fi
+
+  # We need both internal.key and internal.pem to exist
+  if [[ -f ${HOST}${CERTDIR}/internal.key && ! -f ${HOST}${CERTDIR}/internal.pem ]]; then
+    echo "Missing ${CERTDIR}/internal.pem.  Renaming $CERTDIR/internal.key to internal.key.old"
+    mv -f ${HOST}${CERTDIR}/internal.key ${HOST}${CERTDIR}/internal.key.old
+  fi
+
+  if [[ ! -f ${HOST}${CERTDIR}/internal.key && -f ${HOST}${CERTDIR}/internal.pem ]]; then
+    echo "Missing $CERTDIR/internal.key.  Renaming $CERTDIR/internal.pem to internal.pem.old"
+    mv -f ${HOST}${CERTDIR}/internal.pem ${HOST}${CERTDIR}/internal.pem.old
+  fi
+
+  # Generate the internal keypair
+  if [[ ! -f ${HOST}${CERTDIR}/internal.key || ! -f ${HOST}${CERTDIR}/internal.pem ]]; then
+    echo "Generating new internal SSL keypair"
+    chroot $HOST /usr/bin/openssl genrsa -out $CERTDIR/internal.key 2048
+    chroot $HOST /usr/bin/openssl req -new -sha256 -key $CERTDIR/internal.key -out /tmp/tmpint.csr -subj "/C=US/ST=Colorado/L=Denver/O=Kensington Technology Associates, Limited/CN=localhost/emailAddress=info@knowledgekta.com"
+    chroot $HOST /usr/bin/openssl x509 -req -days 3650 -in /tmp/tmpint.csr -signkey $CERTDIR/internal.key -out $CERTDIR/internal.pem
+    chmod 600 ${HOST}${CERTDIR}/internal.key ${HOST}${CERTDIR}/internal.pem
+  fi
+
 
   if [ -f $HOST/etc/systemd/system/221b-server.service ]; then
     # our systemd unit is installed so start with systemd

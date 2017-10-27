@@ -125,8 +125,9 @@ var collectionsData = {};
 const cfgDir = '/etc/kentech/221b';
 const certDir = cfgDir + '/certificates';
 const cfgFile = cfgDir + '/221b-server.conf';
-const jwtPrivateKeyFile = certDir + '/221b.key';
-const jwtPublicKeyFile = certDir + '/221b.pem';
+const jwtPrivateKeyFile = certDir + '/ssl.key';
+const jwtPublicKeyFile = certDir + '/ssl.pem';
+const internalPublicKeyFile = certDir + '/internal.pem';
 const collectionsUrl = '/collections'
 var collectionsDir = '/var/kentech/221b/collections';
 
