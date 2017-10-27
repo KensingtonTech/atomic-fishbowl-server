@@ -1013,7 +1013,7 @@ function buildFixedCollection(id) {
     socketServer.listen(tempName, () => {
       winston.debug('Listening for worker communication');
       winston.debug("Spawning worker with socket file " + tempName);
-      var worker = spawn('./221b_worker.py ',[tempName], {shell:true, stdio: 'inherit'});
+      var worker = spawn('./worker_stub.py ',[tempName], {shell:true, stdio: 'inherit'});
       worker.on('exit', (code) => {
         if (typeof code === 'undefined') {
           winston.debug('Worker process exited abnormally without an exit code');
@@ -1376,7 +1376,7 @@ function runRollingCollection(collectionId, res, clientSessionId='') {
         winston.debug("runRollingCollection(): work(): listen(): Rolling Collection: Spawning worker with socket file " + tempName);
         
         // Start the worker process and assign a reference to it to 'worker'
-        let worker = spawn('./221b_worker.py ',[tempName], {shell:true, stdio: 'inherit'});
+        let worker = spawn('./worker_stub.py ',[tempName], {shell:true, stdio: 'inherit'});
         // Notice that we don't pass any configuration to the worker on the command line.  It's all done through the UNIX socket for security.
         
         // Add the worker reference to rollingCollectionSubjects so we can work with it later

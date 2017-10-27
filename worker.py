@@ -8,8 +8,8 @@ import urllib
 import time
 import calendar
 import asyncore
-from fetcher import Fetcher
-from communicator import communicator
+from worker_fetcher import Fetcher
+from worker_communicator import communicator
 from pprint import pprint, pformat
 import logging
 import signal
@@ -151,12 +151,14 @@ def exitWithException(message):
   client.handle_close()
   sys.exit(1)
 
-if __name__ == "__main__":
+  
+def main():
   if len(sys.argv) == 1:
     print "Argument must be a path to a UNIX socket"
     sys.exit(1)
   try:
     #Set up logging
+    global log
     log = logging.getLogger()
     handler = logging.StreamHandler()
     formatStr = '%(asctime)s 221b_worker     %(levelname)-10s %(message)s'
@@ -184,10 +186,10 @@ if __name__ == "__main__":
     #Handle rest of startup
     log.info("221b_worker is starting")
     socketFile = sys.argv[1]
+    global client
     client = communicator(socketFile, configCallback)
     asyncore.loop()
-    log.info("Exiting 221b_worker with code 0");
+    log.info("Exiting 221b_worker with code 0")
     sys.exit(0)
   except Exception as e:
     log.exception("Unhandled general exception: " + str(e) )
-    

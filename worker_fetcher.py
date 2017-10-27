@@ -9,7 +9,7 @@ import mimetypes
 from pprint import pprint, pformat
 import StringIO
 from PIL import Image ##install
-from communicator import communicator
+from worker_communicator import communicator
 import time
 from subprocess import Popen, PIPE
 import zipfile
@@ -19,7 +19,7 @@ import hashlib
 import rarfile ##install
 import re
 import logging
-from ContentObj import ContentObj
+from worker_contentobj import ContentObj
 from copy import deepcopy, copy
 from multiprocessing import Pool, Manager, Value
 import shlex
