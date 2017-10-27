@@ -128,6 +128,8 @@ const cfgFile = cfgDir + '/221b-server.conf';
 const jwtPrivateKeyFile = certDir + '/ssl.key';
 const jwtPublicKeyFile = certDir + '/ssl.pem';
 const internalPublicKeyFile = certDir + '/internal.pem';
+const internalPrivateKeyFile = certDir + '/internal.key';
+// const internalPrivateKeyFile = certDir + '/internal.key';
 const collectionsUrl = '/collections'
 var collectionsDir = '/var/kentech/221b/collections';
 
@@ -167,6 +169,8 @@ if ( config['dbConfig']['authentication']['enabled']
   sys.exit(1);
 }
 winston.debug(config);
+
+var internalPublicKey = fs.readFileSync(internalPublicKeyFile, 'utf8');
 
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -402,6 +406,11 @@ app.get('/api/isloggedin', passport.authenticate('jwt', { session: false } ), (r
   // req.session.save();
 
   res.json( { user: req.user.toObject(), sessionId: uuidV4() }); // { versionKey: false, transform: transformUserIsLoggedIn }
+});
+
+app.get('/api/publickey', passport.authenticate('jwt', { session: false } ), (req, res)=>{
+  winston.debug("GET /api/publickey");
+  res.json( { pubKey: internalPublicKey });
 });
 
 app.get('/api/users', passport.authenticate('jwt', { session: false } ), (req,res)=>{
@@ -927,7 +936,8 @@ function fixedSocketConnectionHandler(id, socket, tempName, subject) {
     collectionsDir: collectionsDir,
     summaryTimeout: preferences.summaryTimeout,
     queryTimeout: preferences.queryTimeout,
-    contentTimeout: preferences.contentTimeout
+    contentTimeout: preferences.contentTimeout,
+    privateKeyFile: internalPrivateKeyFile
   };
   
   if ('distillationTerms' in collections[id]) {
@@ -1219,7 +1229,8 @@ function rollingCollectionSocketConnectionHandler(id, socket, tempName, subject,
     collectionsDir: collectionsDir,
     summaryTimeout: preferences.summaryTimeout,
     queryTimeout: preferences.queryTimeout,
-    contentTimeout: preferences.contentTimeout
+    contentTimeout: preferences.contentTimeout,
+    privateKeyFile: internalPrivateKeyFile
   };
 
   if (thisCollection.type === 'monitoring') {

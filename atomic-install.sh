@@ -45,24 +45,31 @@ if [ $? -ne 0 ]; then
   chroot $HOST /usr/bin/docker network create --subnet 172.31.255.240/28 --gateway 172.31.255.241 -d bridge 221b-network >/dev/null
 fi
 
-# We need both internal.key and internal.pem to exist
-if [[ -f ${HOST}${CERTDIR}/internal.key && ! -f ${HOST}${CERTDIR}/internal.pem ]]; then
-  echo "Missing ${CERTDIR}/internal.pem.  Renaming $CERTDIR/internal.key to internal.key.old"
+# We need both internal.key and internal.cer to exist
+if [[ -f ${HOST}${CERTDIR}/internal.key && ! -f ${HOST}${CERTDIR}/internal.cer ]]; then
+  echo "Missing ${CERTDIR}/internal.cer.  Renaming $CERTDIR/internal.key to internal.key.old"
   mv -f ${HOST}${CERTDIR}/internal.key ${HOST}${CERTDIR}/internal.key.old
 fi
 
-if [[ ! -f ${HOST}${CERTDIR}/internal.key && -f ${HOST}${CERTDIR}/internal.pem ]]; then
-  echo "Missing $CERTDIR/internal.key.  Renaming $CERTDIR/internal.pem to internal.pem.old"
-  mv -f ${HOST}${CERTDIR}/internal.pem ${HOST}${CERTDIR}/internal.pem.old
+if [[ ! -f ${HOST}${CERTDIR}/internal.key && -f ${HOST}${CERTDIR}/internal.cer ]]; then
+  echo "Missing $CERTDIR/internal.key.  Renaming $CERTDIR/internal.cer to internal.cer.old"
+  mv -f ${HOST}${CERTDIR}/internal.cer ${HOST}${CERTDIR}/internal.cer.old
 fi
 
 # Generate the internal keypair
-if [[ ! -f ${HOST}${CERTDIR}/internal.key || ! -f ${HOST}${CERTDIR}/internal.pem ]]; then
+if [[ ! -f ${HOST}${CERTDIR}/internal.key || ! -f ${HOST}${CERTDIR}/internal.cer ]]; then
   echo "Generating new internal SSL keypair"
   chroot $HOST /usr/bin/openssl genrsa -out $CERTDIR/internal.key 2048
   chroot $HOST /usr/bin/openssl req -new -sha256 -key $CERTDIR/internal.key -out /tmp/tmpint.csr -subj "/C=US/ST=Colorado/L=Denver/O=Kensington Technology Associates, Limited/CN=localhost/emailAddress=info@knowledgekta.com"
-  chroot $HOST /usr/bin/openssl x509 -req -days 3650 -in /tmp/tmpint.csr -signkey $CERTDIR/internal.key -out $CERTDIR/internal.pem
-  chmod 600 ${HOST}${CERTDIR}/internal.key ${HOST}${CERTDIR}/internal.pem
+  chroot $HOST /usr/bin/openssl x509 -req -days 3650 -in /tmp/tmpint.csr -signkey $CERTDIR/internal.key -out $CERTDIR/internal.cer
+  chmod 600 ${HOST}${CERTDIR}/internal.key ${HOST}${CERTDIR}/internal.cer
+  chroot $HOST /usr/bin/openssl x509 -in ${HOST}${CERTDIR}/internal.cer -pubkey -noout > ${HOST}${CERTDIR}/internal.pem
+fi
+
+# Check for extracted public key
+if [[ -f ${HOST}${CERTDIR}/internal.key && -f ${HOST}${CERTDIR}/internal.cer && ! -f ${HOST}${CERTDIR}/internal.pem ]]; then
+  echo "Missing internal.pem.  Extracting it from internal.cer"
+  chroot $HOST /usr/bin/openssl x509 -in ${HOST}${CERTDIR}/internal.cer -pubkey -noout > ${HOST}${CERTDIR}/internal.pem
 fi
 
 # Create container
