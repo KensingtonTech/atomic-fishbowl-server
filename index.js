@@ -175,7 +175,7 @@ winston.debug(config);
 //Set default preferences
 var defaultPreferences = {
   nwInvestigateUrl: '',
-  defaultNwQuery: "filetype = 'jpg','gif','png','pdf','zip','rar','windows executable','apple executable (pef)','apple executable (mach-o)'",
+  defaultNwQuery: "filetype = 'jpg','gif','png','pdf','zip','rar','windows executable','x86 pe','windows dll','x64pe','apple executable (pef)','apple executable (mach-o)'",
   defaultQuerySelection : "All Supported File Types",
   defaultImageLimit: 1000,
   defaultRollingHours: 1,
