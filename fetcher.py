@@ -23,6 +23,7 @@ from ContentObj import ContentObj
 from copy import deepcopy, copy
 from multiprocessing import Pool, Manager, Value
 import shlex
+import socket
 
 log = logging.getLogger(__name__)
 
@@ -36,7 +37,7 @@ def unwrapPullFiles(*arg, **kwarg):
 
 class Fetcher:
 
-  def __init__(self, communicator, collectionId, url, user, password, directory, minX, minY, gsPath, pdftotextPath, unrarPath, contentLimit):
+  def __init__(self, communicator, collectionId, url, user, password, directory, minX, minY, gsPath, pdftotextPath, unrarPath, contentLimit, summaryTimeout, queryTimeout, contentTimeout):
 
     self.pool = Pool()
     self.manager = Manager()
@@ -59,7 +60,9 @@ class Fetcher:
     self.contentCount = self.manager.Value('I', 0)
     self.thumbnailSize = 350, 350
     self.devmode = True
-    self.timeout = 5
+    self.summaryTimeout = summaryTimeout
+    self.queryTimeout = queryTimeout
+    self.contentTimeout = contentTimeout
     self.maxContentRetries = 6
     self.contentRetries = self.manager.Value('I', 0)
     log.info("Minimum dimensions are: " + str(minX) + " x " + str(minY))
@@ -72,13 +75,19 @@ class Fetcher:
     self.communicator.handle_close()
     sys.exit(1)
 
+  def exitWithException(self, message):
+    log.exception(message)
+    self.communicator.write_data(json.dumps( { 'error': message} ) + '\n')
+    self.communicator.handle_close()
+    sys.exit(1)
+
   def fetchSummary(self):
     request = urllib2.Request(self.url + '/sdk?msg=summary')
     base64string = base64.b64encode('%s:%s' % (self.user, self.password))
     request.add_header("Authorization", "Basic %s" % base64string)
     request.add_header('Content-type', 'application/json')
     request.add_header('Accept', 'application/json')
-    summaryResult = json.load(urllib2.urlopen(request, timeout=self.timeout))
+    summaryResult = json.load(urllib2.urlopen(request, timeout=self.summaryTimeout))
     for e in summaryResult['string'].split():
       (k, v) = e.split('=')
       self.summary[k] = v
@@ -96,7 +105,7 @@ class Fetcher:
     request.add_header('Content-type', 'application/json')
     request.add_header('Accept', 'application/json')
     try:
-      rawQueryRes = json.load(urllib2.urlopen(request, context=ctx, timeout=self.timeout))
+      rawQueryRes = json.load(urllib2.urlopen(request, context=ctx, timeout=self.queryTimeout))
       #pprint(rawQueryRes)
       #print "length of rawQueryRes", len(rawQueryRes)
       log.debug('runQuery(): Parsing query results')
@@ -139,15 +148,14 @@ class Fetcher:
       else:
         error = "runQuery(): URL Error whilst running query.  Exiting with code 1: "  + str(e)
       self.exitWithError(error)
+    except socket.timeout as e:
+      error = "Query timed out after " + str(self.queryTimeout) + " seconds"
+      self.exitWithError(error)
     except Exception as e:
-      
-      if ('timed out' in str(e)):
-        error = "Error running query: timed out during connection to NetWitness"
-      else:
-        error = "runQuery(): Unhandled exception whilst running query.  Exiting with code 1: " + str(e)
+      error = "runQuery(): Unhandled exception whilst running query.  Exiting with code 1: " + str(e)
       #log.exception("runQuery(): Unhandled exception whilst running query.  Exiting with code 1")
       #sys.exit(1)
-      self.exitWithError(error)
+      self.exitWithException(error)
     return len(self.sessions)
 
 
@@ -178,7 +186,7 @@ class Fetcher:
         error = ''
         while self.contentRetries.value < self.maxContentRetries:
           try:
-            res = urllib2.urlopen(request, context=ctx, timeout=self.timeout)
+            res = urllib2.urlopen(request, context=ctx, timeout=self.contentTimeout)
             break
           except urllib2.HTTPError as e:
             self.contentRetries.value += 1
@@ -190,6 +198,12 @@ class Fetcher:
             error = "URL error pulling content for session " + str(sessionId) + ".  The reason was " + e.reason
             log.error("pullFiles(): " + error)
             continue
+          except socket.timeout as e:
+            self.contentRetries.value += 1
+            error = "content call for session " + str(sessionId) + " timed out after " + str(self.contentTimeout) + " seconds"
+            log.error("pullFiles(): " + error)
+            continue
+
 
         if self.contentRetries.value == self.maxContentRetries:
           e = "pullFiles(): Maximum retries reached whilst pulling content for session " + str(sessionId) + ".  The last error was " + error + ".  Exiting with code 1"
@@ -203,7 +217,7 @@ class Fetcher:
           ##############EXTRACT FILES AND DO THE WORK##############
           log.debug('Launching extractor from pool')
           #processor = ContentProcessor(self.directory, self.minX, self.minY, self.gsPath, self.pdftotextPath, self.contentLimit, self.contentCount)
-          processor = ContentProcessor(self.url, self.user, self.password, self.directory, self.minX, self.minY, self.gsPath, self.pdftotextPath, self.contentLimit, self.contentCount, self.contentRetries, self.maxContentRetries, self.timeout)
+          processor = ContentProcessor(self.url, self.user, self.password, self.directory, self.minX, self.minY, self.gsPath, self.pdftotextPath, self.contentLimit, self.contentCount, self.contentRetries, self.maxContentRetries, self.contentTimeout)
           self.pool.apply_async(unwrapExtractFilesFromMultipart, args=(processor, newFileStr, self.sessions[sessionId], sessionId, distillationTerms, regexDistillationTerms, md5Hashes, sha1Hashes, sha256Hashes), callback=self.sendResult )
       
 
@@ -220,7 +234,7 @@ class Fetcher:
     #This tries to put every content call in its own process but this is actually slower than handling the content call in a single-threaded manner
     for sessionId in self.sessions:
       if not self.contentCount.value >= self.contentLimit:
-        processor = ContentProcessor(self.url, self.user, self.password, self.directory, self.minX, self.minY, self.gsPath, self.pdftotextPath, self.contentLimit, self.contentCount, self.contentRetries, self.maxContentRetries, self.timeout)
+        processor = ContentProcessor(self.url, self.user, self.password, self.directory, self.minX, self.minY, self.gsPath, self.pdftotextPath, self.contentLimit, self.contentCount, self.contentRetries, self.maxContentRetries, self.contentTimeout)
 
         ##############PULL FILES AND PROCESS THEM##############
         log.debug('Launching extractor from pool')

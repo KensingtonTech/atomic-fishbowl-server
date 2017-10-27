@@ -100,12 +100,16 @@ def configReceived(cfgObj):
       if sha256Enabled:
         sha256Hashes = cfg['sha256Hashes']
 
+      summaryTimeout = int(cfg['summaryTimeout'])
+      queryTimeout = int(cfg['queryTimeout'])
+      contentTimeout = int(cfg['contentTimeout'])
+
     except KeyError as e:
       error = 'ERROR: Missing critical configuration data: ' + str(e)
       exitWithError(error)
   
     baseUrl = proto + host + ':' + port
-    fetcher = Fetcher(client, collectionId, baseUrl, user, password, directory, minX, minY, gsPath, pdftotextPath, unrarPath, imageLimit)
+    fetcher = Fetcher(client, collectionId, baseUrl, user, password, directory, minX, minY, gsPath, pdftotextPath, unrarPath, imageLimit, summaryTimeout, queryTimeout, contentTimeout)
     
     ###QUERY DATA###
     log.info("Executing query")

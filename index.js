@@ -169,7 +169,7 @@ winston.debug(config);
 
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-////////////////////////////////////////////////////////////////USER PREFERENCES///////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////////GLOBAL PREFERENCES/////////////////////////////////////////////////////////
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
 //Set default preferences
@@ -214,7 +214,10 @@ var defaultPreferences = {
       friendly : "AD Domain"
     }
   ],
-  masonryColumnSize : 350,
+  masonryColumnSize: 350,
+  summaryTimeout: 5,
+  queryTimeout: 5,
+  contentTimeout: 5
 };
 
 
@@ -693,6 +696,16 @@ app.post('/api/setpreferences', passport.authenticate('jwt', { session: false } 
   try {
     let prefs = req.body;
     // winston.debug(prefs);
+    
+    // merge in default preferences which we haven't worked into our the UI preferences yet (like summaryTimeout)
+    for (let pref in defaultPreferences) {
+      if (defaultPreferences.hasOwnProperty(pref)) {
+        if (!prefs.hasOwnProperty(pref)) {
+          prefs[pref] = defaultPreferences[pref];
+        }
+      }
+    }
+
     preferences = prefs;
     res.sendStatus(201);
     writePreferences();
@@ -910,7 +923,10 @@ function fixedSocketConnectionHandler(id, socket, tempName, subject) {
     md5Enabled: collections[id].md5Enabled,
     sha1Enabled: collections[id].sha1Enabled,
     sha256Enabled: collections[id].sha256Enabled,
-    collectionsDir: collectionsDir
+    collectionsDir: collectionsDir,
+    summaryTimeout: preferences.summaryTimeout,
+    queryTimeout: preferences.queryTimeout,
+    contentTimeout: preferences.contentTimeout
   };
   
   if ('distillationTerms' in collections[id]) {
@@ -1171,7 +1187,6 @@ function rollingCollectionSocketConnectionHandler(id, socket, tempName, subject,
     purgeSessions(thisRollingCollection, sessionsToPurge.slice());
    
     // Notify the client of our purged sessions
-    winston.log
     if (sessionsToPurge.length > 0) {
       let update = { collectionPurge: sessionsToPurge };
       subject.next(update);
@@ -1200,7 +1215,10 @@ function rollingCollectionSocketConnectionHandler(id, socket, tempName, subject,
     md5Enabled: thisCollection.md5Enabled,
     sha1Enabled: thisCollection.sha1Enabled,
     sha256Enabled: thisCollection.sha256Enabled,
-    collectionsDir: collectionsDir
+    collectionsDir: collectionsDir,
+    summaryTimeout: preferences.summaryTimeout,
+    queryTimeout: preferences.queryTimeout,
+    contentTimeout: preferences.contentTimeout
   };
 
   if (thisCollection.type === 'monitoring') {
@@ -1480,13 +1498,16 @@ app.get('/api/getrollingcollection/:collectionId', passport.authenticate('jwt', 
   let collectionId = req.params.collectionId;
   let clientSessionId = req.headers['twosessionid'];
 
+
+/*
 //DEBUG  
   if (! 'clientSessionId' in req.headers ) {
-    console.error('clientSessionId missing from HTTP header!!!');
+    winston.error('clientSessionId missing from HTTP header!!!');
     process.exit(1);
   }
-  console.log(`clientSessionID: ${clientSessionId}`);
+  winston.debug(`clientSessionID: ${clientSessionId}`);
 //////
+*/
 
   winston.info('GET /api/getrollingcollection/:id', collectionId);
   // winston.debug('GET /api/getrollingcollection/:id clientSessionId:', clientSessionId);
@@ -1711,6 +1732,11 @@ app.get('/api/getrollingcollection/:collectionId', passport.authenticate('jwt', 
 /////////////////////////////////////////////////////////UTILITY FUNCTIONS/////////////////////////////////////////////////////////
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
+function writePreferences() {
+  db.collection('preferences').updateOne({},{'preferences': preferences}, (err, res) => {
+    if (err) throw err;
+  });
+}
 
 function connectToDB() {
   mongo.connect(mongoUrl, (err, database) => {
@@ -1723,12 +1749,26 @@ function connectToDB() {
       let foundPrefs = false;
       for (let i=0; i < cols.length; i++) {
         if (cols[i].name == "preferences") {
-           //read prefs
+           // read prefs
            foundPrefs = true;
            justInstalled = false;
            winston.debug("Reading preferences");
            db.collection('preferences').findOne( (err, res) => {
-             preferences = res.preferences;
+            let rewritePrefs = false; 
+            preferences = res.preferences;
+            // merge in default preferences which aren't in our loaded preferences (like for upgrades)
+            for (let pref in defaultPreferences) {
+              if (defaultPreferences.hasOwnProperty(pref)) {
+                if (!preferences.hasOwnProperty(pref)) {
+                  winston.info(`Adding new default preference for ${pref}`);
+                  preferences[pref] = defaultPreferences[pref];
+                  rewritePrefs = true;
+                }
+              }
+            }
+            if (rewritePrefs) {
+              writePreferences();
+            }
            });
         }
       
@@ -1764,7 +1804,7 @@ function connectToDB() {
            });
         }    
       }
-    
+
       if (!foundPrefs) {
         winston.info("Creating default preferences");
         preferences = defaultPreferences;
@@ -1773,15 +1813,7 @@ function connectToDB() {
         });
       }
     });
-  
-  
-  
-  });
-}
-
-function writePreferences() {
-  db.collection('preferences').updateOne({},{'preferences': preferences}, (err, res) => {
-    if (err) throw err;
+    
   });
 }
 
@@ -1826,6 +1858,7 @@ function chunkHandler(collectionRoot, id, subject, data, chunk, clientSessionId=
   }
   let thisCollection = collectionRoot[rollingId];
 
+  /*
 ////DEBUG CODE//
   if (thisCollection == undefined) {
     console.error('ERROR: thisCollection is undefined');
@@ -1840,6 +1873,7 @@ function chunkHandler(collectionRoot, id, subject, data, chunk, clientSessionId=
     process.exit(1);
   }
 ////
+*/
 
   winston.debug('Processing update from worker');
   data += chunk
