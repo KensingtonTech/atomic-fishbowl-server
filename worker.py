@@ -14,7 +14,6 @@ from pprint import pprint, pformat
 import logging
 import signal
 from Crypto.PublicKey import RSA
-from Crypto.Hash import SHA
 from base64 import b64decode
 
 def sigIntHandler(signal, frame):
@@ -46,13 +45,12 @@ def configReceived(cfgObj):
       log.debug(pformat(cfg))
 
       #decrypt password
-      epassword = cfg['password']
+      ePassword = cfg['password']
       privateKeyFile = cfg['privateKeyFile']
-      rsa_key = RSA.importKey(open(privateKeyFile, "rb").read())
-      h = SHA.new()
-      raw_cipher_data = b64decode(epassword)
-      password = pkcs1_unpad(rsa_key.decrypt(raw_cipher_data))
-            
+      rsaKey = RSA.importKey(open(privateKeyFile, "rb").read())
+      rawCipherData = b64decode(ePassword)
+      password = pkcs1_unpad(rsaKey.decrypt(rawCipherData))
+
 
       collectionId = cfg['collectionId']
       id = cfg['id']
