@@ -126,10 +126,9 @@ const cfgDir = '/etc/kentech/221b';
 const certDir = cfgDir + '/certificates';
 const cfgFile = cfgDir + '/221b-server.conf';
 const jwtPrivateKeyFile = certDir + '/ssl.key';
-const jwtPublicKeyFile = certDir + '/ssl.pem';
+const jwtPublicCertFile = certDir + '/ssl.cer';
 const internalPublicKeyFile = certDir + '/internal.pem';
 const internalPrivateKeyFile = certDir + '/internal.key';
-// const internalPrivateKeyFile = certDir + '/internal.key';
 const collectionsUrl = '/collections'
 var collectionsDir = '/var/kentech/221b/collections';
 
@@ -251,10 +250,10 @@ catch(e) {
 }
 
 try {
-  var jwtPublicKey = fs.readFileSync(jwtPublicKeyFile, 'utf8');
+  var jwtPublicKey = fs.readFileSync(jwtPublicCertFile, 'utf8');
 }
 catch(e) {
-  winston.error("Cannot read public key file", jwtPublicKeyFile);
+  winston.error("Cannot read public key file", jwtPublicCertFile);
   process.exit(1);
 }
 

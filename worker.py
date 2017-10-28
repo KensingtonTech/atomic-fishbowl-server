@@ -13,6 +13,9 @@ from worker_communicator import communicator
 from pprint import pprint, pformat
 import logging
 import signal
+from Crypto.PublicKey import RSA
+from Crypto.Hash import SHA
+from base64 import b64decode
 
 def sigIntHandler(signal, frame):
   log.info("Worker terminated cleanly by interrupt")
@@ -24,6 +27,14 @@ def configCallback(cfg):
   #pprint(cfg)
   configReceived(cfg)
 
+def pkcs1_unpad(text):
+  if len(text) > 0 and text[0] == '\x02':
+    # Find end of padding marked by nul
+    pos = text.find('\x00')
+    if pos > 0:
+      return text[pos+1:]
+  return None
+
 def configReceived(cfgObj):
   try:
     '''select * where (time='2017-May-02 14:00:00'-'2017-May-02 14:59:59') && (vis.level exists)'''
@@ -32,10 +43,16 @@ def configReceived(cfgObj):
 
     try:
       cfg = cfgObj['workerConfig']
-      password = cfg['password']
-      cfg.pop('password', None)
-
       log.debug(pformat(cfg))
+
+      #decrypt password
+      epassword = cfg['password']
+      privateKeyFile = cfg['privateKeyFile']
+      rsa_key = RSA.importKey(open(privateKeyFile, "rb").read())
+      h = SHA.new()
+      raw_cipher_data = b64decode(epassword)
+      password = pkcs1_unpad(rsa_key.decrypt(raw_cipher_data))
+            
 
       collectionId = cfg['collectionId']
       id = cfg['id']
