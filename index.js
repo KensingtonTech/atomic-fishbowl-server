@@ -28,6 +28,7 @@ const jwt = require('jsonwebtoken');
 const JwtStrategy = require('passport-jwt').Strategy;
 const ExtractJwt = require('passport-jwt').ExtractJwt;
 var mongo = require('mongodb').MongoClient;
+const NodeRSA = require('node-rsa');
 const buildProperties = require('./build-properties');
 const version = `${buildProperties.major}.${buildProperties.minor}.${buildProperties.patch}.${buildProperties.build}-${buildProperties.level}`;
 var development = process.env.NODE_ENV !== 'production';
@@ -169,7 +170,10 @@ if ( config['dbConfig']['authentication']['enabled']
 }
 winston.debug(config);
 
-var internalPublicKey = fs.readFileSync(internalPublicKeyFile, 'utf8');
+const internalPublicKey = fs.readFileSync(internalPublicKeyFile, 'utf8');
+const internalPrivateKey = fs.readFileSync(internalPrivateKeyFile, 'utf8');
+const decryptor = new NodeRSA( internalPrivateKey );
+decryptor.setOptions({encryptionScheme: 'pkcs1'});
 
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -453,54 +457,68 @@ app.get('/api/user/:uname', passport.authenticate('jwt', { session: false } ), (
 
 app.post('/api/adduser', passport.authenticate('jwt', { session: false } ), (req, res) => {
   winston.info("POST /api/adduser");
-  User.register(new User({ id: uuidV4(), username : req.body.username, fullname: req.body.fullname, email: req.body.email, enabled: req.body.enabled }), req.body.password, (err, user) => {
+  let u = req.body;
+  let uPassword = decryptor.decrypt(u.password, 'utf8');
+  u.password = uPassword;
+  User.register(new User({ id: uuidV4(), username : u.username, fullname: u.fullname, email: u.email, enabled: u.enabled }), u.password, (err, user) => {
     if (err) {
-      winston.error("ERROR adding user " + req.body.username + ':', err);
+      winston.error("ERROR adding user " + u.username + ':', err);
       res.sendStatus(500);
     }
     else {
-      winston.info("User added:", req.body.username);
+      winston.info("User added:", u.username);
       res.sendStatus(201);
     }
   });
 });
 
 function updateUser(req, res) {
-  //User.register(new User({ id: uuidV4(), username : req.body.username, fullname: req.body.fullname, email: req.body.email, enabled: req.body.enabled }), req.body.password, (err, user) => {
-  User.findOneAndUpdate( { 'id': req.body.id }, req.body, (err, doc) => {
-    winston.info("Updating user object with id", req.body.id);
+  let u = req.body;
+  User.findOneAndUpdate( { 'id': u.id }, u, (err, doc) => {
+    winston.info("Updating user object with id", u.id);
     //now update user object
     if (err) {
-      winston.error("ERROR modifying user with id" + req.body.id + ':', err);
+      winston.error("ERROR modifying user with id" + u.id + ':', err);
       res.sendStatus(500);
     }
     else {
-      winston.info("Updated user with id:", req.body.id);
+      winston.info("Updated user with id:", u.id);
       res.sendStatus(201);
     }
   });
+
 }
 
 app.post('/api/updateuser', passport.authenticate('jwt', { session: false } ), (req, res) => {
   winston.info("POST /api/updateuser");
+
+  let u = req.body;
+  //winston.debug('user:', u);
   
-  if ('password' in req.body) {
-    winston.info("Updating password for user with id", req.body.id);
+  if (!('password' in req.body)) {
+    updateUser(req, res);
+  }
+  else {
+    winston.info("Updating password for user with id", u.id);
+
+    let uPassword = decryptor.decrypt(u.password, 'utf8');
+    u.password = uPassword;
+
     //change password
     try {
-      var u;
-      User.findOne( { 'id': req.body.id }, (err, doc) => {
+      let username = '';
+      User.findOne( { 'id': u.id }, (err, doc) => {
         if (err) throw(err);
-        u = doc.username;
+        username = doc.username;
       })
       .then ( () => {
-        User.findByUsername(u, (err, user) => {
+        User.findByUsername(username, (err, user) => {
           if (err) throw(err);
-          user.setPassword(req.body.password, (err) => {
+          user.setPassword(u.password, (err) => {
             if (err) throw(err);
             user.save( (error) => { 
               if (err) throw(err);
-              delete req.body.password; //we don't want this getting set when we update the user object
+              delete u.password; //we don't want this getting set when we update the user object
               updateUser(req, res);
             });
           });
@@ -512,9 +530,6 @@ app.post('/api/updateuser', passport.authenticate('jwt', { session: false } ), (
       res.sendStatus(500);
       return;
     }
-  }
-  else {
-    updateUser(req, res)
   }
 });
 
