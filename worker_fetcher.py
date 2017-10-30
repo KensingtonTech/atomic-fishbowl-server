@@ -37,7 +37,7 @@ def unwrapPullFiles(*arg, **kwarg):
 
 class Fetcher:
 
-  def __init__(self, communicator, collectionId, url, user, password, directory, minX, minY, gsPath, pdftotextPath, unrarPath, contentLimit, summaryTimeout, queryTimeout, contentTimeout):
+  def __init__(self, communicator, collectionId, url, user, password, directory, minX, minY, gsPath, pdftotextPath, unrarPath, contentLimit, summaryTimeout, queryTimeout, contentTimeout, maxContentErrors):
 
     self.pool = Pool()
     self.manager = Manager()
@@ -63,8 +63,8 @@ class Fetcher:
     self.summaryTimeout = summaryTimeout
     self.queryTimeout = queryTimeout
     self.contentTimeout = contentTimeout
-    self.maxContentRetries = 6
-    self.contentRetries = self.manager.Value('I', 0)
+    self.maxContentErrors = maxContentErrors # should default to 6
+    self.contentErrors = self.manager.Value('I', 0)
     log.info("Minimum dimensions are: " + str(minX) + " x " + str(minY))
 
   """curl "http://admin:netwitness@172.16.0.55:50104/sdk?msg=query&query=$query&force-content-type=application/json"""
@@ -184,29 +184,29 @@ class Fetcher:
         request.add_header('Content-type', 'application/json')
         request.add_header('Accept', 'application/json')
         error = ''
-        while self.contentRetries.value < self.maxContentRetries:
-          try:
-            res = urllib2.urlopen(request, context=ctx, timeout=self.contentTimeout)
-            break
-          except urllib2.HTTPError as e:
-            self.contentRetries.value += 1
-            error = "HTTP exception pulling content for session " + str(sessionId) + ".  URI was '" + uri + " .  The HTTP status code was " + str(e.code)
-            log.error("pullFiles(): " + error )
-            continue
-          except urllib2.URLError as e:
-            self.contentRetries.value += 1
-            error = "URL error pulling content for session " + str(sessionId) + ".  The reason was " + e.reason
-            log.error("pullFiles(): " + error)
-            continue
-          except socket.timeout as e:
-            self.contentRetries.value += 1
-            error = "content call for session " + str(sessionId) + " timed out after " + str(self.contentTimeout) + " seconds"
-            log.error("pullFiles(): " + error)
-            continue
+        #while self.contentErrors.value < self.maxContentErrors:
+        try:
+          res = urllib2.urlopen(request, context=ctx, timeout=self.contentTimeout)
+          #break
+        except urllib2.HTTPError as e:
+          self.contentErrors.value += 1
+          error = "HTTP exception pulling content for session " + str(sessionId) + ".  URI was '" + uri + "'.  The HTTP status code was " + str(e.code)
+          log.error("pullFiles(): " + error )
+          continue
+        except urllib2.URLError as e:
+          self.contentErrors.value += 1
+          error = "URL error pulling content for session " + str(sessionId) + ".  The reason was " + e.reason
+          log.error("pullFiles(): " + error)
+          continue
+        except socket.timeout as e:
+          self.contentErrors.value += 1
+          error = "content call for session " + str(sessionId) + " timed out after " + str(self.contentTimeout) + " seconds"
+          log.error("pullFiles(): " + error)
+          continue
 
 
-        if self.contentRetries.value == self.maxContentRetries:
-          e = "pullFiles(): Maximum retries reached whilst pulling content for session " + str(sessionId) + ".  The last error was " + error + ".  Exiting with code 1"
+        if self.contentErrors.value == self.maxContentErrors:
+          e = "pullFiles(): Maximum retries reached whilst pulling files for session " + str(sessionId) + ".  The last error was " + error + ".  Exiting with code 1"
           self.exitWithError(e)
 
         if 'res' in locals() and res.info().getheader('Content-Type').startswith('multipart/mixed'):
@@ -217,7 +217,7 @@ class Fetcher:
           ##############EXTRACT FILES AND DO THE WORK##############
           log.debug('Launching extractor from pool')
           #processor = ContentProcessor(self.directory, self.minX, self.minY, self.gsPath, self.pdftotextPath, self.contentLimit, self.contentCount)
-          processor = ContentProcessor(self.url, self.user, self.password, self.directory, self.minX, self.minY, self.gsPath, self.pdftotextPath, self.contentLimit, self.contentCount, self.contentRetries, self.maxContentRetries, self.contentTimeout)
+          processor = ContentProcessor(self.url, self.user, self.password, self.directory, self.minX, self.minY, self.gsPath, self.pdftotextPath, self.contentLimit, self.contentCount, self.contentErrors, self.maxContentErrors, self.contentTimeout)
           self.pool.apply_async(unwrapExtractFilesFromMultipart, args=(processor, newFileStr, self.sessions[sessionId], sessionId, distillationTerms, regexDistillationTerms, md5Hashes, sha1Hashes, sha256Hashes), callback=self.sendResult )
       
 
@@ -234,7 +234,7 @@ class Fetcher:
     #This tries to put every content call in its own process but this is actually slower than handling the content call in a single-threaded manner
     for sessionId in self.sessions:
       if not self.contentCount.value >= self.contentLimit:
-        processor = ContentProcessor(self.url, self.user, self.password, self.directory, self.minX, self.minY, self.gsPath, self.pdftotextPath, self.contentLimit, self.contentCount, self.contentRetries, self.maxContentRetries, self.contentTimeout)
+        processor = ContentProcessor(self.url, self.user, self.password, self.directory, self.minX, self.minY, self.gsPath, self.pdftotextPath, self.contentLimit, self.contentCount, self.contentErrors, self.maxContentErrors, self.contentTimeout)
 
         ##############PULL FILES AND PROCESS THEM##############
         log.debug('Launching extractor from pool')
@@ -273,7 +273,7 @@ class Fetcher:
 
 class ContentProcessor:
 
-  def __init__(self, url, user, password, directory, minX, minY, gsPath, pdftotextPath, contentLimit, contentCount, contentRetries, maxContentRetries, timeout):
+  def __init__(self, url, user, password, directory, minX, minY, gsPath, pdftotextPath, contentLimit, contentCount, contentErrors, maxContentErrors, timeout):
     self.url = url
     self.directory = directory
     self.minX = int(minX)
@@ -284,8 +284,8 @@ class ContentProcessor:
     self.contentCount = contentCount # is a manager proxy
     self.thumbnailSize = 350, 350
     self.devmode = True
-    self.contentRetries = contentRetries # is a manager proxy
-    self.maxContentRetries = maxContentRetries
+    self.contentErrors = contentErrors # is a manager proxy
+    self.maxContentErrors = maxContentErrors
     self.timeout = timeout
     self.user = user
     self.password = password
@@ -300,22 +300,22 @@ class ContentProcessor:
     request.add_header("Authorization", "Basic %s" % base64string)
     request.add_header('Content-type', 'application/json')
     request.add_header('Accept', 'application/json')
-    while self.contentRetries.value < self.maxContentRetries:
+    while self.contentErrors.value < self.maxContentErrors:
       try:
         res = urllib2.urlopen(request, context=ctx, timeout=self.timeout)
         break
       except urllib2.HTTPError as e:
-        if self.contentRetries.value == self.maxContentRetries:
+        if self.contentErrors.value == self.maxContentErrors:
           log.error("pullFiles(): Maximum retries reached whilst pulling content for session " + str(sessionId) + ".  Exiting with code 1")
           sys.exit(1)
-        self.contentRetries.value += 1
+        self.contentErrors.value += 1
         log.error("pullFiles(): HTTP error pulling content for session " + str(sessionId) + ".  Retrying")
         continue
       except urllib2.URLError as e:
-        if self.contentRetries.value == self.maxContentRetries:
+        if self.contentErrors.value == self.maxContentErrors:
           log.error("pullFiles(): Maximum retries reached whilst pulling content for session " + str(sessionId) + ".  Exiting with code 1")
           sys.exit(1)
-        self.contentRetries.value += 1
+        self.contentErrors.value += 1
         log.error("pullFiles(): ERROR: URL error pulling content for session " + str(sessionId) + ".  Retrying")
         continue
 

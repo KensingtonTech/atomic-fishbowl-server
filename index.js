@@ -168,7 +168,11 @@ if ( config['dbConfig']['authentication']['enabled']
   winston.error(`Either 'dbConfig.authentication.username' or 'dbConfig.authentication.password' property not defined in ${cfgFile}`);
   sys.exit(1);
 }
-winston.debug(config);
+let configCopy = JSON.parse(JSON.stringify(config));
+if ('dbConfig' in configCopy && 'authentication' in configCopy['dbConfig'] && 'password' in configCopy['dbConfig']['authentication']) {
+  configCopy['dbConfig']['authentication']['password'] = '<redacted>';
+}
+winston.debug(configCopy);
 
 const internalPublicKey = fs.readFileSync(internalPublicKeyFile, 'utf8');
 const internalPrivateKey = fs.readFileSync(internalPrivateKeyFile, 'utf8');
@@ -225,7 +229,9 @@ var defaultPreferences = {
   masonryColumnSize: 350,
   summaryTimeout: 5,
   queryTimeout: 5,
-  contentTimeout: 5
+  contentTimeout: 5,
+  queryDelayMinutes: 1,
+  maxContentErrors: 10
 };
 
 
@@ -951,7 +957,8 @@ function fixedSocketConnectionHandler(id, socket, tempName, subject) {
     summaryTimeout: preferences.summaryTimeout,
     queryTimeout: preferences.queryTimeout,
     contentTimeout: preferences.contentTimeout,
-    privateKeyFile: internalPrivateKeyFile
+    privateKeyFile: internalPrivateKeyFile,
+    maxContentErrors: preferences.maxContentErrors
   };
   
   if ('distillationTerms' in collections[id]) {
@@ -1244,19 +1251,22 @@ function rollingCollectionSocketConnectionHandler(id, socket, tempName, subject,
     summaryTimeout: preferences.summaryTimeout,
     queryTimeout: preferences.queryTimeout,
     contentTimeout: preferences.contentTimeout,
-    privateKeyFile: internalPrivateKeyFile
+    privateKeyFile: internalPrivateKeyFile,
+    maxContentErrors: preferences.maxContentErrors
   };
+
+  let queryDelaySeconds = preferences.queryDelayMinutes * 60;
 
   if (thisCollection.type === 'monitoring') {
     // If this is a monitoring collection, then set timeEnd and timeBegin to be a one minute window
-    cfg['timeEnd'] = moment().startOf('minute').unix() - 61;
+    cfg['timeEnd'] = moment().startOf('minute').unix() - 61 - queryDelaySeconds;
     cfg['timeBegin'] = ( cfg['timeEnd'] - 60) + 1;
   }
   
   else if (thisRollingCollectionSubject.runs == 1) {
     // This is the first run of a rolling collection
     winston.debug('rollingCollectionSocketConnectionHandler(): Got first run');
-    cfg['timeEnd'] = moment().startOf('minute').unix() - 61; // the beginning of the last minute minus one second, to give time for sessions to leave the assembler
+    cfg['timeEnd'] = moment().startOf('minute').unix() - 61 - queryDelaySeconds; // the beginning of the last minute minus one second, to give time for sessions to leave the assembler
     cfg['timeBegin'] = ( cfg['timeEnd'] - (thisCollection.lastHours * 60 * 60) ) + 1;
   }
   
@@ -1265,7 +1275,7 @@ function rollingCollectionSocketConnectionHandler(id, socket, tempName, subject,
     // It will only enter this block if more than 61 seconds have elapsed since the last run
     winston.debug('rollingCollectionSocketConnectionHandler(): Got second run');
     cfg['timeBegin'] = thisRollingCollectionSubject['lastRun'] + 1; // one second after the last run
-    cfg['timeEnd'] = moment().startOf('minute').unix() - 61; // the beginning of the last minute minus one second, to give time for sessions to leave the assembler
+    cfg['timeEnd'] = moment().startOf('minute').unix() - 61 - queryDelaySeconds; // the beginning of the last minute minus one second, to give time for sessions to leave the assembler
   }  
 
   else {

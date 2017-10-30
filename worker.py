@@ -119,12 +119,14 @@ def configReceived(cfgObj):
       queryTimeout = int(cfg['queryTimeout'])
       contentTimeout = int(cfg['contentTimeout'])
 
+      maxContentErrors = int(cfg['maxContentErrors'])
+
     except KeyError as e:
       error = 'ERROR: Missing critical configuration data: ' + str(e)
       exitWithError(error)
   
     baseUrl = proto + host + ':' + port
-    fetcher = Fetcher(client, collectionId, baseUrl, user, password, directory, minX, minY, gsPath, pdftotextPath, unrarPath, imageLimit, summaryTimeout, queryTimeout, contentTimeout)
+    fetcher = Fetcher(client, collectionId, baseUrl, user, password, directory, minX, minY, gsPath, pdftotextPath, unrarPath, imageLimit, summaryTimeout, queryTimeout, contentTimeout, maxContentErrors)
     
     ###QUERY DATA###
     log.info("Executing query")
