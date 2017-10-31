@@ -23,12 +23,13 @@ const util = require('util');
 const sprintf = require('sprintf-js').sprintf;
 const winston = require('winston');
 const mongoose = require('mongoose');
-mongoose.Promise = Promise; //global.Promise;
+mongoose.Promise = Promise;
 const jwt = require('jsonwebtoken');
 const JwtStrategy = require('passport-jwt').Strategy;
 const ExtractJwt = require('passport-jwt').ExtractJwt;
 var mongo = require('mongodb').MongoClient;
 const NodeRSA = require('node-rsa');
+const sleep = require('sleep');
 const buildProperties = require('./build-properties');
 const version = `${buildProperties.major}.${buildProperties.minor}.${buildProperties.patch}.${buildProperties.build}-${buildProperties.level}`;
 var development = process.env.NODE_ENV !== 'production';
@@ -282,81 +283,6 @@ if (config.dbConfig.authentication.enabled) {
   mongoUrl = `mongodb://${config.dbConfig.authentication.user}:${config.dbConfig.authentication.password}@${config['dbConfig']['host']}:${config['dbConfig']['port']}/221b?authSource=admin`;
 }
 connectToDB(); //this must come before mongoose user connection so that we know whether to create the default admin account
-
-var User = require('./models/user');
-passport.use(new LocalStrategy(User.authenticate()));
-passport.serializeUser(User.serializeUser());
-passport.deserializeUser(User.deserializeUser());
-
-// Connect to Mongoose
-// mongoose.connect("mongodb://localhost:27017/221b_users", { useMongoClient: true, promiseLibrary: global.Promise });
-var mongooseUrl = `mongodb://${config['dbConfig']['host']}:${config['dbConfig']['port']}/221b_users`
-var mongooseOptions = { useMongoClient: true, promiseLibrary: global.Promise };
-if (config.dbConfig.authentication.enabled) {
-  mongooseUrl = `mongodb://${config.dbConfig.authentication.user}:${config.dbConfig.authentication.password}@${config['dbConfig']['host']}:${config['dbConfig']['port']}/221b_users?authSource=admin`;
-}
-mongoose.connect(mongooseUrl, mongooseOptions );
-var db = mongoose.connection;
-//db.on('error', (err) => {winston.error("Error connecting to 221b_users DB:"), err} );
-//db.once('open', () => {winston.info("Connected to 221b_users DB")} );
-
-/*
-conn.221b_.listCollections({name: 'users'})
-        .next(function(err, collinfo) {
-                if (collinfo) {
-                  winston.info("Collection 'users' exists");
-                }
-            });
-*/
-//mongoose.connect("mongodb://localhost:27017/221b_users", { useMongoClient: true });
-var tokenBlacklist = {};
-
-
-// Create the default user account, if we think the app was just installed and if the count of users is 0
-User.count({}, (err, count) => {
-  if (err) {
-    winston.error("Error getting user count:", err);
-  }
-  else if (justInstalled == true && count == 0) {
-      winston.info("Adding default user 'admin'");
-      createDefaultUser();
-      justInstalled = false;
-  }
-});
-
-
-passport.use(new JwtStrategy(jwtOpts, (jwt_payload, done) => {
-  //After automatically verifying that JWT was signed by us, perform extra validation with this function
-  //winston.debug("jwt validator jwt_payload:", jwt_payload);
-  //winston.debug("verifying token id:", jwt_payload.jti);
-  if (jwt_payload.jti in tokenBlacklist) { //check blacklist
-    winston.info("User " + jwt_payload.username + " has already logged out!");
-    return done(null, false);
-  }
-
-  User.findOne({id: jwt_payload.sub}, function(err, user) {
-    if (err) {
-      return done(err, false);
-    }
-    if (user && user.enabled) {
-      return done(null, user);
-    }
-    if (user && !user.enabled) {
-      winston.info('Login denied for user', user.username);
-      winston.info('Attempt to authenticate by disabled user', user.username);
-      return done(null, false);
-    }
-    else {
-      return done(null, false);
-      // or you could create a new account
-    }
-  });
-}));
-
-
-
-
-
 
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -1774,9 +1700,107 @@ function writePreferences() {
   });
 }
 
+var User = null;
+function mongooseInitFunc() {
+  winston.debug('Initializing mongoose');
+  // Initialise Mongoose.  This gets called from within connectToDB()
+  
+  User = require('./models/user');
+  passport.use(new LocalStrategy(User.authenticate()));
+  passport.serializeUser(User.serializeUser());
+  passport.deserializeUser(User.deserializeUser());
+
+  // Connect to Mongoose
+  // mongoose.connect("mongodb://localhost:27017/221b_users", { useMongoClient: true, promiseLibrary: global.Promise });
+  var mongooseUrl = `mongodb://${config['dbConfig']['host']}:${config['dbConfig']['port']}/221b_users`
+  var mongooseOptions = { useMongoClient: true, promiseLibrary: global.Promise };
+  if (config.dbConfig.authentication.enabled) {
+    mongooseUrl = `mongodb://${config.dbConfig.authentication.user}:${config.dbConfig.authentication.password}@${config['dbConfig']['host']}:${config['dbConfig']['port']}/221b_users?authSource=admin`;
+  }
+  
+  let mongooseOnConnectFunc = () => {
+    var db = mongoose.connection;
+    //db.on('error', (err) => {winston.error("Error connecting to 221b_users DB:"), err} );
+    //db.once('open', () => {winston.info("Connected to 221b_users DB")} );
+  
+    /*
+    conn.221b_.listCollections({name: 'users'})
+            .next(function(err, collinfo) {
+                    if (collinfo) {
+                      winston.info("Collection 'users' exists");
+                    }
+                });
+    */
+    //mongoose.connect("mongodb://localhost:27017/221b_users", { useMongoClient: true });
+    var tokenBlacklist = {};
+  
+  
+    // Create the default user account, if we think the app was just installed and if the count of users is 0
+    User.count({}, (err, count) => {
+      if (err) {
+        winston.error("Error getting user count:", err);
+      }
+      else if (justInstalled == true && count == 0) {
+          winston.info("Adding default user 'admin'");
+          createDefaultUser();
+          justInstalled = false;
+      }
+    });
+  
+  
+    passport.use(new JwtStrategy(jwtOpts, (jwt_payload, done) => {
+      //After automatically verifying that JWT was signed by us, perform extra validation with this function
+      //winston.debug("jwt validator jwt_payload:", jwt_payload);
+      //winston.debug("verifying token id:", jwt_payload.jti);
+      if (jwt_payload.jti in tokenBlacklist) { //check blacklist
+        winston.info("User " + jwt_payload.username + " has already logged out!");
+        return done(null, false);
+      }
+  
+      User.findOne({id: jwt_payload.sub}, function(err, user) {
+        if (err) {
+          return done(err, false);
+        }
+        if (user && user.enabled) {
+          return done(null, user);
+        }
+        if (user && !user.enabled) {
+          winston.info('Login denied for user', user.username);
+          winston.info('Attempt to authenticate by disabled user', user.username);
+          return done(null, false);
+        }
+        else {
+          return done(null, false);
+          // or you could create a new account
+        }
+      });
+    }));
+  };
+
+  let mongooseConnectFunc = () => {
+    mongoose.connect(mongooseUrl, mongooseOptions )
+            .then( () => mongooseOnConnectFunc() )
+            .then( () => listener() )
+            .catch( (err) => {
+              winston.error('Mongoose error whilst connecting to mongo.  Exiting with code 1.');
+              winston.error(err);
+              process.exit(1);
+            } );
+  };
+
+  mongooseConnectFunc();
+}
+
+
+var db = null;
+
 function connectToDB() {
-  mongo.connect(mongoUrl, (err, database) => {
-    if (err) throw err;
+  // mongo.connect(mongoUrl, (err, database) => {
+
+  let connectFunc = (database) => {
+    // winston.debug('connectFunc()');
+    // console.log('db:', db);
+    // if (err) throw err;
     db = database;
   
     db.listCollections().toArray( (err, cols) => {
@@ -1849,8 +1873,32 @@ function connectToDB() {
         });
       }
     });
-    
-  });
+  };
+
+  winston.debug('Initializing mongo db');
+  let connectionAttempts = 1;
+  // winston.debug('mongoUrl:', mongoUrl);
+  let connectorFunc = () => {
+        mongo.connect(mongoUrl)
+        .then( (database) => connectFunc(database) )
+        .then( () => mongooseInitFunc() )
+        .catch( (err) => {
+          // winston.error(err);
+          if (connectionAttempts == 3) {
+            winston.error('Maximum retries reached whilst connecting to mongo.  Exiting with code 1.');
+            winston.error(err.message);
+            process.exit(1);
+          }
+          winston.warn('Could not connect to Mongo DB');
+          connectionAttempts++;
+          if (connectionAttempts <= 3) {
+            winston.warn('Retrying mongo connection in 3 seconds');
+          }
+          sleep.sleep(3);
+         connectorFunc();
+        });
+      };
+  connectorFunc();
 }
 
 function cleanRollingDirs() {
@@ -2077,7 +2125,9 @@ function purgeSessions(thisRollingCollection, sessionsToPurge) {
 ////////////////////////////////////////////////////////////////LISTEN/////////////////////////////////////////////////////////////////
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
-// Start listening for client traffic and away we go
-// app.listen(listenPort, '127.0.0.1');
-app.listen(listenPort);
-winston.info('Serving on localhost:' + listenPort);
+function listener () {
+  // Start listening for client traffic and away we go
+  // app.listen(listenPort, '127.0.0.1');
+  app.listen(listenPort);
+  winston.info('Serving on localhost:' + listenPort);
+}
