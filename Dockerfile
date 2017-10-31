@@ -24,8 +24,8 @@ COPY *.js* worker_stub.py *.so LICENSE.txt /opt/kentech/221b-server/bin/
 ARG CACHE_DATE=2016-01-01
 RUN \
 #echo 172.16.110.11 kentechrepo >> /etc/hosts; \
-sed -i'' 's/mirrorlist=/#mirrorlist=/g' /etc/yum.repos.d/CentOS-Base.repo \
-sed -i'' 's/#baseurl=http:\/\/mirror.centos.org/baseurl=http:\/\/kentechrepo/g' /etc/yum.repos.d/CentOS-Base.repo \
+/bin/sed -i'' 's/mirrorlist=/#mirrorlist=/g' /etc/yum.repos.d/CentOS-Base.repo \
+/bin/sed -i'' 's/#baseurl=http:\/\/mirror.centos.org/baseurl=http:\/\/kentechrepo/g' /etc/yum.repos.d/CentOS-Base.repo \
 yum clean all; \
 yum update -y; \
 rpm --import http://kentechrepo/yumrepo/221b_1.0.0_signed/221b-1.x.key; \
