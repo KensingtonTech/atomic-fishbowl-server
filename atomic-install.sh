@@ -62,14 +62,14 @@ if [[ ! -f ${HOST}${CERTDIR}/internal.key || ! -f ${HOST}${CERTDIR}/internal.cer
   chroot $HOST /usr/bin/openssl genrsa -out $CERTDIR/internal.key 2048
   chroot $HOST /usr/bin/openssl req -new -sha256 -key $CERTDIR/internal.key -out /tmp/tmpint.csr -subj "/C=US/ST=Colorado/L=Denver/O=Kensington Technology Associates, Limited/CN=localhost/emailAddress=info@knowledgekta.com"
   chroot $HOST /usr/bin/openssl x509 -req -days 3650 -in /tmp/tmpint.csr -signkey $CERTDIR/internal.key -out $CERTDIR/internal.cer
+  chroot $HOST /usr/bin/openssl x509 -in ${CERTDIR}/internal.cer -pubkey -noout > ${HOST}${CERTDIR}/internal.pem
   chmod 600 ${HOST}${CERTDIR}/internal.key ${HOST}${CERTDIR}/internal.cer
-  chroot $HOST /usr/bin/openssl x509 -in ${HOST}${CERTDIR}/internal.cer -pubkey -noout > ${HOST}${CERTDIR}/internal.pem
 fi
 
 # Check for extracted public key
 if [[ -f ${HOST}${CERTDIR}/internal.key && -f ${HOST}${CERTDIR}/internal.cer && ! -f ${HOST}${CERTDIR}/internal.pem ]]; then
   echo "Missing internal.pem.  Extracting it from internal.cer"
-  chroot $HOST /usr/bin/openssl x509 -in ${HOST}${CERTDIR}/internal.cer -pubkey -noout > ${HOST}${CERTDIR}/internal.pem
+  chroot $HOST /usr/bin/openssl x509 -in ${CERTDIR}/internal.cer -pubkey -noout > ${HOST}${CERTDIR}/internal.pem
 fi
 
 # Create container
