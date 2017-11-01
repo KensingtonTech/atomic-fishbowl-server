@@ -191,17 +191,17 @@ class Fetcher:
         except urllib2.HTTPError as e:
           self.contentErrors.value += 1
           error = "HTTP exception pulling content for session " + str(sessionId) + ".  URI was '" + uri + "'.  The HTTP status code was " + str(e.code)
-          log.error("pullFiles(): " + error )
+          log.warning("pullFiles(): " + error )
           continue
         except urllib2.URLError as e:
           self.contentErrors.value += 1
           error = "URL error pulling content for session " + str(sessionId) + ".  The reason was " + e.reason
-          log.error("pullFiles(): " + error)
+          log.warning("pullFiles(): " + error)
           continue
         except socket.timeout as e:
           self.contentErrors.value += 1
-          error = "content call for session " + str(sessionId) + " timed out after " + str(self.contentTimeout) + " seconds"
-          log.error("pullFiles(): " + error)
+          error = "Content call for session " + str(sessionId) + " timed out after " + str(self.contentTimeout) + " seconds"
+          log.warning("pullFiles(): " + error)
           continue
 
 
@@ -306,17 +306,17 @@ class ContentProcessor:
         break
       except urllib2.HTTPError as e:
         if self.contentErrors.value == self.maxContentErrors:
-          log.error("pullFiles(): Maximum retries reached whilst pulling content for session " + str(sessionId) + ".  Exiting with code 1")
+          log.warning("pullFiles(): Maximum retries reached whilst pulling content for session " + str(sessionId) + ".  Exiting with code 1")
           sys.exit(1)
         self.contentErrors.value += 1
-        log.error("pullFiles(): HTTP error pulling content for session " + str(sessionId) + ".  Retrying")
+        log.warning("pullFiles(): HTTP error pulling content for session " + str(sessionId) + ".  Retrying")
         continue
       except urllib2.URLError as e:
         if self.contentErrors.value == self.maxContentErrors:
-          log.error("pullFiles(): Maximum retries reached whilst pulling content for session " + str(sessionId) + ".  Exiting with code 1")
+          log.warning("pullFiles(): Maximum retries reached whilst pulling content for session " + str(sessionId) + ".  Exiting with code 1")
           sys.exit(1)
         self.contentErrors.value += 1
-        log.error("pullFiles(): ERROR: URL error pulling content for session " + str(sessionId) + ".  Retrying")
+        log.warning("pullFiles(): ERROR: URL error pulling content for session " + str(sessionId) + ".  Retrying")
         continue
 
     if res.info().getheader('Content-Type').startswith('multipart/mixed'):
@@ -386,21 +386,21 @@ class ContentProcessor:
     #log.debug('processPdf(): contentObj:' + pformat(contentObj.get()) )
 
     #write pdf to disk
-    log.debug("processPdf(): Writing pdf to " + os.path.join(self.directory, contentObj.contentFile) )
+    log.debug("processPdf(): Session " + str(contentObj.session) + ". Writing pdf to " + os.path.join(self.directory, contentObj.contentFile) )
     fp = open(os.path.join(self.directory, contentObj.contentFile), 'wb')
     shutil.copyfileobj(contentObj.getFileContent(), fp)
     fp.close()
     
     #extract first page of pdf
     #gs -dNOPAUSE -sDEVICE=jpeg -r144 -sOutputFile="p%o3d.jpg" -dFirstPage=1 -dLastPage=1 -dBATCH "$filename"
-    log.debug("processPdf(): Extracting first page of pdf " + contentObj.contentFile)
+    log.debug("processPdf(): Session " + str(contentObj.session) + ". Extracting first page of pdf " + contentObj.contentFile)
     outputfile = "page1-" + contentObj.contentFile + ".jpg"
     contentObj.pdfImage = outputfile
-    log.debug("processPdf(): Running gs on file " + contentObj.contentFile)
+    log.debug("processPdf(): Session " + str(contentObj.session) + ". Running gs on file " + contentObj.contentFile)
     
     
     gsCmd = self.gsPath + " -dNOPAUSE -sDEVICE=jpeg -r144 -sOutputFile='" + os.path.join(self.directory, outputfile) + "' -dPDFSTOPONERROR -dFirstPage=1 -dLastPage=1 -dBATCH '" +  os.path.join(self.directory, contentObj.contentFile) + "'"
-    log.debug("processPdf(): Ghostscript command line: " + gsCmd)
+    log.debug("processPdf(): Session " + str(contentObj.session) + ". Ghostscript command line: " + gsCmd)
     args = shlex.split(gsCmd)
     try:
       #process = Popen(gsCmd, stdout=PIPE, stderr=PIPE, shell = True)
@@ -410,21 +410,21 @@ class ContentProcessor:
     
     except OSError as e:
       if ('No such file or directory' in str(e)):
-        log.error('Could not run ghostscript command as ' + self.gsPath + ' was not found')
+        log.error("Session " + str(contentObj.session) + ". Could not run ghostscript command as " + self.gsPath + " was not found")
       else:
         log.exception(str(e))
       return False
 
     except Exception as e:
       #Ghostscript couldn't even be run
-      log.exception("Session " + contentObj.session + ": Could not run GhostScript command for file " + contentObj.contentFile + " at " + self.gsPath )
+      log.exception("Session " + str(contentObj.session) + ": Could not run GhostScript command for file " + contentObj.contentFile + " at " + self.gsPath )
       return False
 
     if exit_code != 0:
       #Ghostscript exited with a non-zero exit code, and thus was unsuccessful
-      log.warning("Session " + contentObj.session + ": GhostScript exited abnormally for file " + contentObj.contentFile + " with exit code " + str(exit_code) )
+      log.warning("Session " + str(contentObj.session) + ". GhostScript exited abnormally for file " + contentObj.contentFile + " with exit code " + str(exit_code) )
       #log.warning("The 'gs' command was: " + gsCmd)
-      log.warning("The 'gs' command output was: " + output)
+      log.warning("Session " + str(contentObj.session) + ". The 'gs' command output was: " + output)
       return False
 
     if exit_code == 0: #this means we successfully generated an image of the pdf and we want to keep it
@@ -443,7 +443,7 @@ class ContentProcessor:
       try:
         #now let's try generating a thumbnail - if we already have an image, this should succeed.  If not, there's something screwy...
         #but we'll keep it anyway and use the original image as the thumbnail and let the browser deal with any potential corruption
-        log.debug("processPdf(): Generating thumbnail for pdf " + outputfile)
+        log.debug("processPdf(): Session " + str(contentObj.session) + ". Generating thumbnail for pdf " + outputfile)
         thumbnailName = 'thumbnail_' + outputfile
         pdfim = Image.open(os.path.join(self.directory, outputfile))
         pdfim.thumbnail(self.thumbnailSize, Image.ANTIALIAS)
@@ -456,7 +456,7 @@ class ContentProcessor:
         self.contentCount.value += 1
         return True
       except Exception as e:
-        log.exception("Error generating thumbnail for pdf " + contentObj.contentFile)
+        log.exception("Session " + str(contentObj.session) + ". Error generating thumbnail for pdf " + contentObj.contentFile)
         #thumbnail generation failed, so set thumbnail to be the original image generated by gs
         contentObj.thumbnail = outputfile
         self.thisSession['images'].append( contentObj.get() )
@@ -468,11 +468,11 @@ class ContentProcessor:
 
   def getPdfText(self, contentObj, searchTerms=[], regexSearchTerms=[]):
     try: #now extract pdf text
-      log.debug('getPdfText(): session: ' + str(contentObj.session))
+      #log.debug('getPdfText(): session: ' + str(contentObj.session))
       sessionId = contentObj.session
 
       pdftotextCmd = self.pdftotextPath + " -enc UTF-8 -eol unix -nopgbrk -q '" + os.path.join(self.directory, contentObj.contentFile) + "' -"
-      log.debug("getPdfText(): pdftotextCmd: " + pdftotextCmd)
+      log.debug("getPdfText(): Session " + str(contentObj.session) + ". pdftotextCmd: " + pdftotextCmd)
       args = shlex.split(pdftotextCmd)
       try:
         #pdftotextProcess = Popen(pdftotextCmd, stdout=PIPE, stderr=PIPE, shell = True)
@@ -482,7 +482,7 @@ class ContentProcessor:
       
       except OSError as e:
         if ('No such file or directory' in str(e)):
-          log.error('ERROR: Could not run pdftotext command as ' + self.pdftotextPath + ' was not found')
+          log.error("Session " + str(contentObj.session) + ". Could not run pdftotext command as " + self.pdftotextPath + " was not found")
         else:
           log.exception(str(e))
         if len(searchTerms) == 0 and len(regexSearchTerms) == 0:
@@ -490,7 +490,7 @@ class ContentProcessor:
         return { 'keep': False, 'contentObj': contentObj }
 
       except Exception as e:
-        log.exception("Could not run pdftotext command at " + self.pdftotextPath )
+        log.exception("Session " + str(contentObj.session) + ". Could not run pdftotext command at " + self.pdftotextPath )
         if len(searchTerms) == 0 and len(regexSearchTerms) == 0:
           return { 'keep': True, 'contentObj': contentObj }
         return { 'keep': False, 'contentObj': contentObj }
@@ -515,7 +515,7 @@ class ContentProcessor:
           #log.debug( "getPdfText(): Text search term: " + term)
           if term.decode('utf-8').lower() in joinedText.decode('utf-8').lower():
             textTermsMatched.append(term)
-            log.debug("getPdfText(): Matched text search term " + term)
+            log.debug("getPdfText(): Session " + str(contentObj.session) + ". Matched text search term " + term)
         
         for t in regexSearchTerms:
           origTerm =  t.decode('utf-8')
@@ -525,8 +525,8 @@ class ContentProcessor:
           res = compiledTerm.search(joinedText.decode('utf-8')) #MatchObject
           if res != None:
             regexTermsMatched.append(origTerm)
-            log.debug("getPdfText(): Matched regex search term " + term)
-            log.debug("getPdfText(): Matched group: " + pformat(res.groups()))
+            log.debug("getPdfText(): Session " + str(contentObj.session) + ". Matched regex search term " + term)
+            log.debug("getPdfText(): Session " + str(contentObj.session) + ". Matched group: " + pformat(res.groups()))
 
         #'keep' is a variable that gets returned which indicates whether the document and session should be retained as part of a collection, if a term has been matched or if there were no terms
         if len(searchTerms) == 0 and len(regexSearchTerms) == 0: #no search terms defined - distillation is not enabled - definitely keep this session
@@ -541,7 +541,7 @@ class ContentProcessor:
         returnObj['contentObj'] = contentObj #pass our modified contentObj back to the caller
 
         if returnObj['keep'] == True:
-          log.debug("getPdfText(): keeping file " + contentObj.contentFile)
+          log.debug("getPdfText(): Session " + str(contentObj.session) + ". Keeping file " + contentObj.contentFile)
           searchObj = { 'id': contentObj.id, 'session': sessionId, 'contentFile': contentObj.contentFile, 'searchString': joinedText }
           if not 'search' in self.thisSession:
             self.thisSession['search'] = []
@@ -551,7 +551,7 @@ class ContentProcessor:
         return returnObj
         
     except Exception as e:
-      log.exception("Unhandled exception in getPdfText()")
+      log.exception("Session " + str(contentObj.session) + ". Unhandled exception in getPdfText()")
       #print "Error Message:", str(e)
       #continue
       #if searchForText:
@@ -563,7 +563,7 @@ class ContentProcessor:
   def genHash(self, contentObj, hashes): #must specify either part or stringFile
     #print "genHash()"
     contentObj.contentType = 'hash'
-    log.debug("genHash(): Generating " + contentObj.hashType + " hash for " + contentObj.contentFile)
+    log.debug("genHash(): Session " + str(contentObj.session) + ". Generating " + contentObj.hashType + " hash for " + contentObj.contentFile)
 
     contentFileObj = contentObj.getFileContent()
 
@@ -575,11 +575,11 @@ class ContentProcessor:
       hash = hashlib.sha256()
     hash.update(contentFileObj.getvalue())
       
-    log.debug("genHash(): " + contentObj.hashType + " hash for " + contentObj.contentFile + " is " + hash.hexdigest())
+    log.debug("genHash(): Session " + str(contentObj.session) + ". " + contentObj.hashType + " hash for " + contentObj.contentFile + " is " + hash.hexdigest())
 
     for h in hashes:
       if hash.hexdigest().decode('utf-8').lower() == h['hash'].lower():
-        log.debug("genHash(): Matched " + contentObj.hashType + " hash " + h['hash'])
+        log.debug("genHash(): Session " + str(contentObj.session) + ". Matched " + contentObj.hashType + " hash " + h['hash'])
         fp = open(os.path.join(self.directory, contentObj.contentFile), 'wb')
         fp.write(contentFileObj.getvalue())
         fp.close()
