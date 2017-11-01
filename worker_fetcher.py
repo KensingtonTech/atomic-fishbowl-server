@@ -410,19 +410,21 @@ class ContentProcessor:
     
     except OSError as e:
       if ('No such file or directory' in str(e)):
-        log.error('ERROR: Could not run ghostscript command as ' + self.gsPath + ' was not found')
+        log.error('Could not run ghostscript command as ' + self.gsPath + ' was not found')
       else:
         log.exception(str(e))
       return False
 
     except Exception as e:
       #Ghostscript couldn't even be run
-      log.exception("ERROR: Could not run GhostScript command at " + self.gsPath )
+      log.exception("Session " + contentObj.session + ": Could not run GhostScript command for file " + contentObj.contentFile + " at " + self.gsPath )
       return False
 
     if exit_code != 0:
       #Ghostscript exited with a non-zero exit code, and thus was unsuccessful
-      log.warning("WARNING: GhostScript exited abnormally with code " + str(exit_code) )
+      log.warning("Session " + contentObj.session + ": GhostScript exited abnormally for file " + contentObj.contentFile + " with exit code " + str(exit_code) )
+      #log.warning("The 'gs' command was: " + gsCmd)
+      log.warning("The 'gs' command output was: " + output)
       return False
 
     if exit_code == 0: #this means we successfully generated an image of the pdf and we want to keep it
