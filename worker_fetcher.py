@@ -399,7 +399,7 @@ class ContentProcessor:
     log.debug("processPdf(): Session " + str(contentObj.session) + ". Running gs on file " + contentObj.contentFile)
     
     
-    gsCmd = self.gsPath + " -dNOPAUSE -sDEVICE=jpeg -r144 -sOutputFile='" + os.path.join(self.directory, outputfile) + "' -dPDFSTOPONERROR -dFirstPage=1 -dLastPage=1 -dBATCH '" +  os.path.join(self.directory, contentObj.contentFile) + "'"
+    gsCmd = self.gsPath + " -dNOPAUSE -sDEVICE=jpeg -r144 -sOutputFile='" + os.path.join(self.directory, outputfile) + "' -dNoVerifyXref -dPDFSTOPONERROR -dFirstPage=1 -dLastPage=1 -dBATCH '" +  os.path.join(self.directory, contentObj.contentFile) + "'"
     log.debug("processPdf(): Session " + str(contentObj.session) + ". Ghostscript command line: " + gsCmd)
     args = shlex.split(gsCmd)
     try:
