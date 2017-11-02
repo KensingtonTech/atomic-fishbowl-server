@@ -205,7 +205,7 @@ def main():
     socketFile = sys.argv[1]
     global client
     client = communicator(socketFile, configCallback)
-    asyncore.loop()
+    asyncore.loop(use_poll=True)
     log.info("Exiting 221b_worker with code 0")
     sys.exit(0)
   except Exception as e:

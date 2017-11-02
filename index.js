@@ -932,12 +932,14 @@ function fixedSocketConnectionHandler(id, socket, tempName, subject) {
   //Now that we've finished building the new collection, emit a finished signal, and merge the new collection into the collectionsData object, and delete the object from buildingFixedCollections
   socket.on('end', () => {
     winston.debug('Worker disconnected.  Merging temporary collection into permanent collection');
-    collectionsData[id].images = buildingFixedCollections[id].images;
-    collectionsData[id].search = buildingFixedCollections[id].search;
-    for (var e in buildingFixedCollections[id].sessions) {
-      let s = buildingFixedCollections[id].sessions[e];
-      let sid = s.id;
-      collectionsData[id].sessions[sid] = s;
+    if (id in collectionsData) { // needed in case the collection has been deleted whilst still building
+      collectionsData[id].images = buildingFixedCollections[id].images;
+      collectionsData[id].search = buildingFixedCollections[id].search;
+      for (var e in buildingFixedCollections[id].sessions) {
+        let s = buildingFixedCollections[id].sessions[e];
+        let sid = s.id;
+        collectionsData[id].sessions[sid] = s;
+      }
     }
     //moved into process exit
     winston.debug('Temporary collection merged into main branch.  Deleting temporary collection.');

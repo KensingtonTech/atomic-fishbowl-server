@@ -1,7 +1,7 @@
 import os
 import sys
 import socket
-import asyncore
+#import asyncore
 import asynchat
 import json
 import logging
