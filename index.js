@@ -697,6 +697,9 @@ app.post('/api/addcollection', passport.authenticate('jwt', { session: false } )
     if (!collection.nwserverName) {
       throw("'nwserverName' is not defined");
     }
+    if (!collection.contentTypes) {
+      throw("'contentTypes' is not defined");
+    }
     collection['state'] = 'initial';
     collections[collection.id] = collection;
     let cDef = {
@@ -884,7 +887,8 @@ function fixedSocketConnectionHandler(id, socket, tempName, subject) {
     queryTimeout: preferences.queryTimeout,
     contentTimeout: preferences.contentTimeout,
     privateKeyFile: internalPrivateKeyFile,
-    maxContentErrors: preferences.maxContentErrors
+    maxContentErrors: preferences.maxContentErrors,
+    contentTypes: collections[id].contentTypes
   };
   
   if ('distillationTerms' in collections[id]) {
@@ -1180,7 +1184,8 @@ function rollingCollectionSocketConnectionHandler(id, socket, tempName, subject,
     queryTimeout: preferences.queryTimeout,
     contentTimeout: preferences.contentTimeout,
     privateKeyFile: internalPrivateKeyFile,
-    maxContentErrors: preferences.maxContentErrors
+    maxContentErrors: preferences.maxContentErrors,
+    contentTypes: collections[id].contentTypes
   };
 
   let queryDelaySeconds = preferences.queryDelayMinutes * 60;

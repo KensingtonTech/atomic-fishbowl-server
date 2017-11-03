@@ -37,7 +37,7 @@ def unwrapPullFiles(*arg, **kwarg):
 
 class Fetcher:
 
-  def __init__(self, communicator, collectionId, url, user, password, directory, minX, minY, gsPath, pdftotextPath, unrarPath, contentLimit, summaryTimeout, queryTimeout, contentTimeout, maxContentErrors):
+  def __init__(self, communicator, collectionId, url, user, password, directory, minX, minY, gsPath, pdftotextPath, unrarPath, contentLimit, summaryTimeout, queryTimeout, contentTimeout, maxContentErrors, contentTypes):
 
     self.pool = Pool()
     self.manager = Manager()
@@ -65,6 +65,7 @@ class Fetcher:
     self.contentTimeout = contentTimeout
     self.maxContentErrors = maxContentErrors # should default to 6
     self.contentErrors = self.manager.Value('I', 0)
+    self.contentTypes = contentTypes
     log.info("Minimum dimensions are: " + str(minX) + " x " + str(minY))
 
   """curl "http://admin:netwitness@172.16.0.55:50104/sdk?msg=query&query=$query&force-content-type=application/json"""
@@ -217,7 +218,7 @@ class Fetcher:
           ##############EXTRACT FILES AND DO THE WORK##############
           log.debug('Launching extractor from pool')
           #processor = ContentProcessor(self.directory, self.minX, self.minY, self.gsPath, self.pdftotextPath, self.contentLimit, self.contentCount)
-          processor = ContentProcessor(self.url, self.user, self.password, self.directory, self.minX, self.minY, self.gsPath, self.pdftotextPath, self.contentLimit, self.contentCount, self.contentErrors, self.maxContentErrors, self.contentTimeout)
+          processor = ContentProcessor(self.url, self.user, self.password, self.directory, self.minX, self.minY, self.gsPath, self.pdftotextPath, self.contentLimit, self.contentCount, self.contentErrors, self.maxContentErrors, self.contentTimeout, self.contentTypes)
           self.pool.apply_async(unwrapExtractFilesFromMultipart, args=(processor, newFileStr, self.sessions[sessionId], sessionId, distillationTerms, regexDistillationTerms, md5Hashes, sha1Hashes, sha256Hashes), callback=self.sendResult )
       
 
@@ -273,7 +274,7 @@ class Fetcher:
 
 class ContentProcessor:
 
-  def __init__(self, url, user, password, directory, minX, minY, gsPath, pdftotextPath, contentLimit, contentCount, contentErrors, maxContentErrors, timeout):
+  def __init__(self, url, user, password, directory, minX, minY, gsPath, pdftotextPath, contentLimit, contentCount, contentErrors, maxContentErrors, timeout, contentTypes):
     self.url = url
     self.directory = directory
     self.minX = int(minX)
@@ -289,6 +290,7 @@ class ContentProcessor:
     self.timeout = timeout
     self.user = user
     self.password = password
+    self.contentTypes = contentTypes
 
 
   def pullFiles(self, session, sessionId, distillationTerms, regexDistillationTerms, md5Hashes=[], sha1Hashes=[], sha256Hashes=[]):
@@ -649,21 +651,21 @@ class ContentProcessor:
       contentObj = ContentObj()
       contentObj.session = contentObj.session = sessionId
 
-      if contentType == 'image' and len(distillationTerms) == 0 and len(regexDistillationTerms) == 0:
+      if contentType == 'image' and len(distillationTerms) == 0 and len(regexDistillationTerms) == 0 and 'images' in self.contentTypes:
         contentObj.contentFile = filename
         contentObj.setPartContent(part)
         ###if not self.processImage(filename, sessionId, contentType, part=part):
         if not self.processImage(contentObj):
           continue
         
-      elif contentType == 'pdf':
+      elif contentType == 'pdf' and 'pdfs' in self.contentTypes:
         contentObj.contentFile = filename
         contentObj.setPartContent(part)
         ###if not self.processPdf(filename, sessionId, contentType, distillationTerms, regexDistillationTerms, part=part):
         if not self.processPdf(contentObj, distillationTerms, regexDistillationTerms):
           continue
         
-      elif contentType == 'executable':
+      elif contentType == 'executable' and 'hashes' in self.contentTypes:
         contentObj.contentFile = filename
         contentObj.setPartContent(part)
         if len(md5Hashes) != 0:
@@ -710,8 +712,11 @@ class ContentProcessor:
             is_encrypted = zinfo.flag_bits & 0x1
             #print "DEBUG: zip compression type is",str(zinfo.compress_type)
             unsupported_compression = zinfo.compress_type == 99
+
+            if not 'dodgyarchives' in self.contentTypes and (is_encrypted or unsupported_compression):
+              continue
             
-            if is_encrypted and len(distillationTerms) == 0 and len(regexDistillationTerms) == 0:
+            elif is_encrypted and len(distillationTerms) == 0 and len(regexDistillationTerms) == 0:
               saveZipFile = True
               log.debug('extractFilesFromMultipart(): ZIP contentFile %s from archive %s is encrypted!' % (archivedFilename, filename))
               contentObj.contentType = 'encryptedZipEntry'
@@ -822,7 +827,8 @@ class ContentProcessor:
         table_needs_password = rarFileHandle.needs_password()
         #log.debug('table_needs_password: %s' % table_needs_password)
 
-        if table_len == 0 and table_needs_password and len(distillationTerms) == 0 and len(regexDistillationTerms) == 0: #this means that the archive's table is encrypted and we cannot see anything inside it
+        if table_len == 0 and table_needs_password and len(distillationTerms) == 0 and len(regexDistillationTerms) == 0 and 'dodgyarchives' in self.contentTypes:
+          #this means that the archive's table is encrypted and we cannot see anything inside it
           saveRarFile = True
           log.debug('extractFilesFromMultipart(): RAR archive %s has an encrypted table!' % filename)
           contentObj.contentType = 'encryptedRarTable'
@@ -839,7 +845,7 @@ class ContentProcessor:
           contentObj.archiveFilename = filename
           archivedFile_is_encrypted = rinfo.needs_password()
 
-          if archivedFile_is_encrypted and len(distillationTerms) == 0 and len(regexDistillationTerms) == 0: #this means that the RAR file's table is not encrypted, but individual files within it are
+          if archivedFile_is_encrypted and len(distillationTerms) == 0 and len(regexDistillationTerms) == 0 and 'dodgyarchives' in self.contentTypes: #this means that the RAR file's table is not encrypted, but individual files within it are
             saveRarFile = True
             log.debug('extractFilesFromMultipart(): RAR contentFile %s from archive %s is encrypted!' % (archivedFilename,filename))
             contentObj.contentType = 'encryptedRarEntry'
@@ -881,15 +887,15 @@ class ContentProcessor:
     #identify the extracted file
     fileType = magic.from_buffer( fileObj.getvalue(), mime=True) #this is where we identify the content file type
 
-    if fileType.startswith('image/') and len(distillationTerms) == 0 and len(regexDistillationTerms) == 0:
+    if fileType.startswith('image/') and len(distillationTerms) == 0 and len(regexDistillationTerms) == 0 and 'images' in self.contentTypes:
       #log.debug("processExtractedFile(): Processing '" + archivedFilename + "' as image")
       self.processImage(contentObj)
 
-    elif fileType == 'application/pdf':
+    elif fileType == 'application/pdf' and 'pdfs' in self.contentTypes:
       #log.debug("processExtractedFile(): processing '" + contentObj.contentType + "' as pdf")
       self.processPdf(contentObj, distillationTerms, regexDistillationTerms)
 
-    elif fileType.startswith('application/'): #fix for executable
+    elif fileType.startswith('application/') and 'hashes' in self.contentTypes: #fix for executable
       #log.debug("processExtractedFile(): Processing '" + archivedFilename + "' as executable")
       if len(md5Hashes) != 0:
         contentObj.hashType = 'md5'
