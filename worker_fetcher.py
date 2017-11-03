@@ -207,7 +207,7 @@ class Fetcher:
 
 
         if self.contentErrors.value == self.maxContentErrors:
-          e = "pullFiles(): Maximum retries reached whilst pulling files for session " + str(sessionId) + ".  The last error was " + error + ".  Exiting with code 1"
+          e = "pullFiles(): Maximum retries reached whilst pulling files for session " + str(sessionId) + ".  The last error was " + error + ".  Try either increasing the Query Delay setting or increasing the Max. Content Errors setting.  Exiting with code 1"
           self.exitWithError(e)
 
         if 'res' in locals() and res.info().getheader('Content-Type').startswith('multipart/mixed'):
@@ -290,7 +290,19 @@ class ContentProcessor:
     self.timeout = timeout
     self.user = user
     self.password = password
-    self.contentTypes = contentTypes
+    
+    self.imagesAllowed = False
+    self.pdfsAllowed = False
+    self.dodgyArchivesAllowed = False
+    self.hashesAllowed = False
+    if 'images' in contentTypes:
+      self.imagesAllowed = True
+    if 'pdfs' in contentTypes:
+      self.pdfsAllowed = True
+    if 'dodgyarchives' in contentTypes:
+      self.dodgyArchivesAllowed = True
+    if 'hashes' in contentTypes:
+      self.hashesAllowed = True
 
 
   def pullFiles(self, session, sessionId, distillationTerms, regexDistillationTerms, md5Hashes=[], sha1Hashes=[], sha256Hashes=[]):
@@ -308,14 +320,14 @@ class ContentProcessor:
         break
       except urllib2.HTTPError as e:
         if self.contentErrors.value == self.maxContentErrors:
-          log.warning("pullFiles(): Maximum retries reached whilst pulling content for session " + str(sessionId) + ".  Exiting with code 1")
+          log.warning("pullFiles(): Maximum allowable errors reached whilst pulling content for session " + str(sessionId) + ".  Try either increasing the Query Delay setting or increasing the Max. Content Errors setting.  Exiting with code 1")
           sys.exit(1)
         self.contentErrors.value += 1
         log.warning("pullFiles(): HTTP error pulling content for session " + str(sessionId) + ".  Retrying")
         continue
       except urllib2.URLError as e:
         if self.contentErrors.value == self.maxContentErrors:
-          log.warning("pullFiles(): Maximum retries reached whilst pulling content for session " + str(sessionId) + ".  Exiting with code 1")
+          log.warning("pullFiles(): Maximum retries reached whilst pulling content for session " + str(sessionId) + ".  Try either increasing the Query Delay setting or increasing the Max. Content Errors setting.  Exiting with code 1")
           sys.exit(1)
         self.contentErrors.value += 1
         log.warning("pullFiles(): ERROR: URL error pulling content for session " + str(sessionId) + ".  Retrying")
@@ -651,21 +663,21 @@ class ContentProcessor:
       contentObj = ContentObj()
       contentObj.session = contentObj.session = sessionId
 
-      if contentType == 'image' and len(distillationTerms) == 0 and len(regexDistillationTerms) == 0 and 'images' in self.contentTypes:
+      if contentType == 'image' and len(distillationTerms) == 0 and len(regexDistillationTerms) == 0 and self.imagesAllowed:
         contentObj.contentFile = filename
         contentObj.setPartContent(part)
         ###if not self.processImage(filename, sessionId, contentType, part=part):
         if not self.processImage(contentObj):
           continue
         
-      elif contentType == 'pdf' and 'pdfs' in self.contentTypes:
+      elif contentType == 'pdf' and self.pdfsAllowed:
         contentObj.contentFile = filename
         contentObj.setPartContent(part)
         ###if not self.processPdf(filename, sessionId, contentType, distillationTerms, regexDistillationTerms, part=part):
         if not self.processPdf(contentObj, distillationTerms, regexDistillationTerms):
           continue
         
-      elif contentType == 'executable' and 'hashes' in self.contentTypes:
+      elif contentType == 'executable' and self.hashesAllowed:
         contentObj.contentFile = filename
         contentObj.setPartContent(part)
         if len(md5Hashes) != 0:
@@ -713,7 +725,7 @@ class ContentProcessor:
             #print "DEBUG: zip compression type is",str(zinfo.compress_type)
             unsupported_compression = zinfo.compress_type == 99
 
-            if not 'dodgyarchives' in self.contentTypes and (is_encrypted or unsupported_compression):
+            if not self.dodgyArchivesAllowed and (is_encrypted or unsupported_compression):
               continue
             
             elif is_encrypted and len(distillationTerms) == 0 and len(regexDistillationTerms) == 0:
@@ -827,7 +839,7 @@ class ContentProcessor:
         table_needs_password = rarFileHandle.needs_password()
         #log.debug('table_needs_password: %s' % table_needs_password)
 
-        if table_len == 0 and table_needs_password and len(distillationTerms) == 0 and len(regexDistillationTerms) == 0 and 'dodgyarchives' in self.contentTypes:
+        if table_len == 0 and table_needs_password and len(distillationTerms) == 0 and len(regexDistillationTerms) == 0 and self.dodgyArchivesAllowed:
           #this means that the archive's table is encrypted and we cannot see anything inside it
           saveRarFile = True
           log.debug('extractFilesFromMultipart(): RAR archive %s has an encrypted table!' % filename)
@@ -845,7 +857,7 @@ class ContentProcessor:
           contentObj.archiveFilename = filename
           archivedFile_is_encrypted = rinfo.needs_password()
 
-          if archivedFile_is_encrypted and len(distillationTerms) == 0 and len(regexDistillationTerms) == 0 and 'dodgyarchives' in self.contentTypes: #this means that the RAR file's table is not encrypted, but individual files within it are
+          if archivedFile_is_encrypted and len(distillationTerms) == 0 and len(regexDistillationTerms) == 0 and self.dodgyArchivesAllowed: #this means that the RAR file's table is not encrypted, but individual files within it are
             saveRarFile = True
             log.debug('extractFilesFromMultipart(): RAR contentFile %s from archive %s is encrypted!' % (archivedFilename,filename))
             contentObj.contentType = 'encryptedRarEntry'
@@ -887,15 +899,15 @@ class ContentProcessor:
     #identify the extracted file
     fileType = magic.from_buffer( fileObj.getvalue(), mime=True) #this is where we identify the content file type
 
-    if fileType.startswith('image/') and len(distillationTerms) == 0 and len(regexDistillationTerms) == 0 and 'images' in self.contentTypes:
+    if fileType.startswith('image/') and len(distillationTerms) == 0 and len(regexDistillationTerms) == 0 and self.imagesAllowed:
       #log.debug("processExtractedFile(): Processing '" + archivedFilename + "' as image")
       self.processImage(contentObj)
 
-    elif fileType == 'application/pdf' and 'pdfs' in self.contentTypes:
+    elif fileType == 'application/pdf' and self.pdfsAllowed:
       #log.debug("processExtractedFile(): processing '" + contentObj.contentType + "' as pdf")
       self.processPdf(contentObj, distillationTerms, regexDistillationTerms)
 
-    elif fileType.startswith('application/') and 'hashes' in self.contentTypes: #fix for executable
+    elif fileType.startswith('application/') and self.hashesAllowed: #fix for executable
       #log.debug("processExtractedFile(): Processing '" + archivedFilename + "' as executable")
       if len(md5Hashes) != 0:
         contentObj.hashType = 'md5'

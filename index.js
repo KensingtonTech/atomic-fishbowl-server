@@ -185,7 +185,7 @@ decryptor.setOptions({encryptionScheme: 'pkcs1'});
 ////////////////////////////////////////////////////////////////GLOBAL PREFERENCES/////////////////////////////////////////////////////////
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
-//Set default preferences
+// Set default preferences
 var defaultPreferences = {
   nwInvestigateUrl: '',
   defaultNwQuery: "filetype = 'jpg','gif','png','pdf','zip','rar','windows executable','x86 pe','windows dll','x64pe','apple executable (pef)','apple executable (mach-o)'",
@@ -234,6 +234,28 @@ var defaultPreferences = {
   queryDelayMinutes: 1,
   maxContentErrors: 10
 };
+
+
+
+// Set use-cases
+// A use-case consists of a name (mandatory), a friendly name (mandatory), a query (mandatory), its allowed content types[] (mandatory), distillation terms (optional), regex distillation terms (optional), and a description (mandatory)
+// { name: '', friendlyName: '', query: "", contentTypes: [], description: '', distillationTerms: [], regexTerms: [] }
+var useCases = [
+  { name: 'outboundDocuments', friendlyName: 'Outbound Documents', query: "direction = 'outbound' && filetype = 'pdf'", contentTypes: [ 'pdfs' ], description: 'Displays documents which are being transferred outbound' },
+  
+  { name: 'ssns', friendlyName: 'Social Security Numbers', query: "filetype = 'pdf'", contentTypes: [ 'pdfs' ], description: 'Displays documents which contain social security numbers', regexTerms: [ '\d\d\d-\d\d-\d\d\d\d' ] },
+
+  { name: 'dob', friendlyName: 'Date of Birth', query: "filetype = 'pdf'", contentTypes: [ 'pdfs' ], description: 'Displays documents which contain dates of birth', regexTerms: [ '(?i:dob|date of birth|birth date|birthdate|birthday|birth day).*\d\d?{/-}\d\d?{/-}\d{2}(?:\d{2})?', '(?i:dob|date of birth|birth date|birthdate|birthday|birth day).*\d\d? \w+, \d{2}(?:\d{2})?', '(?i:dob|date of birth|birth date|birthdate|birthday|birth day).*\w+ \d\d?, \d{2}(?:\d{2})?' ] },
+
+  { name: 'contentinarchives', friendlyName: 'All Content Contained in Archives', query: "filetype = 'zip','rar'", contentTypes: [ 'images', 'pdfs', 'dodgyarchives', 'hashes' ], description: 'Displays any content type contained within a ZIP or RAR archive.  It also displays dodgy archives' },
+
+  { name: 'suspiciousdestcountries', friendlyName: 'Documents to Suspicious Destination Countries', query: "country.dst = 'russia','china','romania','belarus','iran','north korea','ukraine','syria','yemen' && filetype = 'zip','rar','pdf'", contentTypes: [ 'pdfs', 'dodgyarchives' ], description: 'Displays documents and dodgy archives transferred to suspicious destination countries: Russia, China, Romania, Belarus, Iran, North Korea, Ukraine, Syra, or Yemen' },
+
+  { name: 'dodgyarchives', friendlyName: 'Dodgy Archives', query: "filetype = 'zip','rar'", contentTypes: [ 'dodgyarchives' ], description: 'Displays ZIP and RAR Archives which are encrypted or which contain some encrypted files' },
+
+  { name: 'outboundwebmonitoring', friendlyName: 'Outbound Web Usage Monitoring', query: "direction = 'outbound' && service = 80 filetype = 'jpg','gif','png'", contentTypes: [ 'images' ], description: 'Displays images from outbound web usage.  Recommended for use in a Monitoring Collection' }
+];
+  
 
 
 
@@ -346,6 +368,11 @@ app.get('/api/isloggedin', passport.authenticate('jwt', { session: false } ), (r
 app.get('/api/publickey', passport.authenticate('jwt', { session: false } ), (req, res)=>{
   winston.debug("GET /api/publickey");
   res.json( { pubKey: internalPublicKey });
+});
+
+app.get('/api/usecases', passport.authenticate('jwt', { session: false } ), (req, res)=>{
+  winston.debug("GET /api/usecases");
+  res.json( { useCases: useCases } );
 });
 
 app.get('/api/users', passport.authenticate('jwt', { session: false } ), (req,res)=>{
@@ -467,7 +494,7 @@ app.post('/api/updateuser', passport.authenticate('jwt', { session: false } ), (
 
 app.delete('/api/user/:id', passport.authenticate('jwt', { session: false } ), (req, res)=>{
   let id = req.params.id;
-  winston.info('DELETE /api/user/:id', id);
+  winston.info(`DELETE /api/user/${id}`);
   try {
     User.find( {id: id} ).remove( (err) => {
       if (err) {
@@ -521,7 +548,7 @@ function getCollectionPosition(id) {
 
 app.delete('/api/collection/:id', passport.authenticate('jwt', { session: false } ), (req, res)=>{
   let id = req.params.id;
-  winston.info("DELETE /api/collection/:id", id);
+  winston.info(`DELETE /api/collection/${id}`);
   try {
     if (collectionsData[id]) {
       delete collectionsData[id];
@@ -535,7 +562,7 @@ app.delete('/api/collection/:id', passport.authenticate('jwt', { session: false 
   }
   catch(e) {
     res.sendStatus(500);
-    winston.error('ERROR DELETE /api/collection/:id:', e);
+    winston.error(`ERROR DELETE /api/collection/${id} :`, e);
   }
   db.collection('collections').remove( { 'id': id }, (err, res) => {
     if (err) throw err;
@@ -555,7 +582,7 @@ app.delete('/api/collection/:id', passport.authenticate('jwt', { session: false 
 
 app.get('/api/collectiondata/:id', passport.authenticate('jwt', { session: false } ), (req, res)=>{
   let id = req.params.id;
-  winston.info('GET /api/collectiondata/:id', id);
+  winston.info(`GET /api/collectiondata/${id}`);
   try {
     res.json(collectionsData[id]);
   }
@@ -578,7 +605,7 @@ app.get('/api/nwservers', passport.authenticate('jwt', { session: false } ), (re
 
 app.delete('/api/nwserver/:id', passport.authenticate('jwt', { session: false } ), (req, res)=>{
   let servId = req.params.id;
-  winston.info('DELETE /api/nwserver/:id', servId);
+  winston.info(`DELETE /api/nwserver/${servId}`);
   try {
     delete nwservers[servId];
     res.sendStatus(204);
@@ -587,7 +614,7 @@ app.delete('/api/nwserver/:id', passport.authenticate('jwt', { session: false } 
     });
   }
   catch(exception) {
-    winston.error('ERROR DELETE /api/nwserver/:id:',exception);
+    winston.error(`ERROR DELETE /api/nwserver/${servId} :`,exception);
     res.sendStatus(500);
   }
 });
