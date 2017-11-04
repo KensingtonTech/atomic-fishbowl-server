@@ -13,12 +13,11 @@ LABEL RUN="docker run --rm --name 221b-server-run-tmp --privileged -v /:/host -e
 LABEL STOP="docker run --rm --name 221b-server-stop-tmp --privileged -v /:/host -e HOST=/host -e IMAGE=IMAGE -e NAME=221b-server IMAGE /bin/atomic-stop.sh"
 
 #Install the rest of our files
-COPY 221b-server.conf /opt/kentech/221b-server/bin/
 COPY atomic-*.sh /bin/
 COPY atomic-221b-server.service /usr/lib/systemd/system/221b-server.service
 COPY models /opt/kentech/221b-server/bin/models/
 COPY node_modules /opt/kentech/221b-server/bin/node_modules/
-COPY *.js* worker_stub.py *.so LICENSE.txt /opt/kentech/221b-server/bin/
+COPY 221b-server.conf *.js *.js.map worker_stub.py *.so LICENSE.txt /opt/kentech/221b-server/bin/
 
 #install our rpm dependencies
 ARG CACHE_DATE=2016-01-01
