@@ -243,20 +243,33 @@ var defaultPreferences = {
 var useCases = [
   { name: 'outboundDocuments', friendlyName: 'Outbound Documents', query: "direction = 'outbound' && filetype = 'pdf'", contentTypes: [ 'pdfs' ], description: 'Displays documents which are being transferred outbound' },
   
-  { name: 'ssns', friendlyName: 'Social Security Numbers', query: "filetype = 'pdf'", contentTypes: [ 'pdfs' ], description: 'Displays documents which contain social security numbers', regexTerms: [ '\d\d\d-\d\d-\d\d\d\d' ] },
+  { name: 'ssns', friendlyName: 'Social Security Numbers', query: "filetype = 'pdf','zip','rar'", contentTypes: [ 'pdfs' ], description: 'Displays documents which contain social security numbers.  It will look inside ZIP and RAR archives, as well', regexTerms: [ '\\d\\d\\d-\\d\\d-\\d\\d\\d\\d' ] },
 
-  { name: 'dob', friendlyName: 'Date of Birth', query: "filetype = 'pdf'", contentTypes: [ 'pdfs' ], description: 'Displays documents which contain dates of birth', regexTerms: [ '(?i:dob|date of birth|birth date|birthdate|birthday|birth day).*\d\d?{/-}\d\d?{/-}\d{2}(?:\d{2})?', '(?i:dob|date of birth|birth date|birthdate|birthday|birth day).*\d\d? \w+, \d{2}(?:\d{2})?', '(?i:dob|date of birth|birth date|birthdate|birthday|birth day).*\w+ \d\d?, \d{2}(?:\d{2})?' ] },
+  { name: 'dob', friendlyName: 'Date of Birth', query: "filetype = 'pdf','zip','rar'", contentTypes: [ 'pdfs' ], description: 'Displays documents which contain dates of birth', 
+    regexTerms: [ 
+      '(?i)(dob|date of birth|birth date|birthdate|birthday|birth day).*\\d\\d?{/-}\\d\\d?{/-}\\d{2}(?:\\d{2})?',
+      '(?i)(dob|date of birth|birth date|birthdate|birthday|birth day).*\\d\\d? \\w+, \\d{2}(?:\\d{2})?',
+      '(?i)(dob|date of birth|birth date|birthdate|birthday|birth day).*\\w+ \\d\\d?, \\d{2}(?:\\d{2})?'
+    ]
+  },
 
-  { name: 'contentinarchives', friendlyName: 'All Content Contained in Archives', query: "filetype = 'zip','rar'", contentTypes: [ 'images', 'pdfs', 'dodgyarchives', 'hashes' ], description: 'Displays any content type contained within a ZIP or RAR archive.  It also displays dodgy archives' },
+  { name: 'contentinarchives', friendlyName: 'All Content Contained in Archives', query: "filetype = 'zip','rar'", contentTypes: [ 'images', 'pdfs' ], description: 'Displays any content type contained within a ZIP or RAR archive.  It does not display dodgy archives' },
+  
+  { name: 'contentinarchivesdodgy', friendlyName: 'All Content Contained in Archives (with Dodgy Archives)', query: "filetype = 'zip','rar'", contentTypes: [ 'images', 'pdfs', 'dodgyarchives' ], description: 'Displays any content type contained within a ZIP or RAR archive.  It also displays dodgy archives' },
 
   { name: 'suspiciousdestcountries', friendlyName: 'Documents to Suspicious Destination Countries', query: "country.dst = 'russia','china','romania','belarus','iran','north korea','ukraine','syria','yemen' && filetype = 'zip','rar','pdf'", contentTypes: [ 'pdfs', 'dodgyarchives' ], description: 'Displays documents and dodgy archives transferred to suspicious destination countries: Russia, China, Romania, Belarus, Iran, North Korea, Ukraine, Syra, or Yemen' },
 
   { name: 'dodgyarchives', friendlyName: 'Dodgy Archives', query: "filetype = 'zip','rar'", contentTypes: [ 'dodgyarchives' ], description: 'Displays ZIP and RAR Archives which are encrypted or which contain some encrypted files' },
 
-  { name: 'outboundwebmonitoring', friendlyName: 'Outbound Web Usage Monitoring', query: "direction = 'outbound' && service = 80 filetype = 'jpg','gif','png'", contentTypes: [ 'images' ], description: 'Displays images from outbound web usage.  Recommended for use in a Monitoring Collection' }
+  { name: 'outboundwebmonitoring', friendlyName: 'Outbound Web Usage Monitoring', query: "direction = 'outbound' && service = 80 && filetype = 'jpg','gif','png'", contentTypes: [ 'images' ], description: 'Displays images from outbound web usage.  Recommended for use in a Monitoring Collection' }
 ];
-  
-
+var useCasesObj = {};
+// Populate an object with our use cases so we can later reference them by use case name
+for (let i = 0; i < useCases.length; i++) {
+  let thisUseCase = useCases[i];
+  useCasesObj[thisUseCase.name] = thisUseCase;
+}
+//winston.debug('useCasesObj:', useCasesObj);
 
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -706,27 +719,43 @@ app.post('/api/addcollection', passport.authenticate('jwt', { session: false } )
   try {
     //winston.debug(req.body);
     let collection = req.body;
-    if (!collection.type) {
+    if (!('type' in collection)) {
       throw("'type' is not defined");
     }
-    if (!collection.id) {
+    if (!('id' in collection)) {
       throw("'id' is not defined");
     }
-    if (!collection.name) {
+    if (!('name' in collection)) {
       throw("'name' is not defined");
     }
-    if (!collection.query) {
-      throw("'query' is not defined");
-    }
-    if (!collection.nwserver) {
+    if (!('nwserver' in collection)) {
       throw("'nwserver' is not defined");
     }
-    if (!collection.nwserverName) {
+    if (!('nwserverName' in collection)) {
       throw("'nwserverName' is not defined");
     }
-    if (!collection.contentTypes) {
-      throw("'contentTypes' is not defined");
+    if (!('bound' in collection)) {
+      throw("'bound' is not defined");
     }
+    if (!('usecase' in collection)) {
+      throw("'usecase' is not defined");
+    }
+    if (collection.bound && collection.usecase == 'custom') {
+      throw('A bound collection must be associated with a non-custom use case')
+    }
+    else if (collection.bound && collection.usecase != 'custom' && !(collection.usecase in useCasesObj) ) {
+      throw(`Collection use case ${collection.usecase} is not a valid use case!`);
+    }
+    
+    if (!collection.bound) {
+      if (!('query' in collection)) {
+        throw("'query' is not defined");
+      }
+      if (!('contentTypes' in collection)) {
+        throw("'contentTypes' is not defined");
+      }
+    }
+    
     collection['state'] = 'initial';
     collections[collection.id] = collection;
     let cDef = {
@@ -886,6 +915,7 @@ function fixedSocketConnectionHandler(id, socket, tempName, subject) {
   // For building fixed collections
 
   winston.info("fixedSocketConnectionHandler(): Connection received from worker to build collection", id);
+  let thisCollection = collections[id];
   
   //////////////////////////////////
   //Build the worker configuration//
@@ -895,46 +925,81 @@ function fixedSocketConnectionHandler(id, socket, tempName, subject) {
     id: id,
     collectionId: id, // we include this to disambiguate a difference in monitoring collections between id and collectionId
     state: 'building',
-    query: collections[id].query,
-    timeBegin: collections[id].timeBegin,
-    timeEnd: collections[id].timeEnd,
-    imageLimit: collections[id].imageLimit,
-    minX: collections[id].minX,
-    minY: collections[id].minY,
+    timeBegin: thisCollection.timeBegin,
+    timeEnd: thisCollection.timeEnd,
+    imageLimit: thisCollection.imageLimit,
+    minX: thisCollection.minX,
+    minY: thisCollection.minY,
     gsPath: gsPath,
     pdftotextPath: pdftotextPath,
     unrarPath: unrarPath,
-    distillationEnabled: collections[id].distillationEnabled,
-    regexDistillationEnabled: collections[id].regexDistillationEnabled,
-    md5Enabled: collections[id].md5Enabled,
-    sha1Enabled: collections[id].sha1Enabled,
-    sha256Enabled: collections[id].sha256Enabled,
     collectionsDir: collectionsDir,
     summaryTimeout: preferences.summaryTimeout,
     queryTimeout: preferences.queryTimeout,
     contentTimeout: preferences.contentTimeout,
     privateKeyFile: internalPrivateKeyFile,
     maxContentErrors: preferences.maxContentErrors,
-    contentTypes: collections[id].contentTypes
+    md5Enabled: false,
+    sha1Enabled: false,
+    sha256Enabled: false
+
+    // distillationEnabled: thisCollection.distillationEnabled,
+    // regexDistillationEnabled: thisCollection.regexDistillationEnabled,
+    // md5Enabled: thisCollection.md5Enabled,
+    // sha1Enabled: thisCollection.sha1Enabled,
+    // sha256Enabled: thisCollection.sha256Enabled,
+    // query: thisCollection.query,
+    // contentTypes: thisCollection.contentTypes
   };
+
+  if (thisCollection.bound) {
+    // This is an OOTB use case
+    let useCaseName = thisCollection.usecase;
+    let useCase = useCasesObj[useCaseName];
+    cfg['query'] = useCase.query;
+    cfg['contentTypes'] = useCase.contentTypes;
+    cfg['distillationEnabled'] = false;
+    if ('distillationTerms' in useCase) {
+      cfg['distillationEnabled'] = true;
+      cfg['distillationTerms'] = useCase.distillationTerms;
+    }
+    cfg['regexDistillationEnabled'] = false;
+    if ('regexTerms' in useCase) {
+      cfg['regexDistillationEnabled'] = true;
+      cfg['regexDistillationTerms'] = useCase.regexTerms;
+    }
+    // we don't yet support any hashing in OOTB use cases
+  }
+  else {
+    // This is not an OOTB use case
+
+    cfg['distillationEnabled'] = thisCollection.distillationEnabled;
+    cfg['regexDistillationEnabled'] = thisCollection.regexDistillationEnabled;
+    cfg['md5Enabled'] = thisCollection.md5Enabled;
+    cfg['sha1Enabled'] = thisCollection.sha1Enabled;
+    cfg['sha256Enabled'] = thisCollection.sha256Enabled;
+
+    cfg['query'] = thisCollection.query;
+    cfg['contentTypes'] = thisCollection.contentTypes;
   
-  if ('distillationTerms' in collections[id]) {
-    cfg['distillationTerms'] = collections[id].distillationTerms;
-  }
-  if ('regexDistillationTerms' in collections[id]) {
-    cfg['regexDistillationTerms'] = collections[id].regexDistillationTerms;
-  }
-  if ('md5Hashes' in collections[id]) {
-    cfg['md5Hashes'] = collections[id].md5Hashes;
-  }
-  if ('sha1Hashes' in collections[id]) {
-    cfg['sha1Hashes'] = collections[id].sha1Hashes;
-  }
-  if ('sha256Hashes' in collections[id]) {
-    cfg['sha256Hashes'] = collections[id].sha256Hashes;
+    if ('distillationTerms' in thisCollection) {
+      cfg['distillationTerms'] = thisCollection.distillationTerms;
+    }
+    if ('regexDistillationTerms' in thisCollection) {
+      cfg['regexDistillationTerms'] = thisCollection.regexDistillationTerms;
+    }
+    if ('md5Hashes' in thisCollection) {
+      cfg['md5Hashes'] = thisCollection.md5Hashes;
+    }
+    if ('sha1Hashes' in thisCollection) {
+      cfg['sha1Hashes'] = thisCollection.sha1Hashes;
+    }
+    if ('sha256Hashes' in thisCollection) {
+      cfg['sha256Hashes'] = thisCollection.sha256Hashes;
+    }
   }
 
-  let nwserver = nwservers[collections[id].nwserver];
+  let nwserver = nwservers[thisCollection.nwserver];
   for (var k in nwserver) {
     if (k != 'id') {
       cfg[k] = nwserver[k];  // assign an nwserver to the collection cfg
@@ -990,7 +1055,8 @@ function buildFixedCollection(id) {
   winston.debug('buildFixedCollection(): Building collection', id);
   
   try {
-    collections[id]['state'] = 'building';
+    let thisCollection = collections[id];
+    thisCollection['state'] = 'building';
     //Build observable which we can use to notify others of new additions to the collection
     var subject = new Subject();
     buildingFixedCollections[id] = {
@@ -1008,19 +1074,19 @@ function buildFixedCollection(id) {
       worker.on('exit', (code) => {
         if (typeof code === 'undefined') {
           winston.debug('Worker process exited abnormally without an exit code');
-          collections[id]['state'] = 'error';
+          thisCollection['state'] = 'error';
           subject.next({collection: { id: id, state: 'error'}});
         }
         else if (code != 0) {
           winston.debug('Worker process exited abnormally with exit code',code.toString());
-          collections[id]['state'] = 'error';
+          thisCollection['state'] = 'error';
           subject.next({collection: { id: id, state: 'error'}});
         }
         else {
           winston.debug('Worker process exited normally with exit code', code.toString());
-          collections[id]['state'] = 'complete';
+          thisCollection['state'] = 'complete';
           subject.next({collection: { id: id, state: 'complete'}});
-          db.collection('collections').update( {'id': id }, collections[id], (err, res) => {
+          db.collection('collections').update( {'id': id }, thisCollection, (err, res) => {
             if (err) throw err;
           });
           db.collection('collectionsData').update( {'id': id }, {'id': id, 'data': JSON.stringify(collectionsData[id])}, (err, res) => {
@@ -1041,16 +1107,23 @@ function buildFixedCollection(id) {
 app.get('/api/buildfixedcollection/:id', passport.authenticate('jwt', { session: false } ), (req, res)=>{
   let id = req.params.id;
   winston.info('GET /api/buildfixedcollection/:id', id);
+  let thisCollection = collections[id];
   try {
-    if (collections[id].state === 'initial') {
+    if (thisCollection.bound && !('usecase' in thisCollection )) {
+      throw(`Bound collection ${id} does not have a use case defined`);
+    }
+    if (thisCollection.bound && !(thisCollection.usecase in useCasesObj) ) {
+      throw(`Use case ${thisCollection.usecase} in bound collection ${id} is not a valid use case`);
+    }
+    if (thisCollection.state === 'initial') {
       res.sendStatus(202);
     }
     else {
-      throw("Collection " + id + " is not in its initial state");
+      throw(`Collection ${id} is not in its initial state`);
     }
   }
   catch (exception) {
-    winston.error('ERROR GET /api/buildfixedcollection/:id:',exception);
+    winston.error(`GET /api/buildfixedcollection/${id}:`, exception);
     res.sendStatus(500);
     return;
   }
@@ -1194,26 +1267,76 @@ function rollingCollectionSocketConnectionHandler(id, socket, tempName, subject,
     id: rollingId,
     collectionId: id, // original collection ID
     state: ourState,
-    query: thisCollection.query,
     imageLimit: thisCollection.imageLimit,
     minX: thisCollection.minX,
     minY: thisCollection.minY,
     gsPath: gsPath,
     pdftotextPath: pdftotextPath,
     unrarPath: unrarPath,
-    distillationEnabled: thisCollection.distillationEnabled,
-    regexDistillationEnabled: thisCollection.regexDistillationEnabled,
-    md5Enabled: thisCollection.md5Enabled,
-    sha1Enabled: thisCollection.sha1Enabled,
-    sha256Enabled: thisCollection.sha256Enabled,
     collectionsDir: collectionsDir,
     summaryTimeout: preferences.summaryTimeout,
     queryTimeout: preferences.queryTimeout,
     contentTimeout: preferences.contentTimeout,
     privateKeyFile: internalPrivateKeyFile,
     maxContentErrors: preferences.maxContentErrors,
-    contentTypes: collections[id].contentTypes
+    md5Enabled: false,
+    sha1Enabled: false,
+    sha256Enabled: false
+
+    // query: thisCollection.query,
+    // regexDistillationEnabled: thisCollection.regexDistillationEnabled,
+    // md5Enabled: thisCollection.md5Enabled,
+    // sha1Enabled: thisCollection.sha1Enabled,
+    // sha256Enabled: thisCollection.sha256Enabled,
+    // contentTypes: collections[id].contentTypes,
+    // distillationEnabled: thisCollection.distillationEnabled
   };
+
+  if (thisCollection.bound) {
+    // This is an OOTB use case
+    let useCaseName = thisCollection.usecase;
+    let useCase = useCasesObj[useCaseName];
+    cfg['query'] = useCase.query;
+    cfg['contentTypes'] = useCase.contentTypes;
+    cfg['distillationEnabled'] = false;
+    if ('distillationTerms' in useCase) {
+      cfg['distillationEnabled'] = true;
+      cfg['distillationTerms'] = useCase.distillationTerms;
+    }
+    cfg['regexDistillationEnabled'] = false;
+    if ('regexTerms' in useCase) {
+      cfg['regexDistillationEnabled'] = true;
+      cfg['regexDistillationTerms'] = useCase.regexTerms;
+    }
+    // we don't yet support any hashing in OOTB use cases
+  }
+  else {
+    // This is not an OOTB use case
+    cfg['distillationEnabled'] = thisCollection.distillationEnabled;
+    cfg['regexDistillationEnabled'] = thisCollection.regexDistillationEnabled;
+    cfg['md5Enabled'] = thisCollection.md5Enabled;
+    cfg['sha1Enabled'] = thisCollection.sha1Enabled;
+    cfg['sha256Enabled'] = thisCollection.sha256Enabled;
+
+    cfg['query'] = thisCollection.query;
+    cfg['contentTypes'] = thisCollection.contentTypes;
+  
+    if ('distillationTerms' in thisCollection) {
+      cfg['distillationTerms'] = thisCollection.distillationTerms;
+    }
+    if ('regexDistillationTerms' in thisCollection) {
+      cfg['regexDistillationTerms'] = thisCollection.regexDistillationTerms;
+    }
+    if ('md5Hashes' in thisCollection) {
+      cfg['md5Hashes'] = thisCollection.md5Hashes;
+    }
+    if ('sha1Hashes' in thisCollection) {
+      cfg['sha1Hashes'] = thisCollection.sha1Hashes;
+    }
+    if ('sha256Hashes' in thisCollection) {
+      cfg['sha256Hashes'] = thisCollection.sha256Hashes;
+    } 
+  }
 
   let queryDelaySeconds = preferences.queryDelayMinutes * 60;
 
@@ -1521,18 +1644,23 @@ app.get('/api/getrollingcollection/:collectionId', passport.authenticate('jwt', 
 
   try {
     // Write the response headers
+    if (thisCollection.bound && !('usecase' in thisCollection )) {
+      throw(`Bound collection ${collectionId} does not have a use case defined`);
+    }
+    if (thisCollection.bound && !(thisCollection.usecase in useCasesObj) ) {
+      throw(`Use case ${thisCollection.usecase} in bound collection ${collectionId} is not a valid use case`);
+    }
     if (thisCollection.type === 'rolling' || thisCollection.type === 'monitoring') {
       res.writeHead(200, {'Content-Type': 'application/json','Content-Disposition': 'inline' });
       res.write('['); // Open the array so that oboe can see it
       res.flush();
-
     }
     else {
       throw("Collection " + collectionId + " is not of type 'rolling' or 'monitoring'");
     }
   }
   catch (exception) {
-    winston.error('ERROR GET /api/getrollingcollection/:id', exception);
+    winston.error('GET /api/getrollingcollection/:id', exception);
     res.sendStatus(500);
     return;
   }
