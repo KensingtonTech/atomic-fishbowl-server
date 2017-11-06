@@ -311,6 +311,7 @@ var jwtOpts = {
 
 
 //We use mongoose for auth, and MongoClient for everything else.  This is because Passport-Local Mongoose required it, and it is ill-suited to the free-formish objects which we want to use.
+var tokenBlacklist = {};
 
 // var mongoUrl = "mongodb://localhost:27017/221b";
 var mongoUrl = `mongodb://${config['dbConfig']['host']}:${config['dbConfig']['port']}/221b`;
@@ -1893,9 +1894,7 @@ function mongooseInitFunc() {
                     }
                 });
     */
-    //mongoose.connect("mongodb://localhost:27017/221b_users", { useMongoClient: true });
-    var tokenBlacklist = {};
-  
+    //mongoose.connect("mongodb://localhost:27017/221b_users", { useMongoClient: true });  
   
     // Create the default user account, if we think the app was just installed and if the count of users is 0
     User.count({}, (err, count) => {

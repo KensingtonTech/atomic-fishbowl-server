@@ -143,14 +143,20 @@ class Fetcher:
     except urllib2.HTTPError as e:
       error = "runQuery(): HTTP Error whilst running query.  Exiting with code 1: " + str(e)
       self.exitWithError(error)
+    except socket.timeout as e:
+      error = "Query to NetWitness service timed out after " + str(self.queryTimeout) + " seconds"
+      self.exitWithError(error)
     except urllib2.URLError as e:
       if 'Connection refused' in str(e):
         error = "Connection refused whilst trying to query NetWitness service"
+      elif 'timed out' in str(e):
+        error = "Query to NetWitness service timed out after " + str(self.queryTimeout) + " seconds"
+      elif 'No route to host' in str(e):
+        error = "No route to host whilst trying to query NetWitness service"
+      elif 'Host is down' in str(e):
+        error = "Host is down error whilst trying to query NetWitness service"
       else:
         error = "runQuery(): URL Error whilst running query.  Exiting with code 1: "  + str(e)
-      self.exitWithError(error)
-    except socket.timeout as e:
-      error = "Query timed out after " + str(self.queryTimeout) + " seconds"
       self.exitWithError(error)
     except Exception as e:
       error = "runQuery(): Unhandled exception whilst running query.  Exiting with code 1: " + str(e)
@@ -170,11 +176,20 @@ class Fetcher:
 
   def pullFiles(self, distillationTerms, regexDistillationTerms, md5Hashes=[], sha1Hashes=[], sha256Hashes=[]):
 
+    error = ''
+
     for sessionId in self.sessions:
+
+      if self.contentErrors.value == self.maxContentErrors:
+        e = "pullFiles(): Maximum retries reached whilst pulling files for session " + str(sessionId) + ".  The last error was " + error + ".  Try either increasing the Query Delay setting or increasing the Max. Content Errors setting.  Exiting with code 1"
+        self.exitWithError(e)
+      
       if self.contentCount.value >= self.contentLimit:
         log.info("Image limit of " + str(self.contentLimit) + " has been reached.  Ending collection build.  You may want to narrow your result set with a more specific query")
         return
+      
       elif not self.contentCount.value >= self.contentLimit:
+        
         ctx = ssl.create_default_context()
         ctx.check_hostname = False
         ctx.verify_mode = ssl.CERT_NONE
@@ -184,7 +199,6 @@ class Fetcher:
         request.add_header("Authorization", "Basic %s" % base64string)
         request.add_header('Content-type', 'application/json')
         request.add_header('Accept', 'application/json')
-        error = ''
         #while self.contentErrors.value < self.maxContentErrors:
         try:
           res = urllib2.urlopen(request, context=ctx, timeout=self.contentTimeout)
@@ -205,11 +219,6 @@ class Fetcher:
           log.warning("pullFiles(): " + error)
           continue
 
-
-        if self.contentErrors.value == self.maxContentErrors:
-          e = "pullFiles(): Maximum retries reached whilst pulling files for session " + str(sessionId) + ".  The last error was " + error + ".  Try either increasing the Query Delay setting or increasing the Max. Content Errors setting.  Exiting with code 1"
-          self.exitWithError(e)
-
         if 'res' in locals() and res.info().getheader('Content-Type').startswith('multipart/mixed'):
           contentType = res.info().getheader('Content-Type')
           mimeVersion = res.info().getheader('Mime-Version')
@@ -221,8 +230,6 @@ class Fetcher:
           processor = ContentProcessor(self.url, self.user, self.password, self.directory, self.minX, self.minY, self.gsPath, self.pdftotextPath, self.contentLimit, self.contentCount, self.contentErrors, self.maxContentErrors, self.contentTimeout, self.contentTypes)
           self.pool.apply_async(unwrapExtractFilesFromMultipart, args=(processor, newFileStr, self.sessions[sessionId], sessionId, distillationTerms, regexDistillationTerms, md5Hashes, sha1Hashes, sha256Hashes), callback=self.sendResult )
       
-
-
 
     self.pool.close()
     self.pool.join()
