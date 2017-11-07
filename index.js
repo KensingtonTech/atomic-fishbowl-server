@@ -368,7 +368,7 @@ app.get('/api/logout', passport.authenticate('jwt', { session: false } ), (req,r
 };
 */
 
-app.get('/api/isloggedin', passport.authenticate('jwt', { session: false } ), (req, res)=>{
+app.get('/api/isloggedin', passport.authenticate('jwt', { session: false } ), (req, res) => {
   winston.debug("GET /api/isloggedin");
   // winston.debug('sessionID:', req.session.id);
   // winston.debug('Session object:', req.session);
@@ -384,17 +384,17 @@ app.get('/api/publickey', passport.authenticate('jwt', { session: false } ), (re
   res.json( { pubKey: internalPublicKey });
 });
 
-app.get('/api/usecases', passport.authenticate('jwt', { session: false } ), (req, res)=>{
+app.get('/api/usecases', passport.authenticate('jwt', { session: false } ), (req, res) => {
   winston.debug("GET /api/usecases");
   res.json( { useCases: useCases } );
 });
 
-app.get('/api/users', passport.authenticate('jwt', { session: false } ), (req,res)=>{
+app.get('/api/users', passport.authenticate('jwt', { session: false } ), (req,res) => {
   winston.info('GET /api/users');
   try {
     User.find( (err, users) => {
       if (err) {
-        winston.error("ERROR obtaining users:", err);
+        winston.error("obtaining users:", err);
         res.sendStatus(500);
       }
       else {
@@ -408,7 +408,7 @@ app.get('/api/users', passport.authenticate('jwt', { session: false } ), (req,re
   }
 });
 
-app.get('/api/user/:uname', passport.authenticate('jwt', { session: false } ), (req,res)=>{
+app.get('/api/user/:uname', passport.authenticate('jwt', { session: false } ), (req,res) => {
   let uname = req.params.uname;
   winston.info('GET /api/user/' + uname);
   try {
@@ -435,7 +435,7 @@ app.post('/api/adduser', passport.authenticate('jwt', { session: false } ), (req
   u.password = uPassword;
   User.register(new User({ id: uuidV4(), username : u.username, fullname: u.fullname, email: u.email, enabled: u.enabled }), u.password, (err, user) => {
     if (err) {
-      winston.error("ERROR adding user " + u.username + ':', err);
+      winston.error("adding user " + u.username + ':', err);
       res.sendStatus(500);
     }
     else {
@@ -451,7 +451,7 @@ function updateUser(req, res) {
     winston.info("Updating user object with id", u.id);
     //now update user object
     if (err) {
-      winston.error("ERROR modifying user with id" + u.id + ':', err);
+      winston.error("modifying user with id" + u.id + ':', err);
       res.sendStatus(500);
     }
     else {
@@ -499,14 +499,14 @@ app.post('/api/updateuser', passport.authenticate('jwt', { session: false } ), (
       });
     }
     catch(e) {
-      winston.error("ERROR changing password:", e);
+      winston.error("changing password:", e);
       res.sendStatus(500);
       return;
     }
   }
 });
 
-app.delete('/api/user/:id', passport.authenticate('jwt', { session: false } ), (req, res)=>{
+app.delete('/api/user/:id', passport.authenticate('jwt', { session: false } ), (req, res) => {
   let id = req.params.id;
   winston.info(`DELETE /api/user/${id}`);
   try {
@@ -520,14 +520,14 @@ app.delete('/api/user/:id', passport.authenticate('jwt', { session: false } ), (
     } );
   }
   catch(exception) {
-    winston.error("ERROR removing user:", exception);
+    winston.error("removing user:", exception);
     res.sendStatus(500);
   }
 });
 
 //login and return JWT
 
-app.get('/api/version', passport.authenticate('jwt', { session: false } ), (req,res)=>{
+app.get('/api/version', passport.authenticate('jwt', { session: false } ), (req,res) => {
   // Gets the server version
   winston.info('GET /api/version');
   try {
@@ -540,7 +540,7 @@ app.get('/api/version', passport.authenticate('jwt', { session: false } ), (req,
 });
   
 
-app.get('/api/collections', passport.authenticate('jwt', { session: false } ), (req,res)=>{
+app.get('/api/collections', passport.authenticate('jwt', { session: false } ), (req,res) => {
   winston.info('GET /api/collections');
   try {
     res.json(collections);
@@ -560,7 +560,7 @@ function getCollectionPosition(id) {
   }
 }
 
-app.delete('/api/collection/:id', passport.authenticate('jwt', { session: false } ), (req, res)=>{
+app.delete('/api/collection/:id', passport.authenticate('jwt', { session: false } ), (req, res) => {
   let id = req.params.id;
   winston.info(`DELETE /api/collection/${id}`);
   try {
@@ -594,7 +594,7 @@ app.delete('/api/collection/:id', passport.authenticate('jwt', { session: false 
 
 });
 
-app.get('/api/collectiondata/:id', passport.authenticate('jwt', { session: false } ), (req, res)=>{
+app.get('/api/collectiondata/:id', passport.authenticate('jwt', { session: false } ), (req, res) => {
   let id = req.params.id;
   winston.info(`GET /api/collectiondata/${id}`);
   try {
@@ -606,7 +606,7 @@ app.get('/api/collectiondata/:id', passport.authenticate('jwt', { session: false
   }
 });
 
-app.get('/api/nwservers', passport.authenticate('jwt', { session: false } ), (req, res)=>{
+app.get('/api/nwservers', passport.authenticate('jwt', { session: false } ), (req, res) => {
   winston.info('GET /api/nwservers');
   try {
     res.json(nwservers);
@@ -617,7 +617,7 @@ app.get('/api/nwservers', passport.authenticate('jwt', { session: false } ), (re
   }
 });
 
-app.delete('/api/nwserver/:id', passport.authenticate('jwt', { session: false } ), (req, res)=>{
+app.delete('/api/nwserver/:id', passport.authenticate('jwt', { session: false } ), (req, res) => {
   let servId = req.params.id;
   winston.info(`DELETE /api/nwserver/${servId}`);
   try {
@@ -633,7 +633,7 @@ app.delete('/api/nwserver/:id', passport.authenticate('jwt', { session: false } 
   }
 });
 
-app.post('/api/addnwserver', passport.authenticate('jwt', { session: false } ), (req, res)=>{
+app.post('/api/addnwserver', passport.authenticate('jwt', { session: false } ), (req, res) => {
   winston.info("POST /api/addnwserver");
   try {
     //winston.debug(req.body);
@@ -667,7 +667,7 @@ app.post('/api/addnwserver', passport.authenticate('jwt', { session: false } ), 
     res.sendStatus(201);
   }
   catch(e) {
-    winston.error("ERROR POST /api/addnwserver: " + e);
+    winston.error("POST /api/addnwserver: " + e);
     res.sendStatus(500);
   }
 });
@@ -677,7 +677,7 @@ app.get('/api/ping', (req, res)=>{
   res.sendStatus(200);
 });
 
-app.get('/api/preferences', passport.authenticate('jwt', { session: false } ), (req, res)=>{
+app.get('/api/preferences', passport.authenticate('jwt', { session: false } ), (req, res) => {
   winston.info("GET /api/preferences");
   try {
     res.json(preferences);
@@ -688,7 +688,7 @@ app.get('/api/preferences', passport.authenticate('jwt', { session: false } ), (
   }
 });
 
-app.post('/api/setpreferences', passport.authenticate('jwt', { session: false } ), (req, res)=>{
+app.post('/api/setpreferences', passport.authenticate('jwt', { session: false } ), (req, res) => {
   winston.info("POST /api/setpreferences");
   try {
     let prefs = req.body;
@@ -708,14 +708,14 @@ app.post('/api/setpreferences', passport.authenticate('jwt', { session: false } 
     writePreferences();
   }
   catch(e) {
-    winston.error("ERROR POST /api/setpreferences:", e);
+    winston.error("POST /api/setpreferences:", e);
     res.sendStatus(500);
   }
 });
 
 
 
-app.post('/api/addcollection', passport.authenticate('jwt', { session: false } ), (req, res)=>{
+app.post('/api/addcollection', passport.authenticate('jwt', { session: false } ), (req, res) => {
   winston.info("POST /api/addcollection");
   try {
     //winston.debug(req.body);
@@ -765,26 +765,65 @@ app.post('/api/addcollection', passport.authenticate('jwt', { session: false } )
       id: collection.id
     };
     collectionsData[collection.id] = cDef;
-    res.sendStatus(201);
+    
    
-    db.collection('collections').insertOne( collection, (err, res) => {
+    db.collection('collections').insertOne( collection, (err) => {
       if (err) throw err;
+      db.collection('collectionsData').insertOne( { id: collection.id, data: JSON.stringify(cDef)}, (err) => {
+        if (err) throw err;
+        res.sendStatus(201);
+      });
     });
     
-    db.collection('collectionsData').insertOne( {'id': collection.id, 'data': JSON.stringify(cDef)}, (err, res) => {
-      if (err) throw err;
-    });
+
     
   }
   catch(e) {
-    winston.error("ERROR POST /api/addcollection:", e);
+    winston.error("POST /api/addcollection:", e);
     res.sendStatus(500);
   }
 });
 
 
+app.post('/api/editcollection', passport.authenticate('jwt', { session: false } ), (req, res) => {
+  winston.info("POST /api/editcollection");
+  try {
+    let collection = req.body;
+    winston.debug('collection:', collection);
+    let id = collection.id;
+    collection['state'] = 'initial';
+    if (!(id) in collections) {
+      throw(`Cannot update collection ${collection.name}.  Collection ${id} does not exist`);
+    }
 
+    // do something here to stop an existing rolling collection
 
+    collections[id] = collection;
+    let cDef = {
+      images: [],
+      sessions: {},
+      id: collection.id
+    };
+    collectionsData[id] = cDef;
+    
+    // Update collection in mongo
+    db.collection('collections').updateOne( { id: id }, { $set: collection}, (err) => {
+      if (err) throw err;
+
+      db.collection('collectionsData').updateOne( { id: collection.id }, { $set: { data: JSON.stringify(cDef) } }, (err) => {
+        // Update collection data in mongo
+        if (err) throw err;
+
+        res.sendStatus(205);
+      });
+    });
+
+  }
+  catch(e) {
+    winston.error("POST /api/editcollection:", e);
+    res.sendStatus(500);
+  }
+});
 
 
 
@@ -2081,7 +2120,7 @@ function cleanRollingDirs() {
 function createDefaultUser() {
   User.register(new User({ id: uuidV4(), username : 'admin', fullname: 'System Administrator', email: 'noreply@knowledgekta.com', enabled: true }), 'kentech0', (err, user) => {
     if (err) {
-      winston.error("ERROR adding default user 'admin':", err);
+      winston.error("adding default user 'admin':", err);
     }
     else {
       winston.info("Default user 'admin' added");
