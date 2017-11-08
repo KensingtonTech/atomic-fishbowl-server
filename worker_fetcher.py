@@ -37,7 +37,7 @@ def unwrapPullFiles(*arg, **kwarg):
 
 class Fetcher:
 
-  def __init__(self, communicator, collectionId, url, user, password, directory, minX, minY, gsPath, pdftotextPath, unrarPath, contentLimit, summaryTimeout, queryTimeout, contentTimeout, maxContentErrors, contentTypes):
+  def __init__(self, communicator, collectionId, url, user, password, directory, minX, minY, gsPath, pdftotextPath, sofficePath, unrarPath, contentLimit, summaryTimeout, queryTimeout, contentTimeout, maxContentErrors, contentTypes):
 
     self.pool = Pool()
     self.manager = Manager()
@@ -54,6 +54,7 @@ class Fetcher:
     self.minX = int(minX)
     self.minY = int(minY)
     self.gsPath = gsPath
+    self.sofficePath = sofficePath
     self.pdftotextPath = pdftotextPath
     rarfile.UNRAR_TOOL = unrarPath
     self.contentLimit = contentLimit
@@ -227,7 +228,7 @@ class Fetcher:
           ##############EXTRACT FILES AND DO THE WORK##############
           log.debug('Launching extractor from pool')
           #processor = ContentProcessor(self.directory, self.minX, self.minY, self.gsPath, self.pdftotextPath, self.contentLimit, self.contentCount)
-          processor = ContentProcessor(self.url, self.user, self.password, self.directory, self.minX, self.minY, self.gsPath, self.pdftotextPath, self.contentLimit, self.contentCount, self.contentErrors, self.maxContentErrors, self.contentTimeout, self.contentTypes)
+          processor = ContentProcessor(self.url, self.user, self.password, self.directory, self.minX, self.minY, self.gsPath, self.pdftotextPath, self.sofficePath, self.contentLimit, self.contentCount, self.contentErrors, self.maxContentErrors, self.contentTimeout, self.contentTypes)
           self.pool.apply_async(unwrapExtractFilesFromMultipart, args=(processor, newFileStr, self.sessions[sessionId], sessionId, distillationTerms, regexDistillationTerms, md5Hashes, sha1Hashes, sha256Hashes), callback=self.sendResult )
       
 
@@ -242,7 +243,7 @@ class Fetcher:
     #This tries to put every content call in its own process but this is actually slower than handling the content call in a single-threaded manner
     for sessionId in self.sessions:
       if not self.contentCount.value >= self.contentLimit:
-        processor = ContentProcessor(self.url, self.user, self.password, self.directory, self.minX, self.minY, self.gsPath, self.pdftotextPath, self.contentLimit, self.contentCount, self.contentErrors, self.maxContentErrors, self.contentTimeout)
+        processor = ContentProcessor(self.url, self.user, self.password, self.directory, self.minX, self.minY, self.gsPath, self.pdftotextPath, self.sofficePath, self.contentLimit, self.contentCount, self.contentErrors, self.maxContentErrors, self.contentTimeout)
 
         ##############PULL FILES AND PROCESS THEM##############
         log.debug('Launching extractor from pool')
@@ -281,12 +282,13 @@ class Fetcher:
 
 class ContentProcessor:
 
-  def __init__(self, url, user, password, directory, minX, minY, gsPath, pdftotextPath, contentLimit, contentCount, contentErrors, maxContentErrors, timeout, contentTypes):
+  def __init__(self, url, user, password, directory, minX, minY, gsPath, pdftotextPath, sofficePath, contentLimit, contentCount, contentErrors, maxContentErrors, timeout, contentTypes):
     self.url = url
     self.directory = directory
     self.minX = int(minX)
     self.minY = int(minY)
     self.gsPath = gsPath
+    self.sofficePath = sofficePath
     self.pdftotextPath = pdftotextPath
     self.contentLimit = contentLimit
     self.contentCount = contentCount # is a manager proxy
@@ -310,6 +312,8 @@ class ContentProcessor:
       self.dodgyArchivesAllowed = True
     if 'hashes' in contentTypes:
       self.hashesAllowed = True
+    if 'officedocs' in contentTypes:
+      self.officeAllowed = True
 
 
   def pullFiles(self, session, sessionId, distillationTerms, regexDistillationTerms, md5Hashes=[], sha1Hashes=[], sha256Hashes=[]):
@@ -399,7 +403,130 @@ class ContentProcessor:
     
     return True
 
+
+
+
   
+
+
+  def processOfficeDoc(self, contentObj, distillationTerms, regexDistillationTerms):
+    contentObj.contentType = 'office'
+    #log.debug('processOfficeDoc(): contentObj:' + pformat(contentObj.get()) )
+
+    baseName = os.path.splitext(contentObj.contentFile)[0]
+    pdfOutName = baseName + '.pdf'
+    firstPageOutName = baseName + '.jpg'
+    
+    #write document to disk
+    log.debug("processOfficeDoc(): Session " + str(contentObj.session) + ". Writing document to " + os.path.join(self.directory, contentObj.contentFile) )
+    fp = open(os.path.join(self.directory, contentObj.contentFile), 'wb')
+    shutil.copyfileobj(contentObj.getFileContent(), fp)
+    fp.close()
+    
+
+
+    #convert document to PDF
+    sofficeCmd = self.sofficePath + " --headless --convert-to pdf --outdir " + self.directory + " '" + os.path.join(self.directory, contentObj.contentFile) + "'"
+    log.debug("processOfficeDoc(): Session " + str(contentObj.session) + ". soffice command line: " + sofficeCmd)
+    args = shlex.split(sofficeCmd)
+    try:
+      process = Popen(args, stdout=PIPE, stderr=PIPE, shell = False)
+      (output, err) = process.communicate()
+      exit_code = process.wait()
+    except OSError as e:
+      if ('No such file or directory' in str(e)):
+        log.error("Session " + str(contentObj.session) + ". Could not run soffice command as " + self.sofficePath + " was not found")
+      else:
+        log.exception(str(e))
+      return False
+    except Exception as e:
+      #soffice couldn't even be run
+      log.exception("Session " + str(contentObj.session) + ": Could not run soffice command for file " + contentObj.contentFile + " at " + self.sofficePath )
+      return False
+    if exit_code != 0:
+      #soffice exited with a non-zero exit code, and thus was unsuccessful
+      log.warning("Session " + str(contentObj.session) + ". soffice exited abnormally for file " + contentObj.contentFile + " with exit code " + str(exit_code) )
+      log.warning("Session " + str(contentObj.session) + ". The 'soffice' command output was: " + output)
+      return False
+    log.debug('returned from soffice')
+    contentObj.proxyContentFile = pdfOutName
+    log.debug('returned from soffice 2')
+
+    #extract first page of pdf
+    #gs -dNOPAUSE -sDEVICE=jpeg -r144 -sOutputFile="p%o3d.jpg" -dFirstPage=1 -dLastPage=1 -dBATCH "$filename"
+    log.debug("processOfficeDoc(): Session " + str(contentObj.session) + ". Extracting first page of pdf " + contentObj.proxyContentFile)
+    outputfile = "page1-" + firstPageOutName
+    contentObj.pdfImage = outputfile
+    log.debug("processOfficeDoc(): Session " + str(contentObj.session) + ". Running gs on file " + contentObj.proxyContentFile)
+    
+    
+    gsCmd = self.gsPath + " -dNOPAUSE -sDEVICE=jpeg -r144 -sOutputFile='" + os.path.join(self.directory, outputfile) + "' -dNoVerifyXref -dPDFSTOPONERROR -dFirstPage=1 -dLastPage=1 -dBATCH '" +  os.path.join(self.directory, contentObj.proxyContentFile) + "'"
+    log.debug("processOfficeDoc(): Session " + str(contentObj.session) + ". Ghostscript command line: " + gsCmd)
+    args = shlex.split(gsCmd)
+    try:
+      process = Popen(args, stdout=PIPE, stderr=PIPE, shell = False)
+      (output, err) = process.communicate()
+      exit_code = process.wait()
+    
+    except OSError as e:
+      if ('No such file or directory' in str(e)):
+        log.error("Session " + str(contentObj.session) + ". Could not run ghostscript command as " + self.gsPath + " was not found")
+      else:
+        log.exception(str(e))
+      return False
+
+    except Exception as e:
+      #Ghostscript couldn't even be run
+      log.exception("Session " + str(contentObj.session) + ": Could not run GhostScript command for file " + contentObj.contentFile + " at " + self.gsPath )
+      return False
+
+    if exit_code != 0:
+      #Ghostscript exited with a non-zero exit code, and thus was unsuccessful
+      log.warning("Session " + str(contentObj.session) + ". GhostScript exited abnormally for file " + contentObj.contentFile + " with exit code " + str(exit_code) )
+      #log.warning("The 'gs' command was: " + gsCmd)
+      log.warning("Session " + str(contentObj.session) + ". The 'gs' command output was: " + output)
+      return False
+
+    if exit_code == 0: #this means we successfully generated an image of the pdf and we want to keep it
+      keep = True
+      ###keep means we want to keep the file.  We choose to not keep the file (by making keep = False) on these conditions:
+      ###1: if an error is generated by gs whilst trying to render an image of the first page
+      ###2: if we have distillationTerms and/or regexDistillationTerms and they aren't matched
+
+      returnObj = self.getPdfText(contentObj, searchTerms=distillationTerms, regexSearchTerms=regexDistillationTerms)
+      keep = returnObj['keep']
+      contentObj = returnObj['contentObj']
+
+      if keep == False:
+        return False #return if we've chosen to not keep the file
+      
+      try:
+        #now let's try generating a thumbnail - if we already have an image, this should succeed.  If not, there's something screwy...
+        #but we'll keep it anyway and use the original image as the thumbnail and let the browser deal with any potential corruption
+        log.debug("processOfficeDoc(): Session " + str(contentObj.session) + ". Generating thumbnail for pdf " + outputfile)
+        thumbnailName = 'thumbnail_' + outputfile
+        pdfim = Image.open(os.path.join(self.directory, outputfile))
+        pdfim.thumbnail(self.thumbnailSize, Image.ANTIALIAS)
+        pdfim.save(os.path.join(self.directory, thumbnailName), pdfim.format)
+        #pdfim.close()
+
+        #set thumbnail to our generated thumbnail
+        contentObj.thumbnail = thumbnailName
+        self.thisSession['images'].append( contentObj.get() )
+        self.contentCount.value += 1
+        return True
+      except Exception as e:
+        log.exception("Session " + str(contentObj.session) + ". Error generating thumbnail for pdf " + contentObj.proxyContentFile)
+        #thumbnail generation failed, so set thumbnail to be the original image generated by gs
+        contentObj.thumbnail = outputfile
+        self.thisSession['images'].append( contentObj.get() )
+        self.contentCount.value += 1
+        return True
+
+
+
+
+
 
 
   def processPdf(self, contentObj, distillationTerms, regexDistillationTerms):
@@ -492,7 +619,11 @@ class ContentProcessor:
       #log.debug('getPdfText(): session: ' + str(contentObj.session))
       sessionId = contentObj.session
 
-      pdftotextCmd = self.pdftotextPath + " -enc UTF-8 -eol unix -nopgbrk -q '" + os.path.join(self.directory, contentObj.contentFile) + "' -"
+      fileToExtractFrom = contentObj.contentFile
+      if contentObj.proxyContentFile:
+        fileToExtractFrom = contentObj.proxyContentFile
+
+      pdftotextCmd = self.pdftotextPath + " -enc UTF-8 -eol unix -nopgbrk -q '" + os.path.join(self.directory, fileToExtractFrom) + "' -"
       log.debug("getPdfText(): Session " + str(contentObj.session) + ". pdftotextCmd: " + pdftotextCmd)
       args = shlex.split(pdftotextCmd)
       try:
@@ -540,7 +671,7 @@ class ContentProcessor:
         
         for t in regexSearchTerms:
           origTerm =  t.decode('utf-8')
-          term = '(' + t.decode('utf-8') + ')';
+          term = '(' + t.decode('utf-8') + ')'
           #log.debug( "getPdfText(): Regex search term: " + term)
           compiledTerm = re.compile(term)
           res = compiledTerm.search(joinedText.decode('utf-8')) #MatchObject
@@ -625,16 +756,24 @@ class ContentProcessor:
     for part in msg.walk():
 
       # multipart/* are just containers
-      if part.get_content_maintype() == 'multipart' and part.get_content_subtype() == 'mixed':
+      maintype = part.get_content_maintype()
+      subtype = part.get_content_subtype()
+      if maintype == 'multipart' and subtype == 'mixed':
         continue
-      elif part.get_content_maintype() == 'image':
+      elif maintype == 'image':
         contentType = 'image'
-      elif part.get_content_maintype() == 'application' and part.get_content_subtype() == 'pdf':
+      elif maintype == 'application' and subtype == 'pdf':
         contentType = 'pdf'
+      elif maintype == 'application' and subtype in [ 'msword' ]:
+        contentType = 'office'
       else:
+        log.debug("Mime type not recognized.  maintype: " + str(maintype))
+        log.debug("subtype:" + str(subtype))
         log.debug("extractFilesFromMultipart(): Detecting archives")
         type = magic.from_buffer( part.get_payload(decode=True), mime=True)
         log.debug("extractFilesFromMultipart(): Magic type is " + type)
+        if type in [ 'Microsoft Word 2007+', 'Microsoft Excel 2007+', 'Microsoft PowerPoint 2007+' ]:
+          contentType = 'office'
         if type == 'application/zip':
           contentType = 'zip'
         elif type == 'application/x-rar':
@@ -673,15 +812,19 @@ class ContentProcessor:
       if contentType == 'image' and len(distillationTerms) == 0 and len(regexDistillationTerms) == 0 and self.imagesAllowed:
         contentObj.contentFile = filename
         contentObj.setPartContent(part)
-        ###if not self.processImage(filename, sessionId, contentType, part=part):
         if not self.processImage(contentObj):
           continue
         
       elif contentType == 'pdf' and self.pdfsAllowed:
         contentObj.contentFile = filename
         contentObj.setPartContent(part)
-        ###if not self.processPdf(filename, sessionId, contentType, distillationTerms, regexDistillationTerms, part=part):
         if not self.processPdf(contentObj, distillationTerms, regexDistillationTerms):
+          continue
+
+      elif contentType == 'office' and self.officeAllowed:
+        contentObj.contentFile = filename
+        contentObj.setPartContent(part)
+        if not self.processOfficeDoc(contentObj, distillationTerms, regexDistillationTerms):
           continue
         
       elif contentType == 'executable' and self.hashesAllowed:
@@ -913,6 +1056,10 @@ class ContentProcessor:
     elif fileType == 'application/pdf' and self.pdfsAllowed:
       #log.debug("processExtractedFile(): processing '" + contentObj.contentType + "' as pdf")
       self.processPdf(contentObj, distillationTerms, regexDistillationTerms)
+
+    elif fileType in [ 'Microsoft Word 2007+', 'Microsoft Excel 2007+', 'Microsoft PowerPoint 2007+' ] and self.officeAllowed:
+      #log.debug("processExtractedFile(): processing '" + contentObj.contentType + "' as office document")
+      self.processOfficeDoc(contentObj, distillationTerms, regexDistillationTerms)
 
     elif fileType.startswith('application/') and self.hashesAllowed: #fix for executable
       #log.debug("processExtractedFile(): Processing '" + archivedFilename + "' as executable")

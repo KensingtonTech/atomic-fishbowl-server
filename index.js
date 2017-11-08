@@ -37,9 +37,11 @@ var development = process.env.NODE_ENV !== 'production';
 // export NODE_ENV='development'
 const purgeHack = false; // causes sessions older than 5 minutes to be purged, if set to true.  Useful for testing purging without having to wait an hour
 var gsPath = '/usr/bin/gs';
+var sofficePath = '/usr/bin/soffice';
 var pdftotextPath = '/usr/bin/pdftotext';
 var unrarPath = '/usr/bin/unrar';
 if (development) {
+  sofficePath = '/usr/local/bin/soffice.sh';
   gsPath = '/opt/local/bin/gs';
   pdftotextPath = '/opt/local/bin/pdftotext';
   unrarPath = '/opt/local/bin/unrar';
@@ -241,11 +243,11 @@ var defaultPreferences = {
 // A use-case consists of a name (mandatory), a friendly name (mandatory), a query (mandatory), its allowed content types[] (mandatory), distillation terms (optional), regex distillation terms (optional), and a description (mandatory)
 // { name: '', friendlyName: '', query: "", contentTypes: [], description: '', distillationTerms: [], regexTerms: [] }
 var useCases = [
-  { name: 'outboundDocuments', friendlyName: 'Outbound Documents', query: "direction = 'outbound' && filetype = 'pdf'", contentTypes: [ 'pdfs' ], description: 'Displays documents which are being transferred outbound' },
+  { name: 'outboundDocuments', friendlyName: 'Outbound Documents', query: "direction = 'outbound' && filetype = 'pdf','office 2007 document'", contentTypes: [ 'pdfs', 'officedocs' ], description: 'Displays documents which are being transferred outbound' },
   
-  { name: 'ssns', friendlyName: 'Social Security Numbers', query: "filetype = 'pdf','zip','rar'", contentTypes: [ 'pdfs' ], description: 'Displays documents which contain social security numbers.  It will look inside ZIP and RAR archives, as well', regexTerms: [ '\\d\\d\\d-\\d\\d-\\d\\d\\d\\d' ] },
+  { name: 'ssns', friendlyName: 'Social Security Numbers', query: "filetype = 'pdf','office 2007 document','zip','rar'", contentTypes: [ 'pdfs', 'officedocs' ], description: 'Displays documents which contain social security numbers.  It will look inside ZIP and RAR archives, as well', regexTerms: [ '\\d\\d\\d-\\d\\d-\\d\\d\\d\\d' ] },
 
-  { name: 'dob', friendlyName: 'Date of Birth', query: "filetype = 'pdf','zip','rar'", contentTypes: [ 'pdfs' ], description: 'Displays documents which contain dates of birth', 
+  { name: 'dob', friendlyName: 'Date of Birth', query: "filetype = 'pdf','office 2007 document','zip','rar'", contentTypes: [ 'pdfs', 'officedocs' ], description: 'Displays documents which contain dates of birth', 
     regexTerms: [ 
       '(?i)(dob|date of birth|birth date|birthdate|birthday|birth day).*\\d\\d?{/-}\\d\\d?{/-}\\d{2}(?:\\d{2})?',
       '(?i)(dob|date of birth|birth date|birthdate|birthday|birth day).*\\d\\d? \\w+, \\d{2}(?:\\d{2})?',
@@ -253,11 +255,11 @@ var useCases = [
     ]
   },
 
-  { name: 'contentinarchives', friendlyName: 'All Content Contained in Archives', query: "filetype = 'zip','rar'", contentTypes: [ 'images', 'pdfs' ], description: 'Displays any content type contained within a ZIP or RAR archive.  It does not display dodgy archives' },
+  { name: 'contentinarchives', friendlyName: 'All Content Contained in Archives', query: "filetype = 'zip','rar'", contentTypes: [ 'images', 'pdfs', 'officedocs' ], description: 'Displays any content type contained within a ZIP or RAR archive.  It does not display dodgy archives' },
   
-  { name: 'contentinarchivesdodgy', friendlyName: 'All Content Contained in Archives (with Dodgy Archives)', query: "filetype = 'zip','rar'", contentTypes: [ 'images', 'pdfs', 'dodgyarchives' ], description: 'Displays any content type contained within a ZIP or RAR archive.  It also displays dodgy archives' },
+  { name: 'contentinarchivesdodgy', friendlyName: 'All Content Contained in Archives (with Dodgy Archives)', query: "filetype = 'zip','rar'", contentTypes: [ 'images', 'pdfs', 'officedocs', 'dodgyarchives' ], description: 'Displays any content type contained within a ZIP or RAR archive.  It also displays dodgy archives' },
 
-  { name: 'suspiciousdestcountries', friendlyName: 'Documents to Suspicious Destination Countries', query: "country.dst = 'russia','china','romania','belarus','iran','north korea','ukraine','syria','yemen' && filetype = 'zip','rar','pdf'", contentTypes: [ 'pdfs', 'dodgyarchives' ], description: 'Displays documents and dodgy archives transferred to suspicious destination countries: Russia, China, Romania, Belarus, Iran, North Korea, Ukraine, Syra, or Yemen' },
+  { name: 'suspiciousdestcountries', friendlyName: 'Documents to Suspicious Destination Countries', query: "country.dst = 'russia','china','romania','belarus','iran','north korea','ukraine','syria','yemen' && filetype = 'zip','rar','pdf','office 2007 document'", contentTypes: [ 'pdfs', 'officedocs', 'dodgyarchives' ], description: 'Displays documents and dodgy archives transferred to suspicious destination countries: Russia, China, Romania, Belarus, Iran, North Korea, Ukraine, Syra, or Yemen' },
 
   { name: 'dodgyarchives', friendlyName: 'Dodgy Archives', query: "filetype = 'zip','rar'", contentTypes: [ 'dodgyarchives' ], description: 'Displays ZIP and RAR Archives which are encrypted or which contain some encrypted files' },
 
@@ -972,6 +974,7 @@ function fixedSocketConnectionHandler(id, socket, tempName, subject) {
     minY: thisCollection.minY,
     gsPath: gsPath,
     pdftotextPath: pdftotextPath,
+    sofficePath: sofficePath,
     unrarPath: unrarPath,
     collectionsDir: collectionsDir,
     summaryTimeout: preferences.summaryTimeout,
@@ -1312,6 +1315,7 @@ function rollingCollectionSocketConnectionHandler(id, socket, tempName, subject,
     minY: thisCollection.minY,
     gsPath: gsPath,
     pdftotextPath: pdftotextPath,
+    sofficePath: sofficePath,
     unrarPath: unrarPath,
     collectionsDir: collectionsDir,
     summaryTimeout: preferences.summaryTimeout,
@@ -2217,6 +2221,10 @@ function chunkHandler(collectionRoot, id, subject, data, chunk, clientSessionId=
       for (var i=0; i < update.collectionUpdate.images.length; i++) {
         
         update.collectionUpdate.images[i].contentFile = collectionsUrl + '/' + rollingId + '/' + update.collectionUpdate.images[i].contentFile;
+        
+        if ('proxyContentFile' in update.collectionUpdate.images[i]) {
+          update.collectionUpdate.images[i].proxyContentFile = collectionsUrl + '/' + rollingId + '/' + update.collectionUpdate.images[i].proxyContentFile;
+        }
 
         if ('thumbnail' in update.collectionUpdate.images[i]) {
           update.collectionUpdate.images[i].thumbnail = collectionsUrl + '/' + rollingId + '/' + update.collectionUpdate.images[i].thumbnail;
@@ -2300,6 +2308,9 @@ function purgeSessions(thisRollingCollection, sessionsToPurge) {
           thisRollingCollection.images.splice(i, 1);
           if ('contentFile' in content) {
             fs.unlink(content.contentFile, () => {});
+          }
+          if ('proxyContentFile' in content) {
+            fs.unlink(content.proxyContentFile, () => {});
           }
           if ('thumbnail' in content) {
             fs.unlink(content.thumbnail, () => {});

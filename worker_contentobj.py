@@ -4,24 +4,25 @@ from uuid import uuid4
 
 class ContentObj:
 
-    def __init__(self, session=0, contentType='', contentFile='', image='', thumbnail='', hashType='', hashValue='', hashFriendly='', fromArchive=False, archiveType='', archiveFilename='', isArchive=False, textDistillationEnabled=False, regexDistillationEnabled=False, textTermsMatched=[], regexTermsMatched=[]):
-        self.session = session                  # number: session id
-        self.contentType = contentType          # should be image, pdf, or hash, unsupportedZipEntry, encryptedZipEntry, encryptedRarEntry, encryptedRarTable
+    def __init__(self, session=0, contentType='', contentFile='', proxyContentFile='', image='', thumbnail='', hashType='', hashValue='', hashFriendly='', fromArchive=False, archiveType='', archiveFilename='', isArchive=False, textDistillationEnabled=False, regexDistillationEnabled=False, textTermsMatched=[], regexTermsMatched=[]):
+        self.session = session                   # number: session id
+        self.contentType = contentType           # should be image, pdf, office, or hash, unsupportedZipEntry, encryptedZipEntry, encryptedRarEntry, encryptedRarTable
 
-        self.contentFile = contentFile          # the image or pdf or exe filename
-        self.pdfImage = image                   # the PDF gs-generated image filename
-        self.thumbnail = thumbnail              # thumbnail image file
-        self.archiveFilename = archiveFilename  # the name of the zip or rar archive
+        self.contentFile = contentFile           # the image or office or pdf or exe filename
+        self.proxyContentFile = proxyContentFile # this is a pdf document which we may substitute for a converted original office doc.  This will be rendered by the client instead
+        self.pdfImage = image                    # the PDF gs-generated image filename
+        self.thumbnail = thumbnail               # thumbnail image file
+        self.archiveFilename = archiveFilename   # the name of the zip or rar archive
 
         # Hash
         self.hashType = hashType   
-        self.hashValue = hashValue              # sha1, sha256, md5
-        self.hashFriendly = hashFriendly        # friendly name of hash, if there is one
+        self.hashValue = hashValue               # sha1, sha256, md5
+        self.hashFriendly = hashFriendly         # friendly name of hash, if there is one
         
         #Archives
-        self.fromArchive = fromArchive          # boolean, whether the content file came from a zip or rar archive
-        self.isArchive = isArchive              # boolean, whether the file IS an archive rather than came from an archive
-        self.archiveType = archiveType          # either zip or rar
+        self.fromArchive = fromArchive           # boolean, whether the content file came from a zip or rar archive
+        self.isArchive = isArchive               # boolean, whether the file IS an archive rather than came from an archive
+        self.archiveType = archiveType           # either zip or rar
 
         #Distillation
         self.textDistillationEnabled = textDistillationEnabled
@@ -42,6 +43,8 @@ class ContentObj:
             o['contentType'] = self.contentType
         if self.contentFile:
             o['contentFile'] = self.contentFile
+        if self.proxyContentFile:
+            o['proxyContentFile'] = self.proxyContentFile
         if self.pdfImage:
             o['pdfImage'] = self.pdfImage
         if self.thumbnail:
