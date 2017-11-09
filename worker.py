@@ -87,6 +87,7 @@ def configReceived(cfgObj):
       minY = cfg['minY']
       gsPath = cfg['gsPath']
       sofficePath = cfg['sofficePath']
+      sofficeProfilesDir = cfg['sofficeProfilesDir']
       pdftotextPath = cfg['pdftotextPath']
       unrarPath = cfg['unrarPath']
       imageLimit = int(cfg['imageLimit'])
@@ -129,7 +130,7 @@ def configReceived(cfgObj):
       exitWithError(error)
   
     baseUrl = proto + host + ':' + port
-    fetcher = Fetcher(client, collectionId, baseUrl, user, password, directory, minX, minY, gsPath, pdftotextPath, sofficePath, unrarPath, imageLimit, summaryTimeout, queryTimeout, contentTimeout, maxContentErrors, contentTypes)
+    fetcher = Fetcher(client, collectionId, baseUrl, user, password, directory, minX, minY, gsPath, pdftotextPath, sofficePath, sofficeProfilesDir, unrarPath, imageLimit, summaryTimeout, queryTimeout, contentTimeout, maxContentErrors, contentTypes)
     
     ###QUERY DATA###
     log.info("Executing query")

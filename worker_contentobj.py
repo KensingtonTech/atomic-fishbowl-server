@@ -4,12 +4,13 @@ from uuid import uuid4
 
 class ContentObj:
 
-    def __init__(self, session=0, contentType='', contentFile='', proxyContentFile='', image='', thumbnail='', hashType='', hashValue='', hashFriendly='', fromArchive=False, archiveType='', archiveFilename='', isArchive=False, textDistillationEnabled=False, regexDistillationEnabled=False, textTermsMatched=[], regexTermsMatched=[]):
+    def __init__(self, session=0, contentType='', contentSubType='', contentFile='', proxyContentFile='', image='', thumbnail='', hashType='', hashValue='', hashFriendly='', fromArchive=False, archiveType='', archiveFilename='', isArchive=False, textDistillationEnabled=False, regexDistillationEnabled=False, textTermsMatched=[], regexTermsMatched=[]):
         self.session = session                   # number: session id
         self.contentType = contentType           # should be image, pdf, office, or hash, unsupportedZipEntry, encryptedZipEntry, encryptedRarEntry, encryptedRarTable
+        self.contentSubType = contentSubType     # optional: either word, excel, or powerpoint
 
         self.contentFile = contentFile           # the image or office or pdf or exe filename
-        self.proxyContentFile = proxyContentFile # this is a pdf document which we may substitute for a converted original office doc.  This will be rendered by the client instead
+        self.proxyContentFile = proxyContentFile # optional, this is a pdf document which we may substitute for a converted original office doc.  This will be rendered by the client instead
         self.pdfImage = image                    # the PDF gs-generated image filename
         self.thumbnail = thumbnail               # thumbnail image file
         self.archiveFilename = archiveFilename   # the name of the zip or rar archive
@@ -41,6 +42,8 @@ class ContentObj:
         o['session'] = self.session
         if self.contentType:
             o['contentType'] = self.contentType
+        if self.contentSubType:
+            o['contentSubType'] = self.contentSubType
         if self.contentFile:
             o['contentFile'] = self.contentFile
         if self.proxyContentFile:

@@ -21,7 +21,7 @@ import re
 import logging
 from worker_contentobj import ContentObj
 from copy import deepcopy, copy
-from multiprocessing import Pool, Manager, Value
+from multiprocessing import Pool, Manager, Value, current_process
 import shlex
 import socket
 
@@ -37,7 +37,7 @@ def unwrapPullFiles(*arg, **kwarg):
 
 class Fetcher:
 
-  def __init__(self, communicator, collectionId, url, user, password, directory, minX, minY, gsPath, pdftotextPath, sofficePath, unrarPath, contentLimit, summaryTimeout, queryTimeout, contentTimeout, maxContentErrors, contentTypes):
+  def __init__(self, communicator, collectionId, url, user, password, directory, minX, minY, gsPath, pdftotextPath, sofficePath, sofficeProfilesDir, unrarPath, contentLimit, summaryTimeout, queryTimeout, contentTimeout, maxContentErrors, contentTypes):
 
     self.pool = Pool()
     self.manager = Manager()
@@ -55,6 +55,7 @@ class Fetcher:
     self.minY = int(minY)
     self.gsPath = gsPath
     self.sofficePath = sofficePath
+    self.sofficeProfilesDir = sofficeProfilesDir
     self.pdftotextPath = pdftotextPath
     rarfile.UNRAR_TOOL = unrarPath
     self.contentLimit = contentLimit
@@ -228,7 +229,7 @@ class Fetcher:
           ##############EXTRACT FILES AND DO THE WORK##############
           log.debug('Launching extractor from pool')
           #processor = ContentProcessor(self.directory, self.minX, self.minY, self.gsPath, self.pdftotextPath, self.contentLimit, self.contentCount)
-          processor = ContentProcessor(self.url, self.user, self.password, self.directory, self.minX, self.minY, self.gsPath, self.pdftotextPath, self.sofficePath, self.contentLimit, self.contentCount, self.contentErrors, self.maxContentErrors, self.contentTimeout, self.contentTypes)
+          processor = ContentProcessor(self.url, self.user, self.password, self.directory, self.minX, self.minY, self.gsPath, self.pdftotextPath, self.sofficePath, self.sofficeProfilesDir, self.contentLimit, self.contentCount, self.contentErrors, self.maxContentErrors, self.contentTimeout, self.contentTypes)
           self.pool.apply_async(unwrapExtractFilesFromMultipart, args=(processor, newFileStr, self.sessions[sessionId], sessionId, distillationTerms, regexDistillationTerms, md5Hashes, sha1Hashes, sha256Hashes), callback=self.sendResult )
       
 
@@ -282,13 +283,14 @@ class Fetcher:
 
 class ContentProcessor:
 
-  def __init__(self, url, user, password, directory, minX, minY, gsPath, pdftotextPath, sofficePath, contentLimit, contentCount, contentErrors, maxContentErrors, timeout, contentTypes):
+  def __init__(self, url, user, password, directory, minX, minY, gsPath, pdftotextPath, sofficePath, sofficeProfilesDir, contentLimit, contentCount, contentErrors, maxContentErrors, timeout, contentTypes):
     self.url = url
     self.directory = directory
     self.minX = int(minX)
     self.minY = int(minY)
     self.gsPath = gsPath
     self.sofficePath = sofficePath
+    self.sofficeProfilesDir = sofficeProfilesDir
     self.pdftotextPath = pdftotextPath
     self.contentLimit = contentLimit
     self.contentCount = contentCount # is a manager proxy
@@ -314,6 +316,8 @@ class ContentProcessor:
       self.hashesAllowed = True
     if 'officedocs' in contentTypes:
       self.officeAllowed = True
+    #log.debug('My Process Identifier: ' + str(self.processId))
+    #print current_process()
 
 
   def pullFiles(self, session, sessionId, distillationTerms, regexDistillationTerms, md5Hashes=[], sha1Hashes=[], sha256Hashes=[]):
@@ -426,7 +430,7 @@ class ContentProcessor:
 
 
     #convert document to PDF
-    sofficeCmd = self.sofficePath + " --headless --convert-to pdf --outdir " + self.directory + " '" + os.path.join(self.directory, contentObj.contentFile) + "'"
+    sofficeCmd = self.sofficePath + " --headless --norestore -env:SingleAppInstance='false' -env:UserInstallation=file://" + self.sofficeProfilesDir + "/" + self.poolId + " --convert-to pdf --outdir " + self.directory + " '" + os.path.join(self.directory, contentObj.contentFile) + "'"
     log.debug("processOfficeDoc(): Session " + str(contentObj.session) + ". soffice command line: " + sofficeCmd)
     args = shlex.split(sofficeCmd)
     try:
@@ -746,6 +750,9 @@ class ContentProcessor:
 
   def extractFilesFromMultipart(self, fileStr, session, sessionId, distillationTerms, regexDistillationTerms, md5Hashes, sha1Hashes, sha256Hashes):
     log.debug("extractFilesFromMultipart(): Extracting files of session ID " + str(sessionId) )
+    self.poolId = current_process().name
+    #log.debug('My Process Identifier: ' + str(self.processId))
+    #print current_process().name
     #print("extractFilesFromMultipart(): Extracting files of session ID " + str(sessionId) )
     msg = email.message_from_string(fileStr)
     counter = 1
@@ -764,21 +771,35 @@ class ContentProcessor:
         contentType = 'image'
       elif maintype == 'application' and subtype == 'pdf':
         contentType = 'pdf'
-      elif maintype == 'application' and subtype in [ 'msword' ]:
-        contentType = 'office'
+        ext = '.pdf'
       else:
         log.debug("Mime type not recognized.  maintype: " + str(maintype))
         log.debug("subtype:" + str(subtype))
-        log.debug("extractFilesFromMultipart(): Detecting archives")
-        type = magic.from_buffer( part.get_payload(decode=True), mime=True)
-        log.debug("extractFilesFromMultipart(): Magic type is " + type)
-        if type in [ 'Microsoft Word 2007+', 'Microsoft Excel 2007+', 'Microsoft PowerPoint 2007+' ]:
+        log.debug("extractFilesFromMultipart(): Detecting content type")
+        
+        payload = part.get_payload(decode=True)
+        mimeType = magic.from_buffer( payload, mime=True)
+        magicType = magic.from_buffer( payload, mime=False)
+        log.debug("extractFilesFromMultipart(): Magic type is " + mimeType)
+        if magicType == 'Microsoft Word 2007+':
           contentType = 'office'
-        if type == 'application/zip':
+          contentSubType = 'word'
+          ext = '.docx'
+        elif magicType == 'Microsoft Excel 2007+':
+          contentType = 'office'
+          contentSubType = 'excel'
+          ext = '.xlsx'
+        elif magicType == 'Microsoft PowerPoint 2007+':
+          contentType = 'office'
+          contentSubType = 'powerpoint'
+          ext = '.pptx'
+        elif mimeType == 'application/zip':
           contentType = 'zip'
-        elif type == 'application/x-rar':
+          ext = '.zip'
+        elif mimeType == 'application/x-rar':
           contentType = 'rar' #confirm this type
-        elif type in ['application/x-msdownload', 'application/x-ms-installer', 'application/x-elf', 'application/x-dosexec', 'application/x-executable']: #and len(md5Hashes) != 0: #fix this for known executable types
+          ext = '.rar'
+        elif mimeType in ['application/x-msdownload', 'application/x-ms-installer', 'application/x-elf', 'application/x-dosexec', 'application/x-executable']: #and len(md5Hashes) != 0: #fix this for known executable types
           contentType = 'executable'
         else: #should we make else generate hash instead of continue?  stick with just exe's for now
           continue
@@ -786,13 +807,24 @@ class ContentProcessor:
       # Applications should really sanitize the given filename so that an
       # email message can't be used to overwrite important files
       filename = part.get_filename().decode('utf-8')
+      if (contentType == 'office'):
+        (f, e) = os.path.splitext(filename)
+        if contentSubType == 'word' and e != '.docx':
+          e = '.docx'
+        if contentSubType == 'excel' and e != '.xlsx':
+          e = '.xlsx'
+        if contentSubType == 'powerpoint' and e != '.pptx':
+          e = '.pptx'
+        filename = f + e
+
       if not filename:
         log.debug("No filename")
-        ext = mimetypes.guess_extension(part.get_content_type())
+        if not ext:
+          ext = mimetypes.guess_extension(part.get_content_type())
         if not ext:
           # Use a generic bag-of-bits extension
           ext = '.bin'
-        filename = 'part-%03d%s' % (counter, ext)
+        filename = 'session-%d-part-%03d%s' % (sessionId, counter, ext)
       counter += 1
       
       #print filename, part.get_content_maintype(), part.get_content_subtype()
@@ -823,6 +855,7 @@ class ContentProcessor:
 
       elif contentType == 'office' and self.officeAllowed:
         contentObj.contentFile = filename
+        contentObj.contentSubType = contentSubType
         contentObj.setPartContent(part)
         if not self.processOfficeDoc(contentObj, distillationTerms, regexDistillationTerms):
           continue

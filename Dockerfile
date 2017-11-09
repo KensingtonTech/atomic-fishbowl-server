@@ -29,7 +29,7 @@ yum clean all; \
 yum update -y; \
 rpm --import http://kentechrepo/yumrepo/221b_1.0.0_signed/221b-1.x.key; \
 curl http://kentechrepo/yumrepo/221b_1.0.0_signed/221b-1.0.0-signed.repo > /etc/yum.repos.d/221b-1.0.0-signed.repo; \
-yum install -y nodejs kta-python-magic kta-python-Pillow kta-python-rarfile ghostscript poppler-utils libjpeg-turbo openjpeg unzip unrar python2-crypto; \
+yum install -y nodejs kta-python-magic kta-python-Pillow kta-python-rarfile ghostscript poppler-utils libjpeg-turbo openjpeg unzip unrar python2-crypto libreoffice; \
 rm -f /etc/yum.repos.d/221b-1.0.0-signed.repo; \
 yum clean all; \
 rm -rf /var/cache/yum; \

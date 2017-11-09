@@ -133,8 +133,10 @@ const jwtPrivateKeyFile = certDir + '/ssl.key';
 const jwtPublicCertFile = certDir + '/ssl.cer';
 const internalPublicKeyFile = certDir + '/internal.pem';
 const internalPrivateKeyFile = certDir + '/internal.key';
-const collectionsUrl = '/collections'
-var collectionsDir = '/var/kentech/221b/collections';
+const collectionsUrl = '/collections';
+const dataDir = '/var/kentech/221b';
+const collectionsDir = dataDir + '/collections';
+const sofficeProfilesDir = dataDir + '/sofficeProfiles';
 
 try {
   //  Read in config file
@@ -177,10 +179,22 @@ if ('dbConfig' in configCopy && 'authentication' in configCopy['dbConfig'] && 'p
 }
 winston.debug(configCopy);
 
+// Set up encryption
 const internalPublicKey = fs.readFileSync(internalPublicKeyFile, 'utf8');
 const internalPrivateKey = fs.readFileSync(internalPrivateKeyFile, 'utf8');
 const decryptor = new NodeRSA( internalPrivateKey );
 decryptor.setOptions({encryptionScheme: 'pkcs1'});
+
+// Create LibreOffice profiles dir
+if ( !fs.existsSync(dataDir) ) {
+  winston.info(`Creating data directory at ${dataDir}`);
+  fs.mkdirSync(dataDir);
+}
+if ( !fs.existsSync(sofficeProfilesDir) ) {
+  winston.info(`Creating soffice profiles directory at ${sofficeProfilesDir}`);
+  fs.mkdirSync(sofficeProfilesDir);
+}
+
 
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -243,15 +257,16 @@ var defaultPreferences = {
 // A use-case consists of a name (mandatory), a friendly name (mandatory), a query (mandatory), its allowed content types[] (mandatory), distillation terms (optional), regex distillation terms (optional), and a description (mandatory)
 // { name: '', friendlyName: '', query: "", contentTypes: [], description: '', distillationTerms: [], regexTerms: [] }
 var useCases = [
+
   { name: 'outboundDocuments', friendlyName: 'Outbound Documents', query: "direction = 'outbound' && filetype = 'pdf','office 2007 document'", contentTypes: [ 'pdfs', 'officedocs' ], description: 'Displays documents which are being transferred outbound' },
   
   { name: 'ssns', friendlyName: 'Social Security Numbers', query: "filetype = 'pdf','office 2007 document','zip','rar'", contentTypes: [ 'pdfs', 'officedocs' ], description: 'Displays documents which contain social security numbers.  It will look inside ZIP and RAR archives, as well', regexTerms: [ '\\d\\d\\d-\\d\\d-\\d\\d\\d\\d' ] },
 
   { name: 'dob', friendlyName: 'Date of Birth', query: "filetype = 'pdf','office 2007 document','zip','rar'", contentTypes: [ 'pdfs', 'officedocs' ], description: 'Displays documents which contain dates of birth', 
     regexTerms: [ 
-      '(?i)(dob|date of birth|birth date|birthdate|birthday|birth day).*\\d\\d?{/-}\\d\\d?{/-}\\d{2}(?:\\d{2})?',
-      '(?i)(dob|date of birth|birth date|birthdate|birthday|birth day).*\\d\\d? \\w+, \\d{2}(?:\\d{2})?',
-      '(?i)(dob|date of birth|birth date|birthdate|birthday|birth day).*\\w+ \\d\\d?, \\d{2}(?:\\d{2})?'
+      '(?i)(dob|date of birth|birth date|birthdate|birthday|birth day).*\\d\\d?[-/]\\d\\d?[-/]\\d{2}(?:\\d{2})?\\W',
+      '(?i)(dob|date of birth|birth date|birthdate|birthday|birth day).*\\d\\d? \\w+,? \\d{2}(?:\\d{2})?\\W',
+      '(?i)(dob|date of birth|birth date|birthdate|birthday|birth day).*\\w+ \\d\\d?,? \\d{2}(?:\\d{2})?\\W'
     ]
   },
 
@@ -259,11 +274,12 @@ var useCases = [
   
   { name: 'contentinarchivesdodgy', friendlyName: 'All Content Contained in Archives (with Dodgy Archives)', query: "filetype = 'zip','rar'", contentTypes: [ 'images', 'pdfs', 'officedocs', 'dodgyarchives' ], description: 'Displays any content type contained within a ZIP or RAR archive.  It also displays dodgy archives' },
 
-  { name: 'suspiciousdestcountries', friendlyName: 'Documents to Suspicious Destination Countries', query: "country.dst = 'russia','china','romania','belarus','iran','north korea','ukraine','syria','yemen' && filetype = 'zip','rar','pdf','office 2007 document'", contentTypes: [ 'pdfs', 'officedocs', 'dodgyarchives' ], description: 'Displays documents and dodgy archives transferred to suspicious destination countries: Russia, China, Romania, Belarus, Iran, North Korea, Ukraine, Syra, or Yemen' },
+  { name: 'suspiciousdestcountries', friendlyName: 'Documents to Suspicious Destination Countries', query: `country.dst = 'russian federation','china','romania','belarus','iran, islamic republic of',"korea, democratic people's republic of",'ukraine','syrian arab republic','yemen' && filetype = 'zip','rar','pdf','office 2007 document'`, contentTypes: [ 'pdfs', 'officedocs', 'dodgyarchives' ], description: 'Displays documents and dodgy archives transferred to suspicious destination countries: Russia, China, Romania, Belarus, Iran, North Korea, Ukraine, Syra, or Yemen' },
 
   { name: 'dodgyarchives', friendlyName: 'Dodgy Archives', query: "filetype = 'zip','rar'", contentTypes: [ 'dodgyarchives' ], description: 'Displays ZIP and RAR Archives which are encrypted or which contain some encrypted files' },
 
   { name: 'outboundwebmonitoring', friendlyName: 'Outbound Web Usage Monitoring', query: "direction = 'outbound' && service = 80 && filetype = 'jpg','gif','png'", contentTypes: [ 'images' ], description: 'Displays images from outbound web usage.  Recommended for use in a Monitoring Collection' }
+
 ];
 var useCasesObj = {};
 // Populate an object with our use cases so we can later reference them by use case name
@@ -975,6 +991,7 @@ function fixedSocketConnectionHandler(id, socket, tempName, subject) {
     gsPath: gsPath,
     pdftotextPath: pdftotextPath,
     sofficePath: sofficePath,
+    sofficeProfilesDir: sofficeProfilesDir,
     unrarPath: unrarPath,
     collectionsDir: collectionsDir,
     summaryTimeout: preferences.summaryTimeout,
@@ -1316,6 +1333,7 @@ function rollingCollectionSocketConnectionHandler(id, socket, tempName, subject,
     gsPath: gsPath,
     pdftotextPath: pdftotextPath,
     sofficePath: sofficePath,
+    sofficeProfilesDir: sofficeProfilesDir,
     unrarPath: unrarPath,
     collectionsDir: collectionsDir,
     summaryTimeout: preferences.summaryTimeout,
