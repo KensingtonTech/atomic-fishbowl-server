@@ -1,6 +1,6 @@
-221B - End User License Agreement
+Atomic Fishbowl - End User License Agreement
 
-1. Preamble: Please read this End­User License Agreement ("Agreement") carefully before installing 221B ("Software").  By installing the Software, you are agreeing to be bound by the terms and conditions of this Agreement.  If you do not agree to the terms of this Agreement, do not install the Software.  This Agreement sets the terms, rights, restrictions and obligations on using 221B ("Software") created and owned by Licensor, as detailed herein
+1. Preamble: Please read this End­User License Agreement ("Agreement") carefully before installing Atomic Fishbowl ("Software").  By installing the Software, you are agreeing to be bound by the terms and conditions of this Agreement.  If you do not agree to the terms of this Agreement, do not install the Software.  This Agreement sets the terms, rights, restrictions and obligations on using Atomic Fishbowl ("Software") created and owned by Licensor, as detailed herein
 
 2. License Grant: Kensington Technology Associates, Limited ("Licensor"), a Colorado Limited Liability Company, hereby grants RSA Security LLC ("Licensee"), a Business Entity, a Personal, Non-assignable & non-transferable, Temporary, Commercial, Royalty free, Without the rights to create derivative works, Non-exclusive license, all with accordance with the terms set forth and other legal restrictions set forth in 3rd party software used while running Software.
   2.1 Limited: Licensee may use Software for the purpose of:

@@ -78,7 +78,7 @@ app.use(passport.initialize());
 
 let tOptions = {
   'timestamp': () => moment().format('YYYY-MM-DD HH:mm:ss,SSS') + ' ',
-  'formatter': (options) => options.timestamp() + '221b_server     ' + sprintf('%-10s', options.level.toUpperCase()) + ' ' + (options.message ? options.message : '') +
+  'formatter': (options) => options.timestamp() + 'afb_server    ' + sprintf('%-10s', options.level.toUpperCase()) + ' ' + (options.message ? options.message : '') +
 (options.meta && Object.keys(options.meta).length ? '\n\t'+ JSON.stringify(options.meta) : '' )
 };
 if ('SYSTEMD' in process.env) {
@@ -90,13 +90,13 @@ winston.add(winston.transports.Console, tOptions);
 
 if (development) {
   winston.level = 'debug';
-  winston.debug('221b Server is running in development mode');
+  winston.debug('Atomic Fishbowl Server is running in development mode');
 }
 else {
   winston.level = 'info';
 }
 
-winston.info('Starting 221B server version', version);
+winston.info('Starting Atomic Fishbowl server version', version);
 
 
 
@@ -139,7 +139,7 @@ const collectionsDir = dataDir + '/collections';
 const sofficeProfilesDir = dataDir + '/sofficeProfiles';
 
 try {
-  //  Read in config file
+  // Read in config file
   var config = JSON.parse( fs.readFileSync(cfgFile, 'utf8') );
 }
 catch(exception) {
@@ -287,7 +287,7 @@ for (let i = 0; i < useCases.length; i++) {
   let thisUseCase = useCases[i];
   useCasesObj[thisUseCase.name] = thisUseCase;
 }
-//winston.debug('useCasesObj:', useCasesObj);
+// winston.debug('useCasesObj:', useCasesObj);
 
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -295,8 +295,8 @@ for (let i = 0; i < useCases.length; i++) {
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
 var cookieExtractor = function(req) {
-  //Extract JWT from cookie 'access_token' and return to JwtStrategy
-  //winston.debug("cookieExtractor()", req.cookies);
+  // Extract JWT from cookie 'access_token' and return to JwtStrategy
+  // winston.debug("cookieExtractor()", req.cookies);
   var token = null;
   if (req && req.cookies)
   {
@@ -328,15 +328,14 @@ var jwtOpts = {
 };
 
 
-//We use mongoose for auth, and MongoClient for everything else.  This is because Passport-Local Mongoose required it, and it is ill-suited to the free-formish objects which we want to use.
+// We use mongoose for auth, and MongoClient for everything else.  This is because Passport-Local Mongoose required it, and it is ill-suited to the free-formish objects which we want to use.
 var tokenBlacklist = {};
 
-// var mongoUrl = "mongodb://localhost:27017/221b";
 var mongoUrl = `mongodb://${config['dbConfig']['host']}:${config['dbConfig']['port']}/221b`;
 if (config.dbConfig.authentication.enabled) {
   mongoUrl = `mongodb://${config.dbConfig.authentication.user}:${config.dbConfig.authentication.password}@${config['dbConfig']['host']}:${config['dbConfig']['port']}/221b?authSource=admin`;
 }
-connectToDB(); //this must come before mongoose user connection so that we know whether to create the default admin account
+connectToDB(); // this must come before mongoose user connection so that we know whether to create the default admin account
 
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -380,12 +379,6 @@ app.get('/api/logout', passport.authenticate('jwt', { session: false } ), (req,r
   res.sendStatus(200);
 });
 
-/*var transformUserIsLoggedIn = function(doc, ret, options) {
-  delete ret._id;
-  return ret;
-};
-*/
-
 app.get('/api/isloggedin', passport.authenticate('jwt', { session: false } ), (req, res) => {
   winston.debug("GET /api/isloggedin");
   // winston.debug('sessionID:', req.session.id);
@@ -393,7 +386,6 @@ app.get('/api/isloggedin', passport.authenticate('jwt', { session: false } ), (r
   // res.cookie('access_token', token, { httpOnly: true, secure: true })
   // res.cookie( req.session.cookie );
   // req.session.save();
-
   res.json( { user: req.user.toObject(), sessionId: uuidV4() }); // { versionKey: false, transform: transformUserIsLoggedIn }
 });
 
@@ -1002,14 +994,6 @@ function fixedSocketConnectionHandler(id, socket, tempName, subject) {
     md5Enabled: false,
     sha1Enabled: false,
     sha256Enabled: false
-
-    // distillationEnabled: thisCollection.distillationEnabled,
-    // regexDistillationEnabled: thisCollection.regexDistillationEnabled,
-    // md5Enabled: thisCollection.md5Enabled,
-    // sha1Enabled: thisCollection.sha1Enabled,
-    // sha256Enabled: thisCollection.sha256Enabled,
-    // query: thisCollection.query,
-    // contentTypes: thisCollection.contentTypes
   };
 
   if (thisCollection.bound) {
@@ -1935,7 +1919,6 @@ function mongooseInitFunc() {
   passport.deserializeUser(User.deserializeUser());
 
   // Connect to Mongoose
-  // mongoose.connect("mongodb://localhost:27017/221b_users", { useMongoClient: true, promiseLibrary: global.Promise });
   var mongooseUrl = `mongodb://${config['dbConfig']['host']}:${config['dbConfig']['port']}/221b_users`
   var mongooseOptions = { useMongoClient: true, promiseLibrary: global.Promise };
   if (config.dbConfig.authentication.enabled) {
@@ -1944,18 +1927,6 @@ function mongooseInitFunc() {
   
   let mongooseOnConnectFunc = () => {
     var db = mongoose.connection;
-    //db.on('error', (err) => {winston.error("Error connecting to 221b_users DB:"), err} );
-    //db.once('open', () => {winston.info("Connected to 221b_users DB")} );
-  
-    /*
-    conn.221b_.listCollections({name: 'users'})
-            .next(function(err, collinfo) {
-                    if (collinfo) {
-                      winston.info("Collection 'users' exists");
-                    }
-                });
-    */
-    //mongoose.connect("mongodb://localhost:27017/221b_users", { useMongoClient: true });  
   
     // Create the default user account, if we think the app was just installed and if the count of users is 0
     User.count({}, (err, count) => {

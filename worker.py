@@ -182,11 +182,11 @@ def main():
     global log
     log = logging.getLogger()
     handler = logging.StreamHandler()
-    formatStr = '%(asctime)s 221b_worker     %(levelname)-10s %(message)s'
+    formatStr = '%(asctime)s afb_worker    %(levelname)-10s %(message)s'
     if 'SYSTEMD' in os.environ:
-      formatStr = '221b_worker     %(levelname)-10s %(message)s'
+      formatStr = 'afb_worker    %(levelname)-10s %(message)s'
     formatter = logging.Formatter(formatStr)
-    #formatter = logging.Formatter('%(asctime)s 221b_worker     %(levelname)-10s %(message)s')
+    #formatter = logging.Formatter('%(asctime)s afb_worker    %(levelname)-10s %(message)s')
     handler.setFormatter(formatter)
 
     log.setLevel(logging.DEBUG)
@@ -205,12 +205,12 @@ def main():
     signal.signal(signal.SIGINT, sigIntHandler)
 
     #Handle rest of startup
-    log.info("221b_worker is starting")
+    log.info("afb_worker is starting")
     socketFile = sys.argv[1]
     global client
     client = communicator(socketFile, configCallback)
     asyncore.loop(use_poll=True)
-    log.info("Exiting 221b_worker with code 0")
+    log.info("Exiting afb_worker with code 0")
     sys.exit(0)
   except Exception as e:
     log.exception("Unhandled general exception: " + str(e) )
