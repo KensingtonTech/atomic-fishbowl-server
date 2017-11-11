@@ -18,6 +18,7 @@
     "moment": "^2.18.1",
     "mongodb": "^2.2.28",
     "mongoose": "^4.11.0",
+    "node-rest-client": "^3.1.0",
     "node-rsa": "^0.4.2",
     "passport": "^0.3.2",
     "passport-jwt": "^2.2.1",

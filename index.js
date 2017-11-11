@@ -30,6 +30,7 @@ const ExtractJwt = require('passport-jwt').ExtractJwt;
 var mongo = require('mongodb').MongoClient;
 const NodeRSA = require('node-rsa');
 const sleep = require('sleep');
+const restClient = require('node-rest-client').Client;
 const buildProperties = require('./build-properties');
 const version = `${buildProperties.major}.${buildProperties.minor}.${buildProperties.patch}.${buildProperties.build}-${buildProperties.level}`;
 var development = process.env.NODE_ENV !== 'production';
@@ -619,7 +620,14 @@ app.get('/api/collectiondata/:id', passport.authenticate('jwt', { session: false
 app.get('/api/nwservers', passport.authenticate('jwt', { session: false } ), (req, res) => {
   winston.info('GET /api/nwservers');
   try {
-    res.json(nwservers);
+    let servers = JSON.parse(JSON.stringify(nwservers));  // make deep copy of nwservers
+    for (let server in servers) {
+      // delete passwords - they don't need to be transferred back to the client
+      if (servers.hasOwnProperty(server)) {
+        servers[server].password = undefined;
+      }
+    }
+    res.json(servers);
   }
   catch(e) {
     winston.error('ERROR GET /api/nwservers', e);
@@ -648,9 +656,10 @@ app.post('/api/addnwserver', passport.authenticate('jwt', { session: false } ), 
   try {
     //winston.debug(req.body);
     let nwserver = req.body;
-    // winston.debug(nwserver);
-    let id = uuidV4();
-    nwserver['id'] = id;
+    if (!nwserver.id) {
+      throw("'id' is not defined");
+    }
+    let id = nwserver.id;
     if (!nwserver.friendlyName) {
       throw("'friendlyName' is not defined");
     }
@@ -664,7 +673,7 @@ app.post('/api/addnwserver', passport.authenticate('jwt', { session: false } ), 
       throw("'user' is not defined");
     }
     if (!nwserver.password) {
-      throw("'password' is not defined");
+      throw("'password' is not defined"); // we don't decrypt here.  We only decrypt when we build a worker config
     }
     if (typeof nwserver.ssl === 'undefined') {
       throw("'ssl' is not defined");
@@ -678,8 +687,113 @@ app.post('/api/addnwserver', passport.authenticate('jwt', { session: false } ), 
   }
   catch(e) {
     winston.error("POST /api/addnwserver: " + e);
-    res.sendStatus(500);
+    res.status(500).send( JSON.stringify({ error: e.message }));
   }
+});
+
+app.post('/api/editnwserver', passport.authenticate('jwt', { session: false } ), (req, res) => {
+  winston.info("POST /api/editnwserver");
+  try {
+    //winston.debug(req.body);
+    let nwserver = req.body;
+    if (!nwserver.id) {
+      throw("'id' is not defined");
+    }
+    let id = nwserver.id;
+    if (!nwserver.friendlyName) {
+      throw("'friendlyName' is not defined");
+    }
+    if (!nwserver.host) {
+      throw("'host' is not defined");
+    }
+    if (!nwserver.port) {
+      throw("'port' is not defined");
+    }
+    if (!nwserver.user) {
+      throw("'user' is not defined");
+    }
+    if (!nwserver.password) {
+      // throw("'password' is not defined"); // we don't decrypt here.  We only decrypt when we build a worker config
+      // use existing password
+      nwserver['password'] = nwservers[id].password;
+    }
+    if (typeof nwserver.ssl === 'undefined') {
+      throw("'ssl' is not defined");
+    }
+    nwservers[id] = nwserver;
+    db.collection('nwservers').updateOne( { id: id }, { $set: nwserver }, (err, res) => {
+      if (err) throw err;
+    });
+    
+    res.sendStatus(200);
+  }
+  catch(e) {
+    winston.error("POST /api/editnwserver: " + e);
+    res.status(500).send( JSON.stringify({ error: e.message }));
+  }
+});
+
+app.post('/api/testnwserver', passport.authenticate('jwt', { session: false } ), (req, res) => {
+  winston.info("POST /api/testnwserver");
+  try {
+    let nwserver = req.body;
+    var uPassword = '';
+    // console.log(nwserver);
+    if (nwserver.hasOwnProperty('id') && !(nwserver.hasOwnProperty('password'))) {
+      let id = nwserver.id;
+      uPassword = decryptor.decrypt(nwservers[id].password, 'utf8');
+    }
+    else if (nwserver.hasOwnProperty('id') && nwserver.hasOwnProperty('password')) {
+      let id = nwserver.id;
+      uPassword = decryptor.decrypt(nwserver.password, 'utf8');
+    }
+    else {
+      uPassword = decryptor.decrypt(nwserver.password, 'utf8');
+    }
+    // console.log(nwserver);
+    var host = nwserver.host;
+    var ssl = nwserver.ssl;
+    var port = nwserver.port;
+    var user = nwserver.user;
+    
+    //var uPassword = decryptor.decrypt(nwservers[id].password, 'utf8');
+    
+    var proto = 'http://'
+    if (ssl) {
+      proto = 'https://';
+    }
+    var url = `${proto}${host}:${port}`;
+
+  }
+  catch(e) {
+    winston.error("POST /api/testnwserver: " + e);
+    res.status(500).send(JSON.stringify({error: e.message}) );
+  }
+
+  // Now perform test
+  let options = { user: user, password: uPassword, responseConfig: {timeout: 1000}, connection: { rejectUnauthorized: false }}; // 
+  let client = new restClient(options);
+
+  client.get(url, (data, response) => {
+    // console.log(response);
+    if (response.statusCode == 200) {
+      winston.debug(`REST connection test to url ${url} was successful`);
+    }
+    else {
+      winston.debug(`REST connection test to url ${url} failed.`);  
+    }
+    // res.sendStatus(200);
+    res.status(response.statusCode).send( JSON.stringify( { error: response.statusMessage } ) );
+  }).on('error', err => {
+    winston.debug(`REST connection test to url ${url} failed.`);
+    // console.log(err);
+    //winston.info(`The error was:`, err);
+    res.status(403).send( JSON.stringify({ error: err.message }) );
+  });
+
+  // 200 = OK
+  // 403 = Not OK
+
 });
 
 app.get('/api/ping', (req, res)=>{
