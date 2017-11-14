@@ -24,6 +24,7 @@ from copy import deepcopy, copy
 from multiprocessing import Pool, Manager, Value, current_process
 import shlex
 import socket
+from httplib import BadStatusLine
 
 log = logging.getLogger(__name__)
 
@@ -142,8 +143,11 @@ class Fetcher:
               #Update dict
               self.sessions[sessionId] = thisSession
 
+    except BadStatusLine as e:
+      error = "Bad status raised whilst executing query.  This might be an SSL setting mismatch.  Run a Connection Test against your NetWitness server to check"
+      self.exitWithError(error)
     except urllib2.HTTPError as e:
-      error = "runQuery(): HTTP Error whilst running query.  Exiting with code 1: " + str(e)
+      error = "HTTP Error whilst running query.  Exiting with code 1: " + str(e)
       self.exitWithError(error)
     except socket.timeout as e:
       error = "Query to NetWitness service timed out after " + str(self.queryTimeout) + " seconds"

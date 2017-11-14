@@ -271,9 +271,9 @@ var useCases = [
     ]
   },
 
-  { name: 'contentinarchives', friendlyName: 'All Content Contained in Archives', query: "filetype = 'zip','rar'", contentTypes: [ 'images', 'pdfs', 'officedocs' ], description: 'Displays any content type contained within a ZIP or RAR archive.  It does not display dodgy archives' },
+  { name: 'contentinarchives', friendlyName: 'All Content Contained in Archives', query: "filetype = 'zip','rar' && filetype != 'office 2007 document'", contentTypes: [ 'images', 'pdfs', 'officedocs' ], description: 'Displays any content type contained within a ZIP or RAR archive.  It does not display dodgy archives' },
   
-  { name: 'contentinarchivesdodgy', friendlyName: 'All Content Contained in Archives (with Dodgy Archives)', query: "filetype = 'zip','rar'", contentTypes: [ 'images', 'pdfs', 'officedocs', 'dodgyarchives' ], description: 'Displays any content type contained within a ZIP or RAR archive.  It also displays dodgy archives' },
+  { name: 'contentinarchivesdodgy', friendlyName: 'All Content Contained in Archives (with Dodgy Archives)', query: "filetype = 'zip','rar' && filetype != 'office 2007 document'", contentTypes: [ 'images', 'pdfs', 'officedocs', 'dodgyarchives' ], description: 'Displays any content type contained within a ZIP or RAR archive.  It also displays dodgy archives' },
 
   { name: 'suspiciousdestcountries', friendlyName: 'Documents to Suspicious Destination Countries', query: `country.dst = 'russian federation','china','romania','belarus','iran, islamic republic of',"korea, democratic people's republic of",'ukraine','syrian arab republic','yemen' && filetype = 'zip','rar','pdf','office 2007 document'`, contentTypes: [ 'pdfs', 'officedocs', 'dodgyarchives' ], description: 'Displays documents and dodgy archives transferred to suspicious destination countries: Russia, China, Romania, Belarus, Iran, North Korea, Ukraine, Syra, or Yemen' },
 
@@ -713,7 +713,6 @@ app.post('/api/editnwserver', passport.authenticate('jwt', { session: false } ),
       throw("'user' is not defined");
     }
     if (!nwserver.password) {
-      // throw("'password' is not defined"); // we don't decrypt here.  We only decrypt when we build a worker config
       // use existing password
       nwserver['password'] = nwservers[id].password;
     }
@@ -771,10 +770,10 @@ app.post('/api/testnwserver', passport.authenticate('jwt', { session: false } ),
   }
 
   // Now perform test
-  let options = { user: user, password: uPassword, responseConfig: {timeout: 1000}, connection: { rejectUnauthorized: false }}; // 
+  let options = { user: user, password: uPassword, connection: { rejectUnauthorized: false }}; // {requestConfig: {timeout: 5000}, responseConfig: {timeout: 5000}},
   let client = new restClient(options);
 
-  client.get(url, (data, response) => {
+  let request = client.get(url, (data, response) => {
     // console.log(response);
     if (response.statusCode == 200) {
       winston.debug(`REST connection test to url ${url} was successful`);
@@ -790,6 +789,15 @@ app.post('/api/testnwserver', passport.authenticate('jwt', { session: false } ),
     //winston.info(`The error was:`, err);
     res.status(403).send( JSON.stringify({ error: err.message }) );
   });
+
+  /*request.on('requestTimeout', function (req) {
+    winston.debug('request has expired');
+    req.abort();
+  });
+  
+  request.on('responseTimeout', function (res) {
+    winston.debug('response has expired');
+  });*/
 
   // 200 = OK
   // 403 = Not OK
