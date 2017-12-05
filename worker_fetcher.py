@@ -845,6 +845,20 @@ class ContentProcessor:
       contentObj = ContentObj()
       contentObj.session = contentObj.session = sessionId
 
+      #if contentType == 'executable' and self.hashesAllowed:
+      if self.hashesAllowed: #hash check everything, including archives
+        contentObj.contentFile = filename
+        contentObj.setPartContent(part)
+        if len(md5Hashes) != 0:
+          contentObj.hashType = 'md5'
+          self.genHash(contentObj, md5Hashes)
+        if len(sha1Hashes) != 0:
+          contentObj.hashType = 'sha1'
+          self.genHash(contentObj, sha1Hashes)
+        if len(sha256Hashes) != 0:
+          contentObj.hashType = 'sha256'
+          self.genHash(contentObj, sha256Hashes)
+
       if contentType == 'image' and len(distillationTerms) == 0 and len(regexDistillationTerms) == 0 and self.imagesAllowed:
         contentObj.contentFile = filename
         contentObj.setPartContent(part)
@@ -863,19 +877,6 @@ class ContentProcessor:
         contentObj.setPartContent(part)
         if not self.processOfficeDoc(contentObj, distillationTerms, regexDistillationTerms):
           continue
-        
-      elif contentType == 'executable' and self.hashesAllowed:
-        contentObj.contentFile = filename
-        contentObj.setPartContent(part)
-        if len(md5Hashes) != 0:
-          contentObj.hashType = 'md5'
-          self.genHash(contentObj, md5Hashes)
-        if len(sha1Hashes) != 0:
-          contentObj.hashType = 'sha1'
-          self.genHash(contentObj, sha1Hashes)
-        if len(sha256Hashes) != 0:
-          contentObj.hashType = 'sha256'
-          self.genHash(contentObj, sha256Hashes)
       
 
 
@@ -1098,7 +1099,12 @@ class ContentProcessor:
       #log.debug("processExtractedFile(): processing '" + contentObj.contentType + "' as office document")
       self.processOfficeDoc(contentObj, distillationTerms, regexDistillationTerms)
 
-    elif fileType.startswith('application/') and self.hashesAllowed: #fix for executable
+    #else:
+      #log.debug() "processExtractedFile(): discarding " + archivedFilename + ' with MIME type ' + fileType)
+    #  pass
+
+    #elif fileType.startswith('application/') and self.hashesAllowed: #fix for executable
+    if self.hashesAllowed:
       #log.debug("processExtractedFile(): Processing '" + archivedFilename + "' as executable")
       if len(md5Hashes) != 0:
         contentObj.hashType = 'md5'
@@ -1109,10 +1115,6 @@ class ContentProcessor:
       if len(sha256Hashes) != 0:
         contentObj.hashType = 'sha256'
         self.genHash(contentObj, sha256Hashes)
-        
-    else:
-      #log.debug() "processExtractedFile(): discarding " + archivedFilename + ' with MIME type ' + fileType)
-      pass
 
   def convertPartToStringIO(self, part):
     output = StringIO.StringIO()
