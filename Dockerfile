@@ -22,7 +22,7 @@ COPY 221b-server.conf *.js *.js.map worker_stub.py *.so LICENSE.txt /opt/kentech
 #install our rpm dependencies
 ARG CACHE_DATE=2016-01-01
 RUN \
-#echo 172.16.110.11 kentechrepo >> /etc/hosts; \
+echo 172.16.110.11 kentechrepo >> /etc/hosts; \
 /bin/sed -i'' 's/mirrorlist=/#mirrorlist=/g' /etc/yum.repos.d/CentOS-Base.repo; \
 /bin/sed -i'' 's/#baseurl=http:\/\/mirror.centos.org/baseurl=http:\/\/kentechrepo/g' /etc/yum.repos.d/CentOS-Base.repo; \
 yum clean all; \
