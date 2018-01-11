@@ -124,8 +124,8 @@ process.on('SIGTERM', function() {
 var justInstalled = true;
 var preferences = {};
 var nwservers = {};
-var collections = {};
-var collectionsData = {};
+var collections = {}; // holds the high-level definition of a collection but not its content data
+var collectionsData = {}; // holds content data and session data
 
 const cfgDir = '/etc/kentech/221b';
 const certDir = cfgDir + '/certificates';
@@ -849,7 +849,9 @@ app.post('/api/setpreferences', passport.authenticate('jwt', { session: false } 
 
 app.post('/api/addcollection', passport.authenticate('jwt', { session: false } ), (req, res) => {
   winston.info("POST /api/addcollection");
+  // winston.debug(req);
   try {
+    let timestamp = new Date().getTime()
     //winston.debug(req.body);
     let collection = req.body;
     if (!('type' in collection)) {
@@ -890,6 +892,15 @@ app.post('/api/addcollection', passport.authenticate('jwt', { session: false } )
     }
     
     collection['state'] = 'initial';
+
+    let creator = {
+      username: req.user.username,
+      id: req.user.id,
+      fullname: req.user.fullname,
+      timestamp: timestamp
+    };
+    collection['creator'] = creator;
+
     collections[collection.id] = collection;
     let cDef = {
       images: [],
@@ -920,6 +931,7 @@ app.post('/api/addcollection', passport.authenticate('jwt', { session: false } )
 app.post('/api/editcollection', passport.authenticate('jwt', { session: false } ), (req, res) => {
   winston.info("POST /api/editcollection");
   try {
+    let timestamp = new Date().getTime()
     let collection = req.body;
     winston.debug('collection:', collection);
     let id = collection.id;
@@ -929,6 +941,14 @@ app.post('/api/editcollection', passport.authenticate('jwt', { session: false } 
     }
 
     // do something here to stop an existing rolling collection
+
+    let modifier = {
+      username: req.user.username,
+      id: req.user.id,
+      fullname: req.user.fullname,
+      timestamp: timestamp
+    };
+    collection['modifier'] = modifier;
 
     collections[id] = collection;
     let cDef = {
@@ -1043,7 +1063,7 @@ app.get('/api/getbuildingfixedcollection/:id', passport.authenticate('jwt', { se
       res.set('Content-Type', 'application/json');
       res.set('Content-Disposition', 'inline');
       res.set(200);
-      for (var i=0; i < collectionsData[id].images.length; i++) { //play back the image and session data already in buildingFixedCollections
+      for (var i=0; i < collectionsData[id].images.length; i++) { //play back the content and session data already in buildingFixedCollections
         var sessionId = collectionsData[id].images[i].session;
         let resp = {
           collectionUpdate: {
