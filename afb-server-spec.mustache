@@ -1,7 +1,7 @@
 %define name {{name}}
 %define release {{release}}
 %define buildroot %(mktemp -ud %{_tmppath}/%{name}-%{version}-%{release}-XXXXXX)
-%define username 221b-server
+%define username afb-server
 %{?systemd_requires}
 BuildRequires: systemd
 
@@ -59,7 +59,7 @@ getent passwd %{username} >/dev/null || useradd -r -g %{username} -G %{username}
 
 %install
 mkdir -p %{buildroot}%{_unitdir}
-mv 221b-server.service %{buildroot}%{_unitdir}
+mv afb-server.service %{buildroot}%{_unitdir}
 mkdir -p %{buildroot}{{installDir}}
 cp -r ./* %{buildroot}{{installDir}}
 
@@ -87,9 +87,9 @@ rm -rf %{buildroot}
 %exclude {{installDir}}/rpmbuild
 %exclude {{installDir}}/package.json
 %exclude {{installDir}}/package-lock.json
-%exclude {{installDir}}/221b-server-spec.mustache
-%{_unitdir}/221b-server.service
-%license 221b.license
+%exclude {{installDir}}/afb-server-spec.mustache
+%{_unitdir}/afb-server.service
+%license atomic-fishbowl.license
 %defattr(644, %{username}, %{username}, 755)
 {{installDir}}
 {{#hasExecutableFiles}}

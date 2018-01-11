@@ -54,7 +54,7 @@ if (development) {
 
 /*app.set('trust proxy', 1);
 app.use(session( {
-  name: 'twosession',
+  name: 'afbsession',
   secret: 'abc',
   cookie: { secure: false, httpOnly: false },
   //proxy: true,
@@ -127,15 +127,15 @@ var nwservers = {};
 var collections = {}; // holds the high-level definition of a collection but not its content data
 var collectionsData = {}; // holds content data and session data
 
-const cfgDir = '/etc/kentech/221b';
+const cfgDir = '/etc/kentech/afb';
 const certDir = cfgDir + '/certificates';
-const cfgFile = cfgDir + '/221b-server.conf';
+const cfgFile = cfgDir + '/afb-server.conf';
 const jwtPrivateKeyFile = certDir + '/ssl.key';
 const jwtPublicCertFile = certDir + '/ssl.cer';
 const internalPublicKeyFile = certDir + '/internal.pem';
 const internalPrivateKeyFile = certDir + '/internal.key';
 const collectionsUrl = '/collections';
-const dataDir = '/var/kentech/221b';
+const dataDir = '/var/kentech/afb';
 const collectionsDir = dataDir + '/collections';
 const sofficeProfilesDir = dataDir + '/sofficeProfiles';
 
@@ -332,9 +332,9 @@ var jwtOpts = {
 // We use mongoose for auth, and MongoClient for everything else.  This is because Passport-Local Mongoose required it, and it is ill-suited to the free-formish objects which we want to use.
 var tokenBlacklist = {};
 
-var mongoUrl = `mongodb://${config['dbConfig']['host']}:${config['dbConfig']['port']}/221b`;
+var mongoUrl = `mongodb://${config['dbConfig']['host']}:${config['dbConfig']['port']}/afb`;
 if (config.dbConfig.authentication.enabled) {
-  mongoUrl = `mongodb://${config.dbConfig.authentication.user}:${config.dbConfig.authentication.password}@${config['dbConfig']['host']}:${config['dbConfig']['port']}/221b?authSource=admin`;
+  mongoUrl = `mongodb://${config.dbConfig.authentication.user}:${config.dbConfig.authentication.password}@${config['dbConfig']['host']}:${config['dbConfig']['port']}/afb?authSource=admin`;
 }
 connectToDB(); // this must come before mongoose user connection so that we know whether to create the default admin account
 
@@ -1781,7 +1781,7 @@ function runRollingCollection(collectionId, res, clientSessionId='') {
 
 
 app.get('/api/pausemonitoringcollection/:id', passport.authenticate('jwt', { session: false } ), (req, res) => {
-  let clientSessionId = req.headers['twosessionid'];
+  let clientSessionId = req.headers['afbsessionid'];
   winston.info(`GET /api/pausemonitoringcollection/:id: Pausing monitoring collection ${clientSessionId}`);
   // rollingCollectionSubjects[id]['paused'] = true;
   rollingCollectionSubjects[clientSessionId]['paused'] = true;
@@ -1791,7 +1791,7 @@ app.get('/api/pausemonitoringcollection/:id', passport.authenticate('jwt', { ses
 app.get('/api/unpausemonitoringcollection/:id', passport.authenticate('jwt', { session: false } ), (req, res) => {
   // This only gets used by the client if a monitoring collection is paused and then resumed within the minute the run is permitted to continue executing
   // Otherwise, the client will simply call /api/getrollingcollection/:id again
-  let clientSessionId = req.headers['twosessionid'];
+  let clientSessionId = req.headers['afbsessionid'];
   winston.info(`GET /api/unpausemonitoringcollection/:id: Resuming monitoring collection ${clientSessionId}`);
   // rollingCollectionSubjects[id]['paused'] = false;
   rollingCollectionSubjects[clientSessionId]['paused'] = false;
@@ -1803,7 +1803,7 @@ app.get('/api/getrollingcollection/:collectionId', passport.authenticate('jwt', 
   // Builds and streams a rolling or monitoring collection back to the client.  Handles the client connection and kicks off the process
 
   let collectionId = req.params.collectionId;
-  let clientSessionId = req.headers['twosessionid'];
+  let clientSessionId = req.headers['afbsessionid'];
 
 
 /*
@@ -2061,10 +2061,10 @@ function mongooseInitFunc() {
   passport.deserializeUser(User.deserializeUser());
 
   // Connect to Mongoose
-  var mongooseUrl = `mongodb://${config['dbConfig']['host']}:${config['dbConfig']['port']}/221b_users`
+  var mongooseUrl = `mongodb://${config['dbConfig']['host']}:${config['dbConfig']['port']}/afb_users`
   var mongooseOptions = { useMongoClient: true, promiseLibrary: global.Promise };
   if (config.dbConfig.authentication.enabled) {
-    mongooseUrl = `mongodb://${config.dbConfig.authentication.user}:${config.dbConfig.authentication.password}@${config['dbConfig']['host']}:${config['dbConfig']['port']}/221b_users?authSource=admin`;
+    mongooseUrl = `mongodb://${config.dbConfig.authentication.user}:${config.dbConfig.authentication.password}@${config['dbConfig']['host']}:${config['dbConfig']['port']}/afb_users?authSource=admin`;
   }
   
   let mongooseOnConnectFunc = () => {

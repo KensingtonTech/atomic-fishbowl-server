@@ -1,14 +1,14 @@
 {
-  "name": "221b-server",
+  "name": "atomic-fishbowl-server",
   "version": "1.0.0",
-  "description": "API Server for 221B",
+  "description": "API Server for Atomic Fishbowl",
   "main": "index.js",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
     "start": "node index.js"
   },
   "author": "Kensington Technology Associates, Limited",
-  "license": "SEE LICENSE IN 221b.license",
+  "license": "SEE LICENSE IN atomic-fishbowl.license",
   "dependencies": {
     "body-parser": "^1.17.1",
     "cookie-parser": "^1.4.3",
@@ -34,11 +34,11 @@
     "winston": "^2.3.1"
   },
   "spec": {
-    "installDir": "/opt/kentech/221b-server/bin",
-    "specTemplate": "221b-server-spec.mustache",
+    "installDir": "/opt/kentech/afb-server/bin",
+    "specTemplate": "afb-server-spec.mustache",
     "noarch": false,
     "executable": [
-      "./221b_worker.py"
+      "./worker_stub.py"
     ],
     "requires": [
       "unrar",

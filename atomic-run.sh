@@ -1,6 +1,6 @@
 #!/bin/bash
 
-ETCDIR=/etc/kentech/221b
+ETCDIR=/etc/kentech/afb
 CERTDIR=$ETCDIR/certificates
 
 # Check if existing container is already running
@@ -52,7 +52,7 @@ if [ $? -eq 0 ]; then
   fi
 
 
-  if [ -f $HOST/etc/systemd/system/221b-server.service ]; then
+  if [ -f $HOST/etc/systemd/system/afb-server.service ]; then
     # our systemd unit is installed so start with systemd
     chroot $HOST /usr/bin/systemctl start $NAME
   

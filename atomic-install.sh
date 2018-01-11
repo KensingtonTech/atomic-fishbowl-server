@@ -1,8 +1,8 @@
 #!/bin/bash
 
-ETCDIR=/etc/kentech/221b
+ETCDIR=/etc/kentech/afb
 CERTDIR=$ETCDIR/certificates
-CFGFILE=221b-server.conf
+CFGFILE=afb-server.conf
 
 if [ ! -d ${HOST}${ETCDIR} ]; then
   echo Creating $ETCDIR
@@ -15,11 +15,11 @@ if [ ! -d ${HOST}${CERTDIR} ]; then
 fi
 
 # Create a .default version of our cfg file for reference
-cp -f /opt/kentech/221b-server/bin/$CFGFILE ${HOST}${ETCDIR}/${CFGFILE}.default
+cp -f /opt/kentech/afb-server/bin/$CFGFILE ${HOST}${ETCDIR}/${CFGFILE}.default
 if [ ! -f ${HOST}${ETCDIR}/$CFGFILE ]; then
   # If our cfg file doesn't exist on the host, then create it
-  echo "Creating 221B server configuration file"
-  mv -f /opt/kentech/221b-server/bin/$CFGFILE ${HOST}${ETCDIR}/${CFGFILE}
+  echo "Creating Atomic Fishbowl server configuration file"
+  mv -f /opt/kentech/afb-server/bin/$CFGFILE ${HOST}${ETCDIR}/${CFGFILE}
 fi
 
 # Stop existing container, if already running
@@ -38,11 +38,11 @@ if [ $? -eq 0 ]; then
   chroot $HOST /usr/bin/docker rm $NAME >/dev/null
 fi
 
-# Create network '221b-network' if not already there
-chroot $HOST /usr/bin/docker network ls  | awk '{print $2}' | grep -q ^221b-network$
+# Create network 'afb-network' if not already there
+chroot $HOST /usr/bin/docker network ls  | awk '{print $2}' | grep -q ^afb-network$
 if [ $? -ne 0 ]; then
-  echo Creating bridge network 221b-network
-  chroot $HOST /usr/bin/docker network create --subnet 172.31.255.240/28 --gateway 172.31.255.241 -d bridge 221b-network >/dev/null
+  echo Creating bridge network afb-network
+  chroot $HOST /usr/bin/docker network create --subnet 172.31.255.240/28 --gateway 172.31.255.241 -d bridge afb-network >/dev/null
 fi
 
 # We need both internal.key and internal.cer to exist
@@ -74,7 +74,7 @@ fi
 
 # Create container
 echo Creating container $NAME from image $IMAGE
-chroot $HOST /usr/bin/docker create --name $NAME --network 221b-network --ip 172.31.255.243 --add-host 221b-mongo:172.31.255.242 -v /etc/kentech:/etc/kentech:ro -v /var/kentech:/var/kentech:rw,z -e SYSTEMD=1 $IMAGE >/dev/null
+chroot $HOST /usr/bin/docker create --name $NAME --network afb-network --ip 172.31.255.243 --add-host afb-mongo:172.31.255.242 -v /etc/kentech:/etc/kentech:ro -v /var/kentech:/var/kentech:rw,z -e SYSTEMD=1 $IMAGE >/dev/null
 
 # Copy systemd unit file to host OS
 echo Installing systemd unit file

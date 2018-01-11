@@ -7,7 +7,7 @@ from collections import OrderedDict
 #import pymongo
 from pymongo import MongoClient
 mongo = MongoClient('mongodb://localhost:27017')
-db = mongo['221b']
+db = mongo['afb']
 
 collectionsFilename = './etc/collections.cfg'
 collectionDefsFilename = './etc/collectiondefs.cfg'
