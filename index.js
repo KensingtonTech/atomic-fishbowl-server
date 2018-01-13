@@ -806,7 +806,7 @@ app.post('/api/testnwserver', passport.authenticate('jwt', { session: false } ),
 
 app.get('/api/ping', (req, res)=>{
   //winston.debug("GET /api/ping");
-  res.sendStatus(200);
+  res.status(200).send( JSON.stringify( { 'status': 'ok' } ) );
 });
 
 app.get('/api/preferences', passport.authenticate('jwt', { session: false } ), (req, res) => {
