@@ -447,11 +447,13 @@ app.post('/api/adduser', passport.authenticate('jwt', { session: false } ), (req
   User.register(new User({ id: uuidV4(), username : u.username, fullname: u.fullname, email: u.email, enabled: u.enabled }), u.password, (err, user) => {
     if (err) {
       winston.error("adding user " + u.username + ':', err);
-      res.sendStatus(500);
+      // res.sendStatus(500);
+      res.status(500).send( JSON.stringify( { 'status': 'ok' } ) );
     }
     else {
       winston.info("User added:", u.username);
-      res.sendStatus(201);
+      // res.sendStatus(201);
+      res.status(201).send( JSON.stringify( { 'status': 'ok' } ) );
     }
   });
 });
@@ -467,7 +469,8 @@ function updateUser(req, res) {
     }
     else {
       winston.info("Updated user with id:", u.id);
-      res.sendStatus(201);
+      // res.sendStatus(201);
+      res.status(201).send( JSON.stringify( { 'status': 'ok' } ) );
     }
   });
 
@@ -504,6 +507,7 @@ app.post('/api/updateuser', passport.authenticate('jwt', { session: false } ), (
               if (err) throw(err);
               delete u.password; //we don't want this getting set when we update the user object
               updateUser(req, res);
+              // res.json( { 'status': 'ok' } );
             });
           });
         });
@@ -683,7 +687,8 @@ app.post('/api/addnwserver', passport.authenticate('jwt', { session: false } ), 
       if (err) throw err;
     });
     
-    res.sendStatus(201);
+    // res.sendStatus(201);
+    res.status(201).send( JSON.stringify( { 'status': 'ok' } ) );
   }
   catch(e) {
     winston.error("POST /api/addnwserver: " + e);
@@ -724,7 +729,8 @@ app.post('/api/editnwserver', passport.authenticate('jwt', { session: false } ),
       if (err) throw err;
     });
     
-    res.sendStatus(200);
+    // res.sendStatus(200);
+    res.status(200).send( JSON.stringify( { 'status': 'ok' } ) );
   }
   catch(e) {
     winston.error("POST /api/editnwserver: " + e);
@@ -836,7 +842,8 @@ app.post('/api/setpreferences', passport.authenticate('jwt', { session: false } 
     }
 
     preferences = prefs;
-    res.sendStatus(201);
+    // res.sendStatus(201);
+    res.status(201).send( JSON.stringify( { 'status': 'ok' } ) );
     writePreferences();
   }
   catch(e) {
@@ -914,7 +921,8 @@ app.post('/api/addcollection', passport.authenticate('jwt', { session: false } )
       if (err) throw err;
       db.collection('collectionsData').insertOne( { id: collection.id, data: JSON.stringify(cDef)}, (err) => {
         if (err) throw err;
-        res.sendStatus(201);
+        // res.sendStatus(201);
+        res.status(201).send( JSON.stringify( { 'status': 'ok' } ) );
       });
     });
     
@@ -966,7 +974,8 @@ app.post('/api/editcollection', passport.authenticate('jwt', { session: false } 
         // Update collection data in mongo
         if (err) throw err;
 
-        res.sendStatus(205);
+        // res.sendStatus(205);
+        res.status(205).send( JSON.stringify( { 'status': 'ok' } ) );
       });
     });
 
