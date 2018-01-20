@@ -6,6 +6,7 @@ const Observable = require('rxjs/Observable').Observable;
 const Subject = require('rxjs/Subject').Subject;
 const express = require('express');
 const app = express();
+const multer  = require('multer');
 const session = require('express-session');
 const bodyParser = require('body-parser');
 const listenPort = 3002;
@@ -47,6 +48,7 @@ if (development) {
   pdftotextPath = '/opt/local/bin/pdftotext';
   unrarPath = '/opt/local/bin/unrar';
 }
+// import { Buffer } from 'buffer';
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////////EXPRESS////////////////////////////////////////////////////////////////
@@ -126,6 +128,7 @@ var preferences = {};
 var nwservers = {};
 var collections = {}; // holds the high-level definition of a collection but not its content data
 var collectionsData = {}; // holds content data and session data
+var feeds = {}; // holds definitions for hash data CSV's
 
 const cfgDir = '/etc/kentech/afb';
 const certDir = cfgDir + '/certificates';
@@ -138,6 +141,11 @@ const collectionsUrl = '/collections';
 const dataDir = '/var/kentech/afb';
 const collectionsDir = dataDir + '/collections';
 const sofficeProfilesDir = dataDir + '/sofficeProfiles';
+const feedsDir = dataDir + '/feeds';
+const tempDir = dataDir + '/tmp'; // used for temporary holding of uploaded files
+
+// Multipart upload config
+const upload = multer({ dest: tempDir });
 
 try {
   // Read in config file
@@ -195,7 +203,14 @@ if ( !fs.existsSync(sofficeProfilesDir) ) {
   winston.info(`Creating soffice profiles directory at ${sofficeProfilesDir}`);
   fs.mkdirSync(sofficeProfilesDir);
 }
-
+if ( !fs.existsSync(feedsDir) ) {
+  winston.info(`Creating feeds directory at ${feedsDir}`);
+  fs.mkdirSync(feedsDir);
+}
+if ( !fs.existsSync(tempDir) ) {
+  winston.info(`Creating temp directory at ${tempDir}`);
+  fs.mkdirSync(tempDir);
+}
 
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -207,7 +222,7 @@ var defaultPreferences = {
   nwInvestigateUrl: '',
   defaultNwQuery: "filetype = 'jpg','gif','png','pdf','zip','rar','windows executable','x86 pe','windows dll','x64pe','apple executable (pef)','apple executable (mach-o)'",
   defaultQuerySelection : "All Supported File Types",
-  defaultImageLimit: 1000,
+  defaultContentLimit: 1000,
   defaultRollingHours: 1,
   minX: 255,
   minY: 255,
@@ -377,7 +392,7 @@ app.get('/api/logout', passport.authenticate('jwt', { session: false } ), (req,r
   // winston.debug("decoded tokenId:", tokenId);
   tokenBlacklist[tokenId] = tokenId;
   res.clearCookie('access_token');
-  res.sendStatus(200);
+  res.status(200).send(JSON.stringify( { 'status': 'ok' } ));
 });
 
 app.get('/api/isloggedin', passport.authenticate('jwt', { session: false } ), (req, res) => {
@@ -440,23 +455,22 @@ app.get('/api/user/:uname', passport.authenticate('jwt', { session: false } ), (
 });  
 
 app.post('/api/adduser', passport.authenticate('jwt', { session: false } ), (req, res) => {
-  winston.info("POST /api/adduser");
+  winston.info("POST /api/adduser for user " + req.body.username);
   let u = req.body;
   let uPassword = decryptor.decrypt(u.password, 'utf8');
   u.password = uPassword;
   User.register(new User({ id: uuidV4(), username : u.username, fullname: u.fullname, email: u.email, enabled: u.enabled }), u.password, (err, user) => {
     if (err) {
-      winston.error("adding user " + u.username + ':', err);
-      // res.sendStatus(500);
-      res.status(500).send( JSON.stringify( { 'status': 'ok' } ) );
+      winston.error("Error adding user " + u.username  + " by user " + req.body.username + ' : ' + err);
+      res.status(500).send( JSON.stringify( { 'status': 'error', 'message': err } ) );
     }
     else {
-      winston.info("User added:", u.username);
-      // res.sendStatus(201);
+      winston.info("User " + req.body.username + " added user " + u.username);
       res.status(201).send( JSON.stringify( { 'status': 'ok' } ) );
     }
   });
 });
+
 
 function updateUser(req, res) {
   let u = req.body;
@@ -566,6 +580,17 @@ app.get('/api/collections', passport.authenticate('jwt', { session: false } ), (
   }
 });
 
+app.get('/api/feeds', passport.authenticate('jwt', { session: false } ), (req,res) => {
+  winston.info('GET /api/feeds');
+  try {
+    res.json(feeds);
+  }
+  catch(e) {
+    winston.error('ERROR GET /api/feeds:', e);
+    res.sendStatus(500);
+  }
+});
+
 function getCollectionPosition(id) {
   for(var i=0; i < collections.length; i++) {
     let col = collections[i];
@@ -582,7 +607,7 @@ app.delete('/api/collection/:id', passport.authenticate('jwt', { session: false 
     if (collectionsData[id]) {
       delete collectionsData[id];
       delete collections[id];
-      res.sendStatus(204);
+      res.status(204).send( JSON.stringify( {'status': 'ok'} ) );
     }
     else {
       res.body="Collection not found";
@@ -606,8 +631,39 @@ app.delete('/api/collection/:id', passport.authenticate('jwt', { session: false 
   catch(e) {
     winston.error('ERROR removing directory' + collectionsDir + '/' + id + ':', e);
   }
-
 });
+
+
+app.delete('/api/feed/:id', passport.authenticate('jwt', { session: false } ), (req, res) => {
+  let id = req.params.id;
+  winston.info(`DELETE /api/feed/${id}`);
+  try {
+    if (id in feeds) {
+      fs.unlink(feedsDir + '/' + feeds[id].internalFilename);
+      db.collection('feeds').remove( { 'id': id }, (err, result) => {
+        if (err) throw err;
+        delete feeds[id];
+        res.status(204).send( JSON.stringify( { status: 'ok'} ) );
+      });
+    }
+    else {
+      res.status(400).send( JSON.stringify( { status: 'error', error: 'Feed not found' } ) );
+    }
+  }
+  catch(e) {
+    winston.error(`ERROR DELETE /api/feed/${id} :`, e);
+    res.status(500).send( JSON.stringify( { status: 'error', error: e } ) );
+  }
+  
+  /*
+  try { 
+    rimraf( collectionsDir + '/' + id, () => {} );
+  } 
+  catch(e) {
+    winston.error('ERROR removing directory' + collectionsDir + '/' + id + ':', e);
+  }*/
+});
+
 
 app.get('/api/collectiondata/:id', passport.authenticate('jwt', { session: false } ), (req, res) => {
   let id = req.params.id;
@@ -644,7 +700,7 @@ app.delete('/api/nwserver/:id', passport.authenticate('jwt', { session: false } 
   winston.info(`DELETE /api/nwserver/${servId}`);
   try {
     delete nwservers[servId];
-    res.sendStatus(204);
+    res.status(204).send( JSON.stringify( {'status': 'ok'} ) );
     db.collection('nwservers').remove( { 'id': servId }, (err, res) => {
       if (err) throw err;
     });
@@ -692,6 +748,85 @@ app.post('/api/addnwserver', passport.authenticate('jwt', { session: false } ), 
   }
   catch(e) {
     winston.error("POST /api/addnwserver: " + e);
+    res.status(500).send( JSON.stringify({ error: e.message }));
+  }
+});
+
+app.post('/api/addfeed', passport.authenticate('jwt', { session: false } ), upload.single('file'), (req, res) => {
+  winston.info("POST /api/addfeed");
+  // winston.debug('req:', req);
+  let timestamp = new Date().getTime();
+  try {
+    // winston.debug(req.body);
+    let feed = JSON.parse(req.body.model);
+    // winston.debug('req.file:', req.file);
+    // winston.debug('feed:', feed);
+    if (!('id' in feed)) {
+      throw("'id' is not defined");
+    }
+
+    let id = feed.id;
+    if (!('name' in feed)) {
+      throw("'name' is not defined");
+    }
+
+    if (!('type' in feed)) {
+      throw("'type' is not defined");
+    }
+
+    if (!('delimiter' in feed)) {
+      throw("'delimiter' is not defined");
+    }
+
+    if (!('headerRow' in feed)) {
+      throw("'headerRow' is not defined");
+    }
+
+    if (!('headerRow' in feed)) {
+      throw("'headerRow' is not defined");
+    }
+
+    if (!('valueColumn' in feed)) {
+      throw("'valueColumn' is not defined");
+    }
+
+    if (!('typeColumn' in feed)) {
+      throw("'typeColumn' is not defined");
+    }
+
+    if (!('friendlyNameColumn' in feed)) {
+      throw("'friendlyNameColumn' is not defined");
+    }
+
+    if (!('filename' in req.file)) {
+      throw("'filename' not found in file definition");
+    }
+
+    if (!('path' in req.file)) {
+      throw("'path' not found in file definition");
+    }
+
+    let creator = {
+      username: req.user.username,
+      id: req.user.id,
+      fullname: req.user.fullname,
+      timestamp: timestamp
+    };
+    feed['creator'] = creator;
+
+    feed['internalFilename'] = req.file.filename;
+    fs.rename(req.file.path, feedsDir + '/' + req.file.filename, (err) => winston.error('error moving file to feedsDir:', err) );
+
+    feeds[id] = feed;
+
+    db.collection('feeds').insertOne( feed, (err, res) => {
+      if (err) throw err;
+    });
+    
+    res.status(201).send( JSON.stringify( { 'status': 'ok' } ) );
+  }
+  catch(e) {
+    winston.error("POST /api/addfeed: " + e);
     res.status(500).send( JSON.stringify({ error: e.message }));
   }
 });
@@ -858,7 +993,7 @@ app.post('/api/addcollection', passport.authenticate('jwt', { session: false } )
   winston.info("POST /api/addcollection");
   // winston.debug(req);
   try {
-    let timestamp = new Date().getTime()
+    let timestamp = new Date().getTime();
     //winston.debug(req.body);
     let collection = req.body;
     if (!('type' in collection)) {
@@ -898,7 +1033,7 @@ app.post('/api/addcollection', passport.authenticate('jwt', { session: false } )
       }
     }
     
-    collection['state'] = 'initial';
+    // collection['state'] = 'initial';
 
     let creator = {
       username: req.user.username,
@@ -939,7 +1074,7 @@ app.post('/api/addcollection', passport.authenticate('jwt', { session: false } )
 app.post('/api/editcollection', passport.authenticate('jwt', { session: false } ), (req, res) => {
   winston.info("POST /api/editcollection");
   try {
-    let timestamp = new Date().getTime()
+    let timestamp = new Date().getTime();
     let collection = req.body;
     winston.debug('collection:', collection);
     let id = collection.id;
@@ -1128,7 +1263,7 @@ function fixedSocketConnectionHandler(id, socket, tempName, subject) {
     state: 'building',
     timeBegin: thisCollection.timeBegin,
     timeEnd: thisCollection.timeEnd,
-    imageLimit: thisCollection.imageLimit,
+    contentLimit: thisCollection.contentLimit,
     minX: thisCollection.minX,
     minY: thisCollection.minY,
     gsPath: gsPath,
@@ -1142,9 +1277,8 @@ function fixedSocketConnectionHandler(id, socket, tempName, subject) {
     contentTimeout: preferences.contentTimeout,
     privateKeyFile: internalPrivateKeyFile,
     maxContentErrors: preferences.maxContentErrors,
-    md5Enabled: false,
-    sha1Enabled: false,
-    sha256Enabled: false
+    feedsDir: feedsDir,
+    useHashFeed: thisCollection.useHashFeed
   };
 
   if (thisCollection.bound) {
@@ -1166,13 +1300,30 @@ function fixedSocketConnectionHandler(id, socket, tempName, subject) {
     // we don't yet support any hashing in OOTB use cases
   }
   else {
-    // This is not an OOTB use case
+    // This is custom use case, not an OOTB use case
 
     cfg['distillationEnabled'] = thisCollection.distillationEnabled;
     cfg['regexDistillationEnabled'] = thisCollection.regexDistillationEnabled;
-    cfg['md5Enabled'] = thisCollection.md5Enabled;
-    cfg['sha1Enabled'] = thisCollection.sha1Enabled;
-    cfg['sha256Enabled'] = thisCollection.sha256Enabled;
+
+    if (!thisCollection.useHashFeed) {
+      // we're not using a hash feed
+      cfg['md5Enabled'] = thisCollection.md5Enabled;
+      cfg['sha1Enabled'] = thisCollection.sha1Enabled;
+      cfg['sha256Enabled'] = thisCollection.sha256Enabled;
+      if ('md5Hashes' in thisCollection) {
+        cfg['md5Hashes'] = thisCollection.md5Hashes;
+      }
+      if ('sha1Hashes' in thisCollection) {
+        cfg['sha1Hashes'] = thisCollection.sha1Hashes;
+      }
+      if ('sha256Hashes' in thisCollection) {
+        cfg['sha256Hashes'] = thisCollection.sha256Hashes;
+      }
+    }
+    else {
+      // we're using a hash feed
+      cfg['hashFeed'] = feeds[thisCollection.hashFeed] // pass the hash feed definition
+    }
 
     cfg['query'] = thisCollection.query;
     cfg['contentTypes'] = thisCollection.contentTypes;
@@ -1182,15 +1333,6 @@ function fixedSocketConnectionHandler(id, socket, tempName, subject) {
     }
     if ('regexDistillationTerms' in thisCollection) {
       cfg['regexDistillationTerms'] = thisCollection.regexDistillationTerms;
-    }
-    if ('md5Hashes' in thisCollection) {
-      cfg['md5Hashes'] = thisCollection.md5Hashes;
-    }
-    if ('sha1Hashes' in thisCollection) {
-      cfg['sha1Hashes'] = thisCollection.sha1Hashes;
-    }
-    if ('sha256Hashes' in thisCollection) {
-      cfg['sha256Hashes'] = thisCollection.sha256Hashes;
     }
   }
 
@@ -1462,7 +1604,7 @@ function rollingCollectionSocketConnectionHandler(id, socket, tempName, subject,
     id: rollingId,
     collectionId: id, // original collection ID
     state: ourState,
-    imageLimit: thisCollection.imageLimit,
+    contentLimit: thisCollection.contentLimit,
     minX: thisCollection.minX,
     minY: thisCollection.minY,
     gsPath: gsPath,
@@ -1476,9 +1618,8 @@ function rollingCollectionSocketConnectionHandler(id, socket, tempName, subject,
     contentTimeout: preferences.contentTimeout,
     privateKeyFile: internalPrivateKeyFile,
     maxContentErrors: preferences.maxContentErrors,
-    md5Enabled: false,
-    sha1Enabled: false,
-    sha256Enabled: false
+    feedsDir: feedsDir,
+    useHashFeed: thisCollection.useHashFeed
 
     // query: thisCollection.query,
     // regexDistillationEnabled: thisCollection.regexDistillationEnabled,
@@ -1511,9 +1652,26 @@ function rollingCollectionSocketConnectionHandler(id, socket, tempName, subject,
     // This is not an OOTB use case
     cfg['distillationEnabled'] = thisCollection.distillationEnabled;
     cfg['regexDistillationEnabled'] = thisCollection.regexDistillationEnabled;
-    cfg['md5Enabled'] = thisCollection.md5Enabled;
-    cfg['sha1Enabled'] = thisCollection.sha1Enabled;
-    cfg['sha256Enabled'] = thisCollection.sha256Enabled;
+    
+    if (!thisCollection.useHashFeed) {
+      // we're not using a hash feed
+      cfg['md5Enabled'] = thisCollection.md5Enabled;
+      cfg['sha1Enabled'] = thisCollection.sha1Enabled;
+      cfg['sha256Enabled'] = thisCollection.sha256Enabled;
+      if ('md5Hashes' in thisCollection) {
+        cfg['md5Hashes'] = thisCollection.md5Hashes;
+      }
+      if ('sha1Hashes' in thisCollection) {
+        cfg['sha1Hashes'] = thisCollection.sha1Hashes;
+      }
+      if ('sha256Hashes' in thisCollection) {
+        cfg['sha256Hashes'] = thisCollection.sha256Hashes;
+      }
+    }
+    else {
+      // we're using a hash feed
+      cfg['hashFeed'] = feeds[thisCollection.hashFeed] // pass the hash feed definition
+    }
 
     cfg['query'] = thisCollection.query;
     cfg['contentTypes'] = thisCollection.contentTypes;
@@ -1523,15 +1681,6 @@ function rollingCollectionSocketConnectionHandler(id, socket, tempName, subject,
     }
     if ('regexDistillationTerms' in thisCollection) {
       cfg['regexDistillationTerms'] = thisCollection.regexDistillationTerms;
-    }
-    if ('md5Hashes' in thisCollection) {
-      cfg['md5Hashes'] = thisCollection.md5Hashes;
-    }
-    if ('sha1Hashes' in thisCollection) {
-      cfg['sha1Hashes'] = thisCollection.sha1Hashes;
-    }
-    if ('sha256Hashes' in thisCollection) {
-      cfg['sha256Hashes'] = thisCollection.sha256Hashes;
     } 
   }
 
@@ -2185,6 +2334,17 @@ function connectToDB() {
              }
            });
         }
+
+        if (cols[i].name == "feeds") {
+          winston.debug("Reading feeds");
+          db.collection('feeds').find({}).toArray( (err, res) => {
+             for (let x = 0; x < res.length; x++) {
+                let id = res[x].id;
+                feeds[id] = res[x];
+             }
+             // cleanRollingDirs();
+           });
+        }
       
         if (cols[i].name == "collections") {
           winston.debug("Reading collections");
@@ -2206,7 +2366,8 @@ function connectToDB() {
                 collectionsData[id] = JSON.parse(res[x].data);
              }
            });
-        }    
+        }
+
       }
 
       if (!foundPrefs) {
