@@ -1277,7 +1277,6 @@ function fixedSocketConnectionHandler(id, socket, tempName, subject) {
     contentTimeout: preferences.contentTimeout,
     privateKeyFile: internalPrivateKeyFile,
     maxContentErrors: preferences.maxContentErrors,
-    feedsDir: feedsDir,
     useHashFeed: thisCollection.useHashFeed
   };
 
@@ -1323,6 +1322,7 @@ function fixedSocketConnectionHandler(id, socket, tempName, subject) {
     else {
       // we're using a hash feed
       cfg['hashFeed'] = feeds[thisCollection.hashFeed] // pass the hash feed definition
+      cfg['hashFeederSocket'] = feederSocket
     }
 
     cfg['query'] = thisCollection.query;
@@ -1381,7 +1381,8 @@ function fixedSocketConnectionHandler(id, socket, tempName, subject) {
   });
                           
   // Send configuration to worker.  This officially kicks off the work.  After this, we should start receiving data on the socket
-  socket.write(JSON.stringify(outerCfg) + '\n'); 
+  // socket.write(JSON.stringify(outerCfg) + '\n');
+  writeToSocket(socket, JSON.stringify(outerCfg));
   
 }
 
@@ -1618,7 +1619,6 @@ function rollingCollectionSocketConnectionHandler(id, socket, tempName, subject,
     contentTimeout: preferences.contentTimeout,
     privateKeyFile: internalPrivateKeyFile,
     maxContentErrors: preferences.maxContentErrors,
-    feedsDir: feedsDir,
     useHashFeed: thisCollection.useHashFeed
 
     // query: thisCollection.query,
@@ -1671,6 +1671,7 @@ function rollingCollectionSocketConnectionHandler(id, socket, tempName, subject,
     else {
       // we're using a hash feed
       cfg['hashFeed'] = feeds[thisCollection.hashFeed] // pass the hash feed definition
+      cfg['hashFeederSocket'] = feederSocket
     }
 
     cfg['query'] = thisCollection.query;
@@ -1763,7 +1764,8 @@ function rollingCollectionSocketConnectionHandler(id, socket, tempName, subject,
   });
 
   // Send configuration to worker.  This officially kicks off the work.  After this, we should start receiving data on the socket
-  socket.write(JSON.stringify(outerCfg) + '\n'); 
+  // socket.write(JSON.stringify(outerCfg) + '\n'); 
+  writeToSocket(socket, JSON.stringify(outerCfg));
   socket.end();
   
 }
@@ -2273,7 +2275,8 @@ function mongooseInitFunc() {
   let mongooseConnectFunc = () => {
     mongoose.connect(mongooseUrl, mongooseOptions )
             .then( () => mongooseOnConnectFunc() )
-            .then( () => listener() )
+            .then( () => startFeeder() )
+            // .then( () => listener() ) // now starting after feeder is running
             .catch( (err) => {
               winston.error('Mongoose error whilst connecting to mongo.  Exiting with code 1.');
               winston.error(err);
@@ -2435,6 +2438,48 @@ function createDefaultUser() {
 
 function sortNumber(a, b) {
   return b - a;
+}
+
+var newChunkHandler = (data, chunk, callback) => {
+  // Handles socket data received from the feeder process
+
+  winston.debug('Processing update');
+  data += chunk
+
+  var splt = data.split("\n").filter( (el) => { return el.length != 0});
+
+  if ( splt.length == 1 && data.indexOf("\n") === -1 ) {
+    // This case means the split resulted in only one element and that doesn't contain the newline delimiter, which means we haven't received an entire update yet...
+    // we'll continue and wait for the next update which will hopefully contain the delimeter
+    return data;
+  }
+  var d = [] // 'd' is an array of complete JSON messages.  each one should later be parsed with JSON.parse()
+  if ( splt.length == 1 && data.endsWith("\n") ) {
+    // this case means the split resulted in only one element and that it does contain the newline delimiter.  This means we received a single complete update.
+    d.push(splt.shift() );
+    data='';
+  }
+  else if ( splt.length > 1 ) {
+    // This case means the split resulted in multiple elements and that it does contain a newline delimiter...
+    // This means we have at least one complete update, and possibly more.
+    if (data.endsWith("\n")) {  //the last element is a full update as data ends with a newline
+      while (splt.length > 0) {
+        d.push(splt.shift());
+      }
+      data = '';
+    }
+    else { // the last element is only a partial update, meaning that more data must be coming
+      while (splt.length > 1) {
+        d.push(splt.shift());
+      }
+      data = splt.shift();  // this should be the last partial update, which should be appended to in the next update
+    }
+  }
+
+  callback(d);
+
+  return data;
+
 }
 
 function chunkHandler(collectionRoot, id, subject, data, chunk, clientSessionId='') {
@@ -2627,6 +2672,103 @@ function purgeSessions(thisRollingCollection, sessionsToPurge) {
   }
 }
 
+function writeToSocket(socket, data) {
+  socket.write(data + '\n');
+}
+
+
+
+var feederSocket = null;
+var feederInitialized = false;
+var apiInitialized = false;
+var feederSocket = null;
+
+function feederSocketCommunicationHandler(socket, tempName) {
+
+  feederSocket = socket; // assign our socket globally so we can write to it later
+
+  ////////////////////////
+  //DEAL WITH THE SOCKET//
+  ////////////////////////
+
+  // Buffer for worker data
+  var data = '';
+  
+  // Set socket options
+  feederSocket.setEncoding('utf8');
+
+  //Handle data from the socket
+  feederSocket.on('data', chunk => data = newChunkHandler(data, chunk, feederDataHandler) );
+  
+  feederSocket.on('end', () => {
+    winston.debug('Feeder has disconnected');
+    //delete temporary socket
+    fs.unlink(tempName, () => {});
+    feederInitialized = false;
+  });
+                          
+  // Send configuration to feeder_srv.  After this, we should receive an okay response containing a path to a socket for workers
+  writeToSocket(feederSocket, JSON.stringify( { config: { feedsDir: feedsDir }, feeds: feeds } ));
+}
+
+var feederDataHandler = (data) => {
+  // Handles data sent by feeder_srv
+  while (data.length > 0) {
+    let line = data.shift();
+    let message = JSON.parse(line);
+    // winston.debug('feederDataHandler(): message:', message);
+
+    if (!feederInitialized && 'initialized' in message && message.initialized && 'feederSocket' in message) {
+      winston.info('feederDataHandler(): Feeder is initialized');
+      feederInitialized = true;
+      feederSocket = message.feederSocket;
+      winston.debug('feederDataHandler(): Feeder socket is ' + feederSocket);
+      if (!apiInitialized) {
+        listener(); // start the API listener
+      }
+    }
+  }
+};
+
+function startFeeder() {
+  winston.debug('startFeeder(): starting feeder_srv');
+
+  try {
+    // get a temporary file to use as our domain socket
+    var tempName = temp.path({suffix: '.socket'});
+    
+    // open UNIX domain socket to talk to server script, and set the socket handler to feederSocketCommunicationHandler
+    var socketServer = net.createServer( (socket) => feederSocketCommunicationHandler(socket, tempName) );
+
+    // start the feeder_srv
+    socketServer.listen(tempName, () => {
+      
+      winston.debug('Waiting for Feeder connection');
+      winston.debug("Spawning feeder_srv with socket file " + tempName);
+
+      // spawn the feeder process
+      var feederSrv = spawn('./feeder_stub.py ', [tempName], { shell: true, stdio: 'inherit' });
+
+      // wait for the feeder to exit (ideally it shouldn't until we shutdown)
+      feederSrv.on('exit', (code) => {
+        if (typeof code === 'undefined') {
+          winston.debug('Feeder process exited abnormally without an exit code');
+        }
+        else if (code != 0) {
+          winston.debug('Feeder process exited abnormally with exit code',code.toString());
+        }
+        else {
+          winston.debug('Feeder process exited normally with exit code', code.toString());
+        }
+        
+      });
+    });
+  }
+  catch(e) {
+    winston.error("startFeeder(): Caught error:", e);
+  }
+}
+
 
 
 
@@ -2637,9 +2779,10 @@ function purgeSessions(thisRollingCollection, sessionsToPurge) {
 ////////////////////////////////////////////////////////////////LISTEN/////////////////////////////////////////////////////////////////
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
-function listener () {
+function listener() {
   // Start listening for client traffic and away we go
   // app.listen(listenPort, '127.0.0.1');
   app.listen(listenPort);
+  apiInitialized = true;
   winston.info('Serving on localhost:' + listenPort);
 }

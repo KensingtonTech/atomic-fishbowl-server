@@ -21,11 +21,6 @@ def sigIntHandler(signal, frame):
   log.info("Exiting with code 0")
   sys.exit(0)
 
-def configCallback(cfg):
-  log.debug("Configuration received")
-  #pprint(cfg)
-  configReceived(cfg)
-
 def pkcs1_unpad(text):
   if len(text) > 0 and text[0] == '\x02':
     # Find end of padding marked by nul
@@ -82,7 +77,6 @@ def configReceived(cfgObj):
       exitWithError(error)
   
     
-    #fetcher = Fetcher(client, collectionId, baseUrl, user, password, directory, minX, minY, gsPath, pdftotextPath, sofficePath, sofficeProfilesDir, unrarPath, contentLimit, summaryTimeout, queryTimeout, contentTimeout, maxContentErrors, contentTypes)
     fetcher = Fetcher(cfg, client)
 
     ###QUERY DATA###
@@ -99,7 +93,6 @@ def configReceived(cfgObj):
       log.info("Extracting files from sessions")
       client.write_data(json.dumps( { 'collection': { 'id': collectionId, 'state': state }} ) + '\n')
       time0 = time.time()
-      #fetcher.pullFiles(distillationTerms, regexDistillationTerms, md5Hashes=md5Hashes, sha1Hashes=sha1Hashes, sha256Hashes=sha256Hashes)
       fetcher.pullFiles()
       time1 = time.time()
       log.info("Pulled files in " + str(time1 - time0) + " seconds")
@@ -162,7 +155,7 @@ def main():
     log.info("afb_worker is starting")
     socketFile = sys.argv[1]
     global client
-    client = communicator(socketFile, configCallback)
+    client = communicator(socketFile, configReceived)
     asyncore.loop(use_poll=True)
     log.info("Exiting afb_worker with code 0")
     sys.exit(0)
