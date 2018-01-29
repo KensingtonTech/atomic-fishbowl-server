@@ -120,7 +120,6 @@ class HashClientConnectionHandler(asynchat.async_chat):
     self.hasher = hasher
     self.set_terminator('\n')
     self.in_buffer = []
-    #self.out_buffer = ''
 
   def collect_incoming_data(self, data):
     #log.debug("HashClientConnectionHandler: collect_incoming_data()")
@@ -135,13 +134,15 @@ class HashClientConnectionHandler(asynchat.async_chat):
       req = json.loads(msg)
       #print(pformat(req))
     except Exception as e:
-      log.exception("Exception parsing JSON in found_terminator()")
+      log.exception("HashClientConnectionHandler: found_terminator(): Exception parsing JSON in found_terminator()")
       return
     
     if 'getTypes' in req:
       res = self.hasher.getTypes(req['feedId'])
-    if 'hash' in req:
+    elif 'hash' in req:
       res = self.hasher.submit(req)
+    else:
+      return
 
     #log.debug('HashClientConnectionHandler: found_terminator(): res:\n' + pformat(res))
     self.send(json.dumps(res) + '\n')

@@ -12,58 +12,81 @@ import logging
 import signal
 import tempfile
 
-def sigIntHandler(signal, frame):
-  log.info("Feeder terminated cleanly by interrupt")
-  log.info("Exiting with code 0")
-  configSocket.handle_close()
-  hashSocket.handle_close()
-  sys.exit(0)
-
-def exitWithError(message):
-  log.error(message)
-  configSocket.write_data(json.dumps( { 'error': message} ) + '\n')
-  configSocket.handle_close()
-  hashSocket.handle_close()
-  sys.exit(1)
-
-def exitWithException(message):
-  log.exception(message)
-  configSocket.write_data(json.dumps( { 'error': message} ) + '\n')
-  configSocket.handle_close()
-  hashSocket.handle_close()
-  sys.exit(1)
-
 config = {}
 feeds = {}
 hasher = Hasher()
 listenerSocketFile = None
-hashSocket = None
+hashCommunicator = None
+configCommunicator = None
 feedsDir = None
+initialized = False
+
+def sigIntHandler(signal, frame):
+  log.info("Feeder terminated cleanly by interrupt")
+  log.info("Exiting with code 0")
+  configCommunicator.handle_close()
+  hashCommunicator.handle_close()
+  sys.exit(0)
+
+def exitWithError(message):
+  log.error(message)
+  configCommunicator.write_data(json.dumps( { 'error': message} ) + '\n')
+  configCommunicator.handle_close()
+  hashCommunicator.handle_close()
+  sys.exit(1)
+
+def exitWithException(message):
+  log.exception(message)
+  configCommunicator.write_data(json.dumps( { 'error': message} ) + '\n')
+  configCommunicator.handle_close()
+  hashCommunicator.handle_close()
+  sys.exit(1)
 
 def configReceived(cfg):
   log.debug("configReceived(): Data received on configuration socket")
   try:
     log.debug('configReceived():\n' + pformat(cfg))
-    
-    global config
-    config = cfg['config']
-    
-    global feeds
-    feeds = cfg['feeds']
-    
     global hasher
-    global feedsDir
-    feedsDir = config['feedsDir']
-    hasher.setFeedsDir(feedsDir)
-    hasher.updateFeeds(feeds)
+    
+    if 'config' in cfg:
+      global config
+      config = cfg['config']
+      if 'feedsDir' in config:
+        global feedsDir
+        feedsDir = config['feedsDir']
+        hasher.setFeedsDir(feedsDir)
+    
+    if 'feeds' in cfg:
+      global feeds
+      feeds = cfg['feeds']    
+      hasher.updateFeeds(feeds)
 
-    global hashSocket
-    hashSocket = HashServer(listenerSocketFile, hasher)
+    if 'new' in cfg:
+      feed = cfg['feed']
+      hasher.updateFeed(feed) # update and add are exactly the same
+
+    if 'update' in cfg:
+      feed = cfg['feed']
+      hasher.updateFeed(feed)
+
+    if 'updateFile' in cfg:
+      id = cfg['id']
+      hasher.updateFeedFile(id)
+
+    if 'delete' in cfg:
+      id = cfg['id']
+      hasher.delFeed(id)
 
     # tell node.js that we're ready to roll
-    configSocket.send( json.dumps( { 'initialized': True, 'feederSocket': listenerSocketFile } ) + '\n' )
+    global initialized
+    if not initialized and hasher.isInitialized():
+      initialized = True
+      configCommunicator.send( json.dumps( { 'initialized': True, 'feederSocket': listenerSocketFile } ) + '\n' )
+    else:
+      configCommunicator.send( json.dumps( { 'initialized': False } ) + '\n' )
 
   except KeyError as e:
+    raise
     error = 'ERROR: Missing critical configuration data: ' + str(e)
     exitWithError(error)
 
@@ -102,13 +125,16 @@ def main():
     log.info("afb_feeder is starting")
     socketFile = sys.argv[1]
     
-    global configSocket
-    configSocket = Communicator(socketFile, configReceived)
+    global configCommunicator
+    configCommunicator = Communicator(socketFile, configReceived)
     
     #create a temp unix socket to listen for worker connections
     tempDir = tempfile._get_default_tempdir() + '/'
     global listenerSocketFile
     listenerSocketFile = tempDir + next(tempfile._get_candidate_names()) + '.socket'
+    global hashCommunicator
+    if hashCommunicator == None:
+      hashCommunicator = HashServer(listenerSocketFile, hasher)
 
     
     asyncore.loop(use_poll=True)

@@ -2,9 +2,6 @@ import logging
 import json
 from worker_communicator import FeederCommunicator
 from worker_contentobj import ContentObj
-import threading
-import asyncore
-
 from pprint import pprint, pformat
 
 log = logging.getLogger(__name__)

@@ -37,7 +37,7 @@ def configReceived(cfgObj):
 
     try:
       cfg = cfgObj['workerConfig']
-      log.debug(pformat(cfg))
+      log.debug('configReceived: cfg:\n' + pformat(cfg))
 
       #decrypt password
       ePassword = cfg['password']

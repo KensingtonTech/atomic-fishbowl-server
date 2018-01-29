@@ -553,16 +553,16 @@ class ContentProcessor:
 
   def processPdf(self, contentObj):
     contentObj.contentType = 'pdf'
-    #log.debug('ContentProcessor: processPdf(): contentObj:' + pformat(contentObj.get()) )
+    # log.debug('ContentProcessor: processPdf(): contentObj:' + pformat(contentObj.get()) )
 
-    #write pdf to disk
+    # write pdf to disk
     log.debug("ContentProcessor: processPdf(): Session " + str(contentObj.session) + ". Writing pdf to " + os.path.join(self.cfg['outputDir'], contentObj.contentFile) )
     fp = open(os.path.join(self.cfg['outputDir'], contentObj.contentFile), 'wb')
     shutil.copyfileobj(contentObj.getFileContent(), fp)
     fp.close()
     
-    #extract first page of pdf
-    #gs -dNOPAUSE -sDEVICE=jpeg -r144 -sOutputFile="p%o3d.jpg" -dFirstPage=1 -dLastPage=1 -dBATCH "$filename"
+    # extract first page of pdf
+    # gs -dNOPAUSE -sDEVICE=jpeg -r144 -sOutputFile="p%o3d.jpg" -dFirstPage=1 -dLastPage=1 -dBATCH "$filename"
     log.debug("ContentProcessor: processPdf(): Session " + str(contentObj.session) + ". Extracting first page of pdf " + contentObj.contentFile)
     outputfile = "page1-" + contentObj.contentFile + ".jpg"
     contentObj.pdfImage = outputfile
