@@ -6,6 +6,7 @@ const Observable = require('rxjs/Observable').Observable;
 const Subject = require('rxjs/Subject').Subject;
 const express = require('express');
 const app = express();
+const multer  = require('multer');
 const session = require('express-session');
 const bodyParser = require('body-parser');
 const listenPort = 3002;
@@ -14,6 +15,7 @@ const fs = require('fs');
 const net = require('net'); //for unix sockets
 const rimraf = require('rimraf');
 const spawn = require('child_process').spawn;
+const exec = require('child_process').exec;
 const temp = require('temp');
 const moment = require('moment');
 const passport = require('passport');
@@ -31,8 +33,11 @@ var mongo = require('mongodb').MongoClient;
 const NodeRSA = require('node-rsa');
 const sleep = require('sleep');
 const restClient = require('node-rest-client').Client;
+const request = require('request');
+const path = require('path');
 const buildProperties = require('./build-properties');
 const version = `${buildProperties.major}.${buildProperties.minor}.${buildProperties.patch}.${buildProperties.build}-${buildProperties.level}`;
+const feedScheduler = require('./feed-scheduler.js');
 var development = process.env.NODE_ENV !== 'production';
 // export NODE_ENV='production'
 // export NODE_ENV='development'
@@ -47,6 +52,7 @@ if (development) {
   pdftotextPath = '/opt/local/bin/pdftotext';
   unrarPath = '/opt/local/bin/unrar';
 }
+// import { Buffer } from 'buffer';
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////////EXPRESS////////////////////////////////////////////////////////////////
@@ -126,6 +132,7 @@ var preferences = {};
 var nwservers = {};
 var collections = {}; // holds the high-level definition of a collection but not its content data
 var collectionsData = {}; // holds content data and session data
+var feeds = {}; // holds definitions for hash data CSV's
 
 const cfgDir = '/etc/kentech/afb';
 const certDir = cfgDir + '/certificates';
@@ -138,6 +145,16 @@ const collectionsUrl = '/collections';
 const dataDir = '/var/kentech/afb';
 const collectionsDir = dataDir + '/collections';
 const sofficeProfilesDir = dataDir + '/sofficeProfiles';
+const feedsDir = dataDir + '/feeds';
+const tempDir = dataDir + '/tmp'; // used for temporary holding of uploaded files
+
+var feederSocket = null;
+var feederSocketFile = null;
+var feederInitialized = false;
+var apiInitialized = false;
+
+// Multipart upload config
+const upload = multer({ dest: tempDir });
 
 try {
   // Read in config file
@@ -186,6 +203,9 @@ const internalPrivateKey = fs.readFileSync(internalPrivateKeyFile, 'utf8');
 const decryptor = new NodeRSA( internalPrivateKey );
 decryptor.setOptions({encryptionScheme: 'pkcs1'});
 
+// Set up feed scheduler
+var scheduler = new feedScheduler(feedsDir, winston, decryptor, () => schedulerUpdatedCallback);
+
 // Create LibreOffice profiles dir
 if ( !fs.existsSync(dataDir) ) {
   winston.info(`Creating data directory at ${dataDir}`);
@@ -195,7 +215,14 @@ if ( !fs.existsSync(sofficeProfilesDir) ) {
   winston.info(`Creating soffice profiles directory at ${sofficeProfilesDir}`);
   fs.mkdirSync(sofficeProfilesDir);
 }
-
+if ( !fs.existsSync(feedsDir) ) {
+  winston.info(`Creating feeds directory at ${feedsDir}`);
+  fs.mkdirSync(feedsDir);
+}
+if ( !fs.existsSync(tempDir) ) {
+  winston.info(`Creating temp directory at ${tempDir}`);
+  fs.mkdirSync(tempDir);
+}
 
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -207,7 +234,7 @@ var defaultPreferences = {
   nwInvestigateUrl: '',
   defaultNwQuery: "filetype = 'jpg','gif','png','pdf','zip','rar','windows executable','x86 pe','windows dll','x64pe','apple executable (pef)','apple executable (mach-o)'",
   defaultQuerySelection : "All Supported File Types",
-  defaultImageLimit: 1000,
+  defaultContentLimit: 1000,
   defaultRollingHours: 1,
   minX: 255,
   minY: 255,
@@ -344,6 +371,8 @@ connectToDB(); // this must come before mongoose user connection so that we know
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
 
+//////////////////////LOGIN & LOGOUT//////////////////////
+
 app.post('/api/login', passport.authenticate('local'), (req,res) => {
   winston.info('POST /api/login');
   User.findOne({username: req.body.username, enabled: true}, (err, user) => {
@@ -377,7 +406,7 @@ app.get('/api/logout', passport.authenticate('jwt', { session: false } ), (req,r
   // winston.debug("decoded tokenId:", tokenId);
   tokenBlacklist[tokenId] = tokenId;
   res.clearCookie('access_token');
-  res.sendStatus(200);
+  res.status(200).send(JSON.stringify( { 'status': 'ok' } ));
 });
 
 app.get('/api/isloggedin', passport.authenticate('jwt', { session: false } ), (req, res) => {
@@ -390,15 +419,52 @@ app.get('/api/isloggedin', passport.authenticate('jwt', { session: false } ), (r
   res.json( { user: req.user.toObject(), sessionId: uuidV4() }); // { versionKey: false, transform: transformUserIsLoggedIn }
 });
 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+//////////////////////SERVER PUBLIC KEY//////////////////////
+
 app.get('/api/publickey', passport.authenticate('jwt', { session: false } ), (req, res)=>{
   winston.debug("GET /api/publickey");
   res.json( { pubKey: internalPublicKey });
 });
 
+
+
+
+
+
+
+
+
+
+
+//////////////////////USE CASES//////////////////////
+
 app.get('/api/usecases', passport.authenticate('jwt', { session: false } ), (req, res) => {
   winston.debug("GET /api/usecases");
   res.json( { useCases: useCases } );
 });
+
+
+
+
+
+
+
+
+//////////////////////USERS//////////////////////
 
 app.get('/api/users', passport.authenticate('jwt', { session: false } ), (req,res) => {
   winston.info('GET /api/users');
@@ -440,23 +506,22 @@ app.get('/api/user/:uname', passport.authenticate('jwt', { session: false } ), (
 });  
 
 app.post('/api/adduser', passport.authenticate('jwt', { session: false } ), (req, res) => {
-  winston.info("POST /api/adduser");
+  winston.info("POST /api/adduser for user " + req.body.username);
   let u = req.body;
   let uPassword = decryptor.decrypt(u.password, 'utf8');
   u.password = uPassword;
   User.register(new User({ id: uuidV4(), username : u.username, fullname: u.fullname, email: u.email, enabled: u.enabled }), u.password, (err, user) => {
     if (err) {
-      winston.error("adding user " + u.username + ':', err);
-      // res.sendStatus(500);
-      res.status(500).send( JSON.stringify( { 'status': 'ok' } ) );
+      winston.error("Error adding user " + u.username  + " by user " + req.body.username + ' : ' + err);
+      res.status(500).send( JSON.stringify( { 'status': 'error', 'message': err } ) );
     }
     else {
-      winston.info("User added:", u.username);
-      // res.sendStatus(201);
+      winston.info("User " + req.body.username + " added user " + u.username);
       res.status(201).send( JSON.stringify( { 'status': 'ok' } ) );
     }
   });
 });
+
 
 function updateUser(req, res) {
   let u = req.body;
@@ -542,6 +607,14 @@ app.delete('/api/user/:id', passport.authenticate('jwt', { session: false } ), (
 
 //login and return JWT
 
+
+
+
+
+
+
+//////////////////////SERVER VERSION//////////////////////
+
 app.get('/api/version', passport.authenticate('jwt', { session: false } ), (req,res) => {
   // Gets the server version
   winston.info('GET /api/version');
@@ -553,6 +626,13 @@ app.get('/api/version', passport.authenticate('jwt', { session: false } ), (req,
     res.sendStatus(500);
   }
 });
+
+
+
+
+
+
+//////////////////////COLLECTIONS//////////////////////
   
 
 app.get('/api/collections', passport.authenticate('jwt', { session: false } ), (req,res) => {
@@ -582,7 +662,7 @@ app.delete('/api/collection/:id', passport.authenticate('jwt', { session: false 
     if (collectionsData[id]) {
       delete collectionsData[id];
       delete collections[id];
-      res.sendStatus(204);
+      res.status(200).send( JSON.stringify( {'status': 'ok'} ) );
     }
     else {
       res.body="Collection not found";
@@ -606,7 +686,6 @@ app.delete('/api/collection/:id', passport.authenticate('jwt', { session: false 
   catch(e) {
     winston.error('ERROR removing directory' + collectionsDir + '/' + id + ':', e);
   }
-
 });
 
 app.get('/api/collectiondata/:id', passport.authenticate('jwt', { session: false } ), (req, res) => {
@@ -620,6 +699,798 @@ app.get('/api/collectiondata/:id', passport.authenticate('jwt', { session: false
     res.sendStatus(500);
   }
 });
+
+app.post('/api/addcollection', passport.authenticate('jwt', { session: false } ), (req, res) => {
+  winston.info("POST /api/addcollection");
+  // winston.debug(req);
+  try {
+    let timestamp = new Date().getTime();
+    //winston.debug(req.body);
+    let collection = req.body;
+    if (!('type' in collection)) {
+      throw("'type' is not defined");
+    }
+    if (!('id' in collection)) {
+      throw("'id' is not defined");
+    }
+    if (!('name' in collection)) {
+      throw("'name' is not defined");
+    }
+    if (!('nwserver' in collection)) {
+      throw("'nwserver' is not defined");
+    }
+    if (!('nwserverName' in collection)) {
+      throw("'nwserverName' is not defined");
+    }
+    if (!('bound' in collection)) {
+      throw("'bound' is not defined");
+    }
+    if (!('usecase' in collection)) {
+      throw("'usecase' is not defined");
+    }
+    if (collection.bound && collection.usecase == 'custom') {
+      throw('A bound collection must be associated with a non-custom use case')
+    }
+    else if (collection.bound && collection.usecase != 'custom' && !(collection.usecase in useCasesObj) ) {
+      throw(`Collection use case ${collection.usecase} is not a valid use case!`);
+    }
+    
+    if (!collection.bound) {
+      if (!('query' in collection)) {
+        throw("'query' is not defined");
+      }
+      if (!('contentTypes' in collection)) {
+        throw("'contentTypes' is not defined");
+      }
+    }
+    
+    // collection['state'] = 'initial';
+
+    let creator = {
+      username: req.user.username,
+      id: req.user.id,
+      fullname: req.user.fullname,
+      timestamp: timestamp
+    };
+    collection['creator'] = creator;
+
+    collections[collection.id] = collection;
+    let cDef = {
+      images: [],
+      sessions: {},
+      id: collection.id
+    };
+    collectionsData[collection.id] = cDef;
+    
+   
+    db.collection('collections').insertOne( collection, (err) => {
+      if (err) throw err;
+      db.collection('collectionsData').insertOne( { id: collection.id, data: JSON.stringify(cDef)}, (err) => {
+        if (err) throw err;
+        // res.sendStatus(201);
+        res.status(201).send( JSON.stringify( { 'status': 'ok' } ) );
+      });
+    });
+    
+
+    
+  }
+  catch(e) {
+    winston.error("POST /api/addcollection:", e);
+    res.sendStatus(500);
+  }
+});
+
+
+app.post('/api/editcollection', passport.authenticate('jwt', { session: false } ), (req, res) => {
+  winston.info("POST /api/editcollection");
+  try {
+    let timestamp = new Date().getTime();
+    let collection = req.body;
+    winston.debug('collection:', collection);
+    let id = collection.id;
+    collection['state'] = 'initial';
+    if (!(id) in collections) {
+      throw(`Cannot update collection ${collection.name}.  Collection ${id} does not exist`);
+    }
+
+    // do something here to stop an existing rolling collection
+
+    let modifier = {
+      username: req.user.username,
+      id: req.user.id,
+      fullname: req.user.fullname,
+      timestamp: timestamp
+    };
+    collection['modifier'] = modifier;
+
+    collections[id] = collection;
+    let cDef = {
+      images: [],
+      sessions: {},
+      id: collection.id
+    };
+    collectionsData[id] = cDef;
+    
+    // Update collection in mongo
+    db.collection('collections').updateOne( { id: id }, { $set: collection}, (err, result) => {
+      if (err) throw err;
+
+      db.collection('collectionsData').updateOne( { id: collection.id }, { $set: { data: JSON.stringify(cDef) } }, (err, result) => {
+        // Update collection data in mongo
+        if (err) throw err;
+
+        // res.sendStatus(205);
+        res.status(205).send( JSON.stringify( { 'status': 'ok' } ) );
+      });
+    });
+
+  }
+  catch(e) {
+    winston.error("POST /api/editcollection:", e);
+    res.sendStatus(500);
+  }
+});
+
+
+
+
+
+
+//////////////////////FEEDS//////////////////////
+
+app.get('/api/feed', passport.authenticate('jwt', { session: false } ), (req,res) => {
+  winston.info('GET /api/feeds');
+  try {
+    res.json(feeds);
+  }
+  catch(e) {
+    winston.error('ERROR GET /api/feeds:', e);
+    res.sendStatus(500);
+  }
+});
+
+
+
+app.post('/api/feed/manual', passport.authenticate('jwt', { session: false } ), upload.single('file'), (req, res) => {
+  winston.info("POST /api/feed/manual");
+  // winston.debug('req:', req);
+  let timestamp = new Date().getTime();
+  try {
+    // winston.debug(req.body);
+    let feed = JSON.parse(req.body.model);
+    // winston.debug('req.file:', req.file);
+    // winston.debug('feed:', feed);
+    if (!('id' in feed)) {
+      throw("'id' is not defined");
+    }
+    let id = feed.id;
+
+    if (id in feeds) {
+      throw('Feed id ' + id + ' already exists!')
+    }
+
+    if (!('name' in feed)) {
+      throw("'name' is not defined");
+    }
+
+    if (!('type' in feed)) {
+      throw("'type' is not defined");
+    }
+
+    if (!('delimiter' in feed)) {
+      throw("'delimiter' is not defined");
+    }
+
+    if (!('headerRow' in feed)) {
+      throw("'headerRow' is not defined");
+    }
+
+    if (!('valueColumn' in feed)) {
+      throw("'valueColumn' is not defined");
+    }
+
+    if (!('typeColumn' in feed)) {
+      throw("'typeColumn' is not defined");
+    }
+
+    if (!('friendlyNameColumn' in feed)) {
+      throw("'friendlyNameColumn' is not defined");
+    }
+
+    if (!('filename' in req.file)) {
+      throw("'filename' not found in file definition");
+    }
+
+    if (!('path' in req.file)) {
+      throw("'path' not found in file definition");
+    }
+
+    feed['version'] = 1;
+
+    let creator = {
+      username: req.user.username,
+      id: req.user.id,
+      fullname: req.user.fullname,
+      timestamp: timestamp
+    };
+    feed['creator'] = creator;
+
+    fs.rename(req.file.path, feedsDir + '/' + id + '.feed', (mverror) => {
+      // rename feed callback
+      if (mverror) {
+        winston.error('error moving file to feedsDir:', err);
+        fs.unlinkSync(req.file.path);
+        throw(mverror);
+      }
+      else {
+        db.collection('feeds').insertOne( feed, (err, result) => {
+          //insert into db callback
+          if (err) {
+            throw(err);
+          }
+          else 
+          {
+            feeds[id] = feed;
+            res.status(201).send( JSON.stringify( { status: 'ok' } ) );
+            // writeToSocket( feederSocket, JSON.stringify( { feeds: feeds } ) );
+            writeToSocket( feederSocket, JSON.stringify( { new: true, feed: feed } ) );
+          }
+        });
+      }
+    });
+  
+  }
+  catch(e) {
+    winston.error("POST /api/feed/manual: " + e);
+    res.status(500).send( JSON.stringify({ error: e.message }));
+  }
+});
+
+
+app.post('/api/feed/scheduled', passport.authenticate('jwt', { session: false } ), (req, res) => {
+  winston.info("POST /api/feed/scheduled");
+  // winston.debug('req:', req);
+  let timestamp = new Date().getTime();
+  try {
+    let feed = req.body;
+    // winston.debug('feed:', feed);
+
+    if (!('id' in feed)) {
+      throw("'id' is not defined");
+    }
+    let id = feed.id;
+
+    if (id in feeds) {
+      throw('Feed id ' + id + ' already exists!')
+    }
+
+    if (!('name' in feed)) {
+      throw("'name' property not found in feed definition");
+    }
+
+    if (!('type' in feed)) {
+      throw("'type' property not found in feed definition");
+    }
+
+    if (!('delimiter' in feed)) {
+      throw("'delimiter' property not found in feed definition");
+    }
+
+    if (!('headerRow' in feed)) {
+      throw("'headerRow' property not found in feed definition");
+    }
+
+    if (!('valueColumn' in feed)) {
+      throw("'valueColumn' property not found in feed definition");
+    }
+
+    if (!('typeColumn' in feed)) {
+      throw("'typeColumn' property not found in feed definition");
+    }
+
+    if (!('friendlyNameColumn' in feed)) {
+      throw("'friendlyNameColumn' property not found in feed definition");
+    }
+
+    if (!('schedule' in feed)) {
+      throw("'schedule' property not found in feed definition");
+    }
+
+    if (!('url' in feed)) {
+      throw("'url' property not found in feed definition");
+    }
+
+    if (!('authentication' in feed)) {
+      throw("'authentication' property not found in feed definition");
+    }
+
+    if (feed.authentication && !('username' in feed && 'password' in feed)) {
+      throw("Credentials not found in feed definition");
+    }
+
+    feed['version'] = 1;
+
+    let creator = {
+      username: req.user.username,
+      id: req.user.id,
+      fullname: req.user.fullname,
+      timestamp: timestamp
+    };
+    feed['creator'] = creator;
+
+    // now we need to fetch the file and write it to disk
+    let options = { url: feed.url, method: 'GET', gzip: true };
+    if (feed.authentication) {
+      options['auth'] = { user: feed.username, pass: decryptor.decrypt(feed.password, 'utf8'), sendImmediately: true };
+    }
+    
+    // let tempName = path.basename(temp.path({suffix: '.scheduled'}));
+
+    let myRequest = request(options, (error, result, body) => { // get the feed
+      // callback
+      winston.debug('/api/feed/scheduled: myRequest callback()');
+
+      db.collection('feeds').insertOne( feed, (err, dbresult) => {
+        if (err) {
+          winston.error('/api/feed/scheduled: insertOne(): error adding feed to db:', err);
+          throw(err);
+        }
+        else 
+        {
+          winston.debug('/api/feed/scheduled: insertOne(): feed added to db');
+          feeds[id] = feed;
+          scheduler.addFeed(feed);
+          res.status(201).send( JSON.stringify( { success: true } ) );
+          // writeToSocket(feederSocket, JSON.stringify( { feeds: feeds } ) ); // let feeder server know of our update
+          writeToSocket( feederSocket, JSON.stringify( { new: true, feed: feed } ) ); // let feeder server know of our update
+        }
+      });
+    })
+    .on('end', () => {
+      winston.debug('/api/feed/scheduled: myRequest end()');
+      // res.status(201).send( JSON.stringify( { success: true } ) )
+    })
+    .on('error', (err) => {
+      winston.debug('/api/feed/scheduled: myRequest error()');
+      res.status(500).send( JSON.stringify( { success: false, error: err } ) )
+    })
+    .pipe(fs.createWriteStream(feedsDir + '/' + id + '.feed'));
+  }
+  catch(e) {
+    winston.error("POST /api/feed/scheduled: " + e );
+    res.status(500).send( JSON.stringify( { success: false, error: e } ) )
+  }
+});
+
+
+
+app.post('/api/feed/edit/withfile', passport.authenticate('jwt', { session: false } ), upload.single('file'), (req, res) => {
+  // this is for editing of manual feeds which contain a new file
+  winston.info("POST /api/feed/edit/withfile");
+  // winston.debug('req:', req);
+  
+  try {
+    let timestamp = new Date().getTime();
+    let feed = JSON.parse(req.body.model);
+    
+    if (!('id' in feed)) {
+      throw("'id' parameter not found in feed");
+    }
+
+    let id = feed.id;
+    if (!(id in feeds)) {
+      throw('Feed not found');
+    }
+
+    // get creator from old feed
+    let oldFeed = feeds[id];
+    let creator = oldFeed.creator
+    feed['creator'] = creator;
+    feed['version'] = oldFeed.version + 1;
+
+    let modifier = {
+      username: req.user.username,
+      id: req.user.id,
+      fullname: req.user.fullname,
+      timestamp: timestamp
+    };
+    feed['modifier'] = modifier;
+
+
+
+    fs.rename(req.file.path, feedsDir + '/' + id + '.feed', (mverror) => {
+      // rename feed callback
+      if (mverror) {
+        winston.error('error moving file to feedsDir:', err);
+        fs.unlinkSync(req.file.path);
+        throw(mverror);
+      }
+      else {
+        db.collection('feeds').updateOne( { id: id }, { $set: feed}, (err, result) => {
+          //insert into db callback
+          if (err) {
+            throw(err);
+          }
+          else {
+            feeds[id] = feed;
+            res.status(201).send( JSON.stringify( { status: 'ok' } ) );
+            // writeToSocket( feederSocket, JSON.stringify( { feeds: feeds } ) );
+            writeToSocket( feederSocket, JSON.stringify( { update: true, feed: feed } ) ); // let feeder server know of our update
+          }
+        });
+      }
+    });
+
+  }
+  catch(e) {
+    winston.error("POST /api/feed/edit/withfile: " + e);
+    res.status(500).send( JSON.stringify({ error: e.message }));
+  }
+
+});
+
+
+
+
+app.post('/api/feed/edit/withoutfile', passport.authenticate('jwt', { session: false } ), (req, res) => {
+  // this is for editing of any feed which does not include a new file, both manual or scheduled
+  winston.info("POST /api/feed/edit/withoutfile");
+  // winston.debug('req:', req);
+  
+  try {
+    let timestamp = new Date().getTime();
+    let feed = req.body;
+    
+    if (!('id' in feed)) {
+      throw("'id' parameter not found in feed");
+    }
+
+    let id = feed.id;
+    if (!(id in feeds)) {
+      throw('Feed not found');
+    }
+
+    // get creator from old feed
+    let oldFeed = feeds[id];
+    let creator = oldFeed.creator
+    feed['creator'] = creator;
+    feed['version'] = oldFeed.version + 1;
+
+    let modifier = {
+      username: req.user.username,
+      id: req.user.id,
+      fullname: req.user.fullname,
+      timestamp: timestamp
+    };
+    feed['modifier'] = modifier;
+
+    if (feed.type == 'manual' ) {
+
+      db.collection('feeds').updateOne( { id: id }, { $set: feed}, (err, result) => {
+        //insert into db callback
+        if (err) {
+          throw(err);
+        }
+        else {
+          feeds[id] = feed;
+          res.status(201).send( JSON.stringify( { status: 'ok' } ) );
+          if (oldFeed.type == 'scheduled') {
+            // tell scheduler to remove old feed
+            scheduler.delFeed(feed.id);
+          }
+          // writeToSocket( feederSocket, JSON.stringify( { feeds: feeds } ) );
+          writeToSocket( feederSocket, JSON.stringify( { update: true, feed: feed } ) ); // let feeder server know of our update
+        }
+      });
+    }
+    else {
+      // scheduled feed
+      // always pull feed anew.  this will save on funky logic
+      let options = { url: feed.url, method: 'GET', gzip: true };
+      if (feed.authentication) {
+        if (!feed.authChanged) {
+          feed['username'] = oldFeed.username;
+          feed['password'] = oldFeed.password; // if credentials haven't changed, then set the password to the old password
+        }
+        options['auth'] = { user: feed.username, pass: decryptor.decrypt(feed.password, 'utf8'), sendImmediately: true };
+      }
+
+      let myRequest = request(options, (error, result, body) => { // get the feed
+        // callback
+        winston.debug('/api/feed/edit/withoutfile: myRequest callback()');
+  
+        // db.collection('feeds').updateOne( feed, (err, dbresult) => {
+        db.collection('feeds').updateOne( { id: id }, { $set: feed}, (err, dbresult) => {
+          if (err) {
+            winston.error('/api/feed/edit/withoutfile updateOne(): error updating feed in db:', err);
+            throw(err);
+          }
+          else 
+          {
+            winston.debug('/api/feed/edit/withoutfile: updateOne(): feed modified in db');
+            // calculate file hash for feed file
+            feeds[id] = feed;
+            
+            scheduler.updateFeed(feed);
+            
+            res.status(201).send( JSON.stringify( { success: true } ) );
+            //notify scheduler of update here
+            // writeToSocket(feederSocket, JSON.stringify( { feeds: feeds } ) ); // let feeder server know of our update
+            writeToSocket( feederSocket, JSON.stringify( { update: true, feed: feed } ) ); // let feeder server know of our update
+          }
+        });
+      })
+      .on('end', () => {
+        winston.debug('/api/feed/edit/withoutfile: myRequest end()');
+      })
+      .on('error', (err) => {
+        winston.debug('/api/feed/edit/withoutfile: myRequest error()');
+        res.status(500).send( JSON.stringify( { success: false, error: err } ) )
+      })
+      .pipe(fs.createWriteStream(feedsDir + '/' + id + '.feed'));
+
+    }
+
+  }
+  catch(e) {
+    winston.error("POST /api/feed/edit/withoutfile: " + e);
+    res.status(500).send( JSON.stringify({ error: e.message }));
+  }
+});
+
+
+
+
+app.post('/api/feed/testurl', passport.authenticate('jwt', { session: false } ), (req, res) => {
+  winston.debug('/api/feed/testurl');
+
+  let url = '';
+  let options = { method: 'GET', gzip: true };
+
+  try {
+    let host = req.body;
+    winston.debug('host:', host);
+    
+    if (!('url' in host)) {
+      throw("'url' property not found in host definition");
+    }
+
+    if (!('authentication' in host)) {
+      throw("'authentication' property not found in host definition");
+    }
+
+    if ('useCollectionCredentials' in host) {
+      let id = host.useCollectionCredentials;
+      options['auth'] = { user: feeds[id].username, pass: decryptor.decrypt(feeds[id].password, 'utf8'), sendImmediately: true };
+    }
+    else if (host.authentication && !('username' in host && 'password' in host)) {
+      throw("Credentials not found in host definition");
+    }
+    else if (host.authentication) {
+      options['auth'] = { user: host.username, pass: decryptor.decrypt(host.password, 'utf8'), sendImmediately: true };
+    }
+    url = host.url;
+    options['url'] = url
+
+  }
+  catch(e) {
+    winston.error("POST /api/feed/testurl " + e);
+    res.status(500).send(JSON.stringify(e.message || e) );
+    return;
+  }
+
+  let buffer = '';
+  let rawCSV = '';
+  let myRes = null;
+
+  let myrequest = request(options, (error, result, body) => {
+    winston.debug('/api/feed/testurl: request callback()');
+    
+    myRes = result;
+
+    if (error) {
+      winston.debug('/api/feed/testurl: caught error:', error);
+      let body = { success: false, error: error };
+      if (result.statusCode) {
+        body['statusCode'] = result.statusCode;
+      }
+      res.status(200).send( JSON.stringify( body ) );
+      return;
+    }
+    
+    if (result.statusCode != 200) {
+      res.status(200).send( JSON.stringify( { success: false, error: 'Bad HTTP status code', statusCode: result.statusCode } ) );
+    }
+    else if (rawCSV) {
+      // winston.debug('/api/feed/testurl: onEnd(): rawCSV:\n' + rawCSV);
+      res.status(200).send( JSON.stringify( { success: true, rawCSV: rawCSV } ) )
+    }
+    else if (buffer.length > 0) {
+      winston.debug('/api/feed/testurl: fewer than 6 lines were found in the CSV');
+      // let lines = buffer.split('\n');
+      res.status(200).send( JSON.stringify( { success: true, rawCSV: buffer } ) )
+    }
+    else {
+      winston.debug('/api/feed/testurl: empty response');
+      res.status(200).send( JSON.stringify( { success: false, error: 'Empty response' } ) );
+    }
+
+  });
+
+  myrequest.on('data', (data) => {
+    //called when a chunk of data is received
+    let dataStr = data.toString('utf8');
+    winston.debug('/api/feed/testurl: onData()');
+    // winston.debug('/api/feed/testurl: onData(): data:', data);
+    // winston.debug('/api/feed/testurl: onData(): dataStr:\n' + dataStr);
+    buffer += dataStr;
+    
+    let count = -1; // the number of newline chars we've found this time
+    for (let index = -2; index !== -1; count++, index = buffer.indexOf('\n', index + 1) ) {} // count newlines
+
+    if (count >= 6) {
+      let lines = buffer.split('\n');
+      // console.debug(lines);
+      while (lines.length > 6) {
+        lines.pop();
+      }
+      rawCSV = lines.join('\n');
+      // winston.debug('/api/feed/testurl: onData(): rawCSV:\n' + rawCSV);
+      myrequest.destroy();
+      // myrequest.shouldKeepAlive = false;
+    }
+
+  });
+});
+
+app.get('/api/feed/filehead/:id', passport.authenticate('jwt', { session: false } ), (req, res) => {
+  try {
+    let id = req.params.id;
+    winston.info("GET /api/feed/filehead/" + id);
+
+    if ( !(id in feeds) ) {
+      throw('Feed not found');
+    }
+    
+    let feed = feeds[id];
+    let chunkSize = 1024;
+    let maxBufSize = 262144;
+    let buffer = new Buffer(maxBufSize);
+    let bytesRead = 0;
+    let fileSize = fs.statSync(feedsDir + '/' + id + '.feed').size;
+    if (chunkSize > fileSize) {
+      chunkSize = fileSize;
+    }
+
+    fs.open(feedsDir + '/' + id + '.feed', 'r', (err, fd) => {
+      
+      if (err) {
+        throw(err);
+      }
+
+      let rawCSV = '';
+
+      let fsCallback = (err, read, buf) => {
+        bytesRead += read;
+        let data = buffer.toString();
+        let count = -1; // the number of newline chars we've found this time
+        for (let index = -2; index !== -1; count++, index = data.indexOf('\n', index + 1) ) {} // count newlines
+        if (count >= 6) {
+          let lines = data.split('\n');
+          // console.debug(lines);
+          while (lines.length > 6) {
+            lines.pop();
+          }
+          rawCSV = lines.join('\n');
+          finishCallback();
+          return;
+        }
+        if (bytesRead < fileSize) {
+          // there's still more to read
+          if ( (fileSize - bytesRead) < chunkSize ) {
+            chunkSize = fileSize - bytesRead;
+          }
+          fs.read(fd, buffer, bytesRead, chunkSize, null, fsCallback);
+          return;
+        }
+        // we've read everything
+        finishCallback();
+      };
+
+      let finishCallback = () => {
+        // reading finished
+        // winston.debug('!!!FINISHED');
+        if (rawCSV) {
+          // winston.debug('/api/feed/filehead/:id: onEnd(): rawCSV:\n' + rawCSV);
+          res.status(200).send( JSON.stringify( { success: true, rawCSV: rawCSV } ) )
+        }
+        else if (buffer.length > 0) {
+          winston.debug('/api/feed/filehead/:id : fewer than 6 lines were found in the CSV');
+          // let lines = buffer.split('\n');
+          res.status(200).send( JSON.stringify( { success: true, rawCSV: buffer.toString() } ) )
+        }
+        else {
+          winston.debug('/api/feed/filehead/:id : empty file');
+          res.status(200).send( JSON.stringify( { success: false, error: 'Empty response' } ) );
+        }
+      }
+
+      fs.read(fd, buffer, bytesRead, chunkSize, null, fsCallback);
+
+    });
+
+  }
+  catch(e) {
+    winston.error("GET /api/feed/filehead/:id : " + e);
+    res.status(500).send(JSON.stringify({ error: e.message}) );
+    return;
+  }
+});
+
+
+
+
+app.delete('/api/feed/:id', passport.authenticate('jwt', { session: false } ), (req, res) => {
+  // delete a feed
+  let id = req.params.id;
+  winston.info(`DELETE /api/feed/${id}`);
+  try {
+    if (id in feeds) {
+      fs.unlink(feedsDir + '/' + id + '.feed', (err) => {
+
+        if (err) throw(err);
+
+        db.collection('feeds').remove( { 'id': id }, (err, result) => {
+          
+          if (err) throw err;
+          
+          delete feeds[id];
+          res.status(200).send( JSON.stringify( { success: true } ) );
+          // console.log(feederSocket);
+          // writeToSocket(feederSocket, JSON.stringify( { feeds: feeds } ) ); // let feeder server know of our update
+          scheduler.delFeed(id);
+          writeToSocket( feederSocket, JSON.stringify( { delete: true, id: id } ) ); // let feeder server know of our update
+        });
+      });
+    }
+    else {
+      res.status(400).send( JSON.stringify( { success: false, error: 'Feed not found' } ) );
+    }
+  }
+  catch(e) {
+    winston.error(`ERROR DELETE /api/feed/${id} :`, e);
+    res.status(500).send( JSON.stringify( { success: false, error: e } ) );
+  }
+  
+  /*
+  try { 
+    rimraf( collectionsDir + '/' + id, () => {} );
+  } 
+  catch(e) {
+    winston.error('ERROR removing directory' + collectionsDir + '/' + id + ':', e);
+  }*/
+});
+
+
+app.get('/api/feed/status', passport.authenticate('jwt', { session: false } ), (req, res) => {
+  try {
+    res.status(200).send( JSON.stringify( scheduler.status() ) );
+  }
+  catch(e) {
+    winston.error(`ERROR GET /api/feed/status :`, e);
+    res.status(500).send( JSON.stringify( { success: false, error: e } ) );
+  }
+});
+
+
+
+
+
+
+
+
+//////////////////////NWSERVERS//////////////////////
 
 app.get('/api/nwservers', passport.authenticate('jwt', { session: false } ), (req, res) => {
   winston.info('GET /api/nwservers');
@@ -644,7 +1515,7 @@ app.delete('/api/nwserver/:id', passport.authenticate('jwt', { session: false } 
   winston.info(`DELETE /api/nwserver/${servId}`);
   try {
     delete nwservers[servId];
-    res.sendStatus(204);
+    res.status(200).send( JSON.stringify( {'status': 'ok'} ) );
     db.collection('nwservers').remove( { 'id': servId }, (err, res) => {
       if (err) throw err;
     });
@@ -695,6 +1566,7 @@ app.post('/api/addnwserver', passport.authenticate('jwt', { session: false } ), 
     res.status(500).send( JSON.stringify({ error: e.message }));
   }
 });
+
 
 app.post('/api/editnwserver', passport.authenticate('jwt', { session: false } ), (req, res) => {
   winston.info("POST /api/editnwserver");
@@ -810,10 +1682,24 @@ app.post('/api/testnwserver', passport.authenticate('jwt', { session: false } ),
 
 });
 
+
+
+
+
+
+//////////////////////PING//////////////////////
+
 app.get('/api/ping', (req, res)=>{
   //winston.debug("GET /api/ping");
   res.status(200).send( JSON.stringify( { 'status': 'ok' } ) );
 });
+
+
+
+
+
+
+//////////////////////PREFERENCES//////////////////////
 
 app.get('/api/preferences', passport.authenticate('jwt', { session: false } ), (req, res) => {
   winston.info("GET /api/preferences");
@@ -848,140 +1734,6 @@ app.post('/api/setpreferences', passport.authenticate('jwt', { session: false } 
   }
   catch(e) {
     winston.error("POST /api/setpreferences:", e);
-    res.sendStatus(500);
-  }
-});
-
-
-
-app.post('/api/addcollection', passport.authenticate('jwt', { session: false } ), (req, res) => {
-  winston.info("POST /api/addcollection");
-  // winston.debug(req);
-  try {
-    let timestamp = new Date().getTime()
-    //winston.debug(req.body);
-    let collection = req.body;
-    if (!('type' in collection)) {
-      throw("'type' is not defined");
-    }
-    if (!('id' in collection)) {
-      throw("'id' is not defined");
-    }
-    if (!('name' in collection)) {
-      throw("'name' is not defined");
-    }
-    if (!('nwserver' in collection)) {
-      throw("'nwserver' is not defined");
-    }
-    if (!('nwserverName' in collection)) {
-      throw("'nwserverName' is not defined");
-    }
-    if (!('bound' in collection)) {
-      throw("'bound' is not defined");
-    }
-    if (!('usecase' in collection)) {
-      throw("'usecase' is not defined");
-    }
-    if (collection.bound && collection.usecase == 'custom') {
-      throw('A bound collection must be associated with a non-custom use case')
-    }
-    else if (collection.bound && collection.usecase != 'custom' && !(collection.usecase in useCasesObj) ) {
-      throw(`Collection use case ${collection.usecase} is not a valid use case!`);
-    }
-    
-    if (!collection.bound) {
-      if (!('query' in collection)) {
-        throw("'query' is not defined");
-      }
-      if (!('contentTypes' in collection)) {
-        throw("'contentTypes' is not defined");
-      }
-    }
-    
-    collection['state'] = 'initial';
-
-    let creator = {
-      username: req.user.username,
-      id: req.user.id,
-      fullname: req.user.fullname,
-      timestamp: timestamp
-    };
-    collection['creator'] = creator;
-
-    collections[collection.id] = collection;
-    let cDef = {
-      images: [],
-      sessions: {},
-      id: collection.id
-    };
-    collectionsData[collection.id] = cDef;
-    
-   
-    db.collection('collections').insertOne( collection, (err) => {
-      if (err) throw err;
-      db.collection('collectionsData').insertOne( { id: collection.id, data: JSON.stringify(cDef)}, (err) => {
-        if (err) throw err;
-        // res.sendStatus(201);
-        res.status(201).send( JSON.stringify( { 'status': 'ok' } ) );
-      });
-    });
-    
-
-    
-  }
-  catch(e) {
-    winston.error("POST /api/addcollection:", e);
-    res.sendStatus(500);
-  }
-});
-
-
-app.post('/api/editcollection', passport.authenticate('jwt', { session: false } ), (req, res) => {
-  winston.info("POST /api/editcollection");
-  try {
-    let timestamp = new Date().getTime()
-    let collection = req.body;
-    winston.debug('collection:', collection);
-    let id = collection.id;
-    collection['state'] = 'initial';
-    if (!(id) in collections) {
-      throw(`Cannot update collection ${collection.name}.  Collection ${id} does not exist`);
-    }
-
-    // do something here to stop an existing rolling collection
-
-    let modifier = {
-      username: req.user.username,
-      id: req.user.id,
-      fullname: req.user.fullname,
-      timestamp: timestamp
-    };
-    collection['modifier'] = modifier;
-
-    collections[id] = collection;
-    let cDef = {
-      images: [],
-      sessions: {},
-      id: collection.id
-    };
-    collectionsData[id] = cDef;
-    
-    // Update collection in mongo
-    db.collection('collections').updateOne( { id: id }, { $set: collection}, (err) => {
-      if (err) throw err;
-
-      db.collection('collectionsData').updateOne( { id: collection.id }, { $set: { data: JSON.stringify(cDef) } }, (err) => {
-        // Update collection data in mongo
-        if (err) throw err;
-
-        // res.sendStatus(205);
-        res.status(205).send( JSON.stringify( { 'status': 'ok' } ) );
-      });
-    });
-
-  }
-  catch(e) {
-    winston.error("POST /api/editcollection:", e);
     res.sendStatus(500);
   }
 });
@@ -1128,7 +1880,7 @@ function fixedSocketConnectionHandler(id, socket, tempName, subject) {
     state: 'building',
     timeBegin: thisCollection.timeBegin,
     timeEnd: thisCollection.timeEnd,
-    imageLimit: thisCollection.imageLimit,
+    contentLimit: thisCollection.contentLimit,
     minX: thisCollection.minX,
     minY: thisCollection.minY,
     gsPath: gsPath,
@@ -1142,9 +1894,7 @@ function fixedSocketConnectionHandler(id, socket, tempName, subject) {
     contentTimeout: preferences.contentTimeout,
     privateKeyFile: internalPrivateKeyFile,
     maxContentErrors: preferences.maxContentErrors,
-    md5Enabled: false,
-    sha1Enabled: false,
-    sha256Enabled: false
+    useHashFeed: thisCollection.useHashFeed
   };
 
   if (thisCollection.bound) {
@@ -1166,13 +1916,31 @@ function fixedSocketConnectionHandler(id, socket, tempName, subject) {
     // we don't yet support any hashing in OOTB use cases
   }
   else {
-    // This is not an OOTB use case
+    // This is custom use case, not an OOTB use case
 
     cfg['distillationEnabled'] = thisCollection.distillationEnabled;
     cfg['regexDistillationEnabled'] = thisCollection.regexDistillationEnabled;
-    cfg['md5Enabled'] = thisCollection.md5Enabled;
-    cfg['sha1Enabled'] = thisCollection.sha1Enabled;
-    cfg['sha256Enabled'] = thisCollection.sha256Enabled;
+
+    if (!thisCollection.useHashFeed) {
+      // we're not using a hash feed
+      cfg['md5Enabled'] = thisCollection.md5Enabled;
+      cfg['sha1Enabled'] = thisCollection.sha1Enabled;
+      cfg['sha256Enabled'] = thisCollection.sha256Enabled;
+      if ('md5Hashes' in thisCollection) {
+        cfg['md5Hashes'] = thisCollection.md5Hashes;
+      }
+      if ('sha1Hashes' in thisCollection) {
+        cfg['sha1Hashes'] = thisCollection.sha1Hashes;
+      }
+      if ('sha256Hashes' in thisCollection) {
+        cfg['sha256Hashes'] = thisCollection.sha256Hashes;
+      }
+    }
+    else {
+      // we're using a hash feed
+      cfg['hashFeed'] = feeds[thisCollection.hashFeed] // pass the hash feed definition
+      cfg['hashFeederSocket'] = feederSocketFile
+    }
 
     cfg['query'] = thisCollection.query;
     cfg['contentTypes'] = thisCollection.contentTypes;
@@ -1182,15 +1950,6 @@ function fixedSocketConnectionHandler(id, socket, tempName, subject) {
     }
     if ('regexDistillationTerms' in thisCollection) {
       cfg['regexDistillationTerms'] = thisCollection.regexDistillationTerms;
-    }
-    if ('md5Hashes' in thisCollection) {
-      cfg['md5Hashes'] = thisCollection.md5Hashes;
-    }
-    if ('sha1Hashes' in thisCollection) {
-      cfg['sha1Hashes'] = thisCollection.sha1Hashes;
-    }
-    if ('sha256Hashes' in thisCollection) {
-      cfg['sha256Hashes'] = thisCollection.sha256Hashes;
     }
   }
 
@@ -1239,7 +1998,8 @@ function fixedSocketConnectionHandler(id, socket, tempName, subject) {
   });
                           
   // Send configuration to worker.  This officially kicks off the work.  After this, we should start receiving data on the socket
-  socket.write(JSON.stringify(outerCfg) + '\n'); 
+  // socket.write(JSON.stringify(outerCfg) + '\n');
+  writeToSocket(socket, JSON.stringify(outerCfg));
   
 }
 
@@ -1462,7 +2222,7 @@ function rollingCollectionSocketConnectionHandler(id, socket, tempName, subject,
     id: rollingId,
     collectionId: id, // original collection ID
     state: ourState,
-    imageLimit: thisCollection.imageLimit,
+    contentLimit: thisCollection.contentLimit,
     minX: thisCollection.minX,
     minY: thisCollection.minY,
     gsPath: gsPath,
@@ -1476,9 +2236,7 @@ function rollingCollectionSocketConnectionHandler(id, socket, tempName, subject,
     contentTimeout: preferences.contentTimeout,
     privateKeyFile: internalPrivateKeyFile,
     maxContentErrors: preferences.maxContentErrors,
-    md5Enabled: false,
-    sha1Enabled: false,
-    sha256Enabled: false
+    useHashFeed: thisCollection.useHashFeed
 
     // query: thisCollection.query,
     // regexDistillationEnabled: thisCollection.regexDistillationEnabled,
@@ -1511,9 +2269,27 @@ function rollingCollectionSocketConnectionHandler(id, socket, tempName, subject,
     // This is not an OOTB use case
     cfg['distillationEnabled'] = thisCollection.distillationEnabled;
     cfg['regexDistillationEnabled'] = thisCollection.regexDistillationEnabled;
-    cfg['md5Enabled'] = thisCollection.md5Enabled;
-    cfg['sha1Enabled'] = thisCollection.sha1Enabled;
-    cfg['sha256Enabled'] = thisCollection.sha256Enabled;
+    
+    if (!thisCollection.useHashFeed) {
+      // we're not using a hash feed
+      cfg['md5Enabled'] = thisCollection.md5Enabled;
+      cfg['sha1Enabled'] = thisCollection.sha1Enabled;
+      cfg['sha256Enabled'] = thisCollection.sha256Enabled;
+      if ('md5Hashes' in thisCollection) {
+        cfg['md5Hashes'] = thisCollection.md5Hashes;
+      }
+      if ('sha1Hashes' in thisCollection) {
+        cfg['sha1Hashes'] = thisCollection.sha1Hashes;
+      }
+      if ('sha256Hashes' in thisCollection) {
+        cfg['sha256Hashes'] = thisCollection.sha256Hashes;
+      }
+    }
+    else {
+      // we're using a hash feed
+      cfg['hashFeed'] = feeds[thisCollection.hashFeed] // pass the hash feed definition
+      cfg['hashFeederSocket'] = feederSocketFile
+    }
 
     cfg['query'] = thisCollection.query;
     cfg['contentTypes'] = thisCollection.contentTypes;
@@ -1523,15 +2299,6 @@ function rollingCollectionSocketConnectionHandler(id, socket, tempName, subject,
     }
     if ('regexDistillationTerms' in thisCollection) {
       cfg['regexDistillationTerms'] = thisCollection.regexDistillationTerms;
-    }
-    if ('md5Hashes' in thisCollection) {
-      cfg['md5Hashes'] = thisCollection.md5Hashes;
-    }
-    if ('sha1Hashes' in thisCollection) {
-      cfg['sha1Hashes'] = thisCollection.sha1Hashes;
-    }
-    if ('sha256Hashes' in thisCollection) {
-      cfg['sha256Hashes'] = thisCollection.sha256Hashes;
     } 
   }
 
@@ -1614,7 +2381,8 @@ function rollingCollectionSocketConnectionHandler(id, socket, tempName, subject,
   });
 
   // Send configuration to worker.  This officially kicks off the work.  After this, we should start receiving data on the socket
-  socket.write(JSON.stringify(outerCfg) + '\n'); 
+  // socket.write(JSON.stringify(outerCfg) + '\n'); 
+  writeToSocket(socket, JSON.stringify(outerCfg));
   socket.end();
   
 }
@@ -2124,7 +2892,8 @@ function mongooseInitFunc() {
   let mongooseConnectFunc = () => {
     mongoose.connect(mongooseUrl, mongooseOptions )
             .then( () => mongooseOnConnectFunc() )
-            .then( () => listener() )
+            .then( () => startFeeder() )
+            // .then( () => listener() ) // now starting after feeder is running
             .catch( (err) => {
               winston.error('Mongoose error whilst connecting to mongo.  Exiting with code 1.');
               winston.error(err);
@@ -2185,6 +2954,18 @@ function connectToDB() {
              }
            });
         }
+
+        if (cols[i].name == "feeds") {
+          winston.debug("Reading feeds");
+          db.collection('feeds').find({}).toArray( (err, res) => {
+             for (let x = 0; x < res.length; x++) {
+                let id = res[x].id;
+                feeds[id] = res[x];
+             }
+             scheduler.updateSchedule(feeds);
+             // cleanRollingDirs();
+           });
+        }
       
         if (cols[i].name == "collections") {
           winston.debug("Reading collections");
@@ -2206,7 +2987,8 @@ function connectToDB() {
                 collectionsData[id] = JSON.parse(res[x].data);
              }
            });
-        }    
+        }
+
       }
 
       if (!foundPrefs) {
@@ -2274,6 +3056,48 @@ function createDefaultUser() {
 
 function sortNumber(a, b) {
   return b - a;
+}
+
+var newChunkHandler = (data, chunk, callback) => {
+  // Handles socket data received from the feeder process
+
+  winston.debug('Processing update');
+  data += chunk
+
+  var splt = data.split("\n").filter( (el) => { return el.length != 0});
+
+  if ( splt.length == 1 && data.indexOf("\n") === -1 ) {
+    // This case means the split resulted in only one element and that doesn't contain the newline delimiter, which means we haven't received an entire update yet...
+    // we'll continue and wait for the next update which will hopefully contain the delimeter
+    return data;
+  }
+  var d = [] // 'd' is an array of complete JSON messages.  each one should later be parsed with JSON.parse()
+  if ( splt.length == 1 && data.endsWith("\n") ) {
+    // this case means the split resulted in only one element and that it does contain the newline delimiter.  This means we received a single complete update.
+    d.push(splt.shift() );
+    data='';
+  }
+  else if ( splt.length > 1 ) {
+    // This case means the split resulted in multiple elements and that it does contain a newline delimiter...
+    // This means we have at least one complete update, and possibly more.
+    if (data.endsWith("\n")) {  //the last element is a full update as data ends with a newline
+      while (splt.length > 0) {
+        d.push(splt.shift());
+      }
+      data = '';
+    }
+    else { // the last element is only a partial update, meaning that more data must be coming
+      while (splt.length > 1) {
+        d.push(splt.shift());
+      }
+      data = splt.shift();  // this should be the last partial update, which should be appended to in the next update
+    }
+  }
+
+  callback(d);
+
+  return data;
+
 }
 
 function chunkHandler(collectionRoot, id, subject, data, chunk, clientSessionId='') {
@@ -2466,6 +3290,100 @@ function purgeSessions(thisRollingCollection, sessionsToPurge) {
   }
 }
 
+function writeToSocket(socket, data) {
+  socket.write(data + '\n');
+}
+
+function feederSocketCommunicationHandler(socket, tempName) {
+
+  feederSocket = socket; // assign our socket globally so we can write to it later
+
+  ////////////////////////
+  //DEAL WITH THE SOCKET//
+  ////////////////////////
+
+  // Buffer for worker data
+  var data = '';
+  
+  // Set socket options
+  feederSocket.setEncoding('utf8');
+
+  //Handle data from the socket
+  feederSocket.on('data', chunk => data = newChunkHandler(data, chunk, feederDataHandler) );
+  
+  feederSocket.on('end', () => {
+    winston.debug('Feeder has disconnected');
+    //delete temporary socket
+    fs.unlink(tempName, () => {});
+    feederInitialized = false;
+  });
+                          
+  // Send configuration to feeder_srv.  After this, we should receive an okay response containing a path to a socket for workers
+  writeToSocket(feederSocket, JSON.stringify( { config: { feedsDir: feedsDir }, feeds: feeds } ));
+}
+
+var feederDataHandler = (data) => {
+  // Handles data sent by feeder_srv
+  while (data.length > 0) {
+    let line = data.shift();
+    let message = JSON.parse(line);
+    // winston.debug('feederDataHandler(): message:', message);
+
+    if (!feederInitialized && 'initialized' in message && message.initialized && 'feederSocket' in message) {
+      winston.info('feederDataHandler(): Feeder is initialized');
+      feederInitialized = true;
+      feederSocketFile = message.feederSocket;
+      winston.debug('feederDataHandler(): Feeder socket file is ' + feederSocketFile);
+      if (!apiInitialized) {
+        listener(); // start the API listener
+      }
+    }
+  }
+};
+
+function startFeeder() {
+  winston.debug('startFeeder(): starting feeder_srv');
+
+  try {
+    // get a temporary file to use as our domain socket
+    var tempName = temp.path({suffix: '.socket'});
+    
+    // open UNIX domain socket to talk to server script, and set the socket handler to feederSocketCommunicationHandler
+    var socketServer = net.createServer( (socket) => feederSocketCommunicationHandler(socket, tempName) );
+
+    // start the feeder_srv
+    socketServer.listen(tempName, () => {
+      
+      winston.debug('Waiting for Feeder connection');
+      winston.debug("Spawning feeder_srv with socket file " + tempName);
+
+      // spawn the feeder process
+      var feederSrv = spawn('./feeder_stub.py ', [tempName], { shell: true, stdio: 'inherit' });
+
+      // wait for the feeder to exit (ideally it shouldn't until we shutdown)
+      feederSrv.on('exit', (code) => {
+        if (typeof code === 'undefined') {
+          winston.debug('Feeder process exited abnormally without an exit code');
+        }
+        else if (code != 0) {
+          winston.debug('Feeder process exited abnormally with exit code',code.toString());
+        }
+        else {
+          winston.debug('Feeder process exited normally with exit code', code.toString());
+        }
+        
+      });
+    });
+  }
+  catch(e) {
+    winston.error("startFeeder(): Caught error:", e);
+  }
+}
+
+function schedulerUpdatedCallback(id) {
+  winston.debug('schedulerUpdatedCallback(): id:', id);
+  writeToSocket( feederSocket, JSON.stringify( { updateFile: true, id: id } ) ); // let feeder server know of our update
+}
 
 
 
@@ -2476,9 +3394,10 @@ function purgeSessions(thisRollingCollection, sessionsToPurge) {
 ////////////////////////////////////////////////////////////////LISTEN/////////////////////////////////////////////////////////////////
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
-function listener () {
+function listener() {
   // Start listening for client traffic and away we go
   // app.listen(listenPort, '127.0.0.1');
   app.listen(listenPort);
+  apiInitialized = true;
   winston.info('Serving on localhost:' + listenPort);
 }

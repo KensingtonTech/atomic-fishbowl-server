@@ -21,11 +21,6 @@ def sigIntHandler(signal, frame):
   log.info("Exiting with code 0")
   sys.exit(0)
 
-def configCallback(cfg):
-  log.debug("Configuration received")
-  #pprint(cfg)
-  configReceived(cfg)
-
 def pkcs1_unpad(text):
   if len(text) > 0 and text[0] == '\x02':
     # Find end of padding marked by nul
@@ -42,101 +37,53 @@ def configReceived(cfgObj):
 
     try:
       cfg = cfgObj['workerConfig']
-      log.debug(pformat(cfg))
+      log.debug('configReceived: cfg:\n' + pformat(cfg))
 
       #decrypt password
       ePassword = cfg['password']
       privateKeyFile = cfg['privateKeyFile']
       rsaKey = RSA.importKey(open(privateKeyFile, "rb").read())
       rawCipherData = b64decode(ePassword)
-      password = pkcs1_unpad(rsaKey.decrypt(rawCipherData))
+      cfg['dpassword'] = pkcs1_unpad(rsaKey.decrypt(rawCipherData)) # write decrypted password back to config
 
-
+      # Leave these
       collectionId = cfg['collectionId']
       id = cfg['id']
       state = cfg['state']
-
-      outputDir = cfg['collectionsDir']
-
+      collectionsDir = cfg['collectionsDir']
       timeformatter='%Y-%B-%d %H:%M:%S'
       timeBegin = time.gmtime( cfg['timeBegin'] )
       timeBeginStr = time.strftime(timeformatter, timeBegin)
       timeEnd = time.gmtime( cfg['timeEnd'] )
       timeEndStr = time.strftime(timeformatter,timeEnd)
       timeClause = "time='%s'-'%s'" % (timeBeginStr, timeEndStr)
-      
       log.debug("timeClause: " + timeClause)
-
-      directory = outputDir + '/' + id
+      outputDir = collectionsDir + '/' + id
+      cfg['outputDir'] = outputDir
+      
       try:
-        os.makedirs(directory)
+        os.makedirs(outputDir)
       except Exception as e:
         pass
+      
       query = 'select * where (%s) && (%s)' % (timeClause, cfg['query'])
-      queryEnc = urllib.quote_plus(query)
+      cfg['queryEnc'] = urllib.quote_plus(query)
       log.info("Query: " + query)
-      log.debug("queryEnc: " + queryEnc)
-      
-      proto='http://'
-      if 'ssl' in cfg and cfg['ssl'] == True:
-        proto='https://'
-      host = cfg['host']
-      port = str(cfg['port'])
-      user = cfg['user']
-      minX = cfg['minX']
-      minY = cfg['minY']
-      gsPath = cfg['gsPath']
-      sofficePath = cfg['sofficePath']
-      sofficeProfilesDir = cfg['sofficeProfilesDir']
-      pdftotextPath = cfg['pdftotextPath']
-      unrarPath = cfg['unrarPath']
-      imageLimit = int(cfg['imageLimit'])
-      
-      distillationEnabled = cfg['distillationEnabled']
-      distillationTerms = []
-      if distillationEnabled:
-        distillationTerms = cfg['distillationTerms']
-      
-      regexDistillationEnabled = cfg['regexDistillationEnabled']
-      regexDistillationTerms = []
-      if regexDistillationEnabled:
-        regexDistillationTerms = cfg['regexDistillationTerms']
-        
-      md5Enabled = cfg['md5Enabled']
-      md5Hashes = []
-      if md5Enabled:
-        md5Hashes = cfg['md5Hashes']
-      
-      sha1Enabled = cfg['sha1Enabled']
-      sha1Hashes = []
-      if sha1Enabled:
-        sha1Hashes = cfg['sha1Hashes']
-        
-      sha256Enabled = cfg['sha256Enabled']
-      sha256Hashes = []
-      if sha256Enabled:
-        sha256Hashes = cfg['sha256Hashes']
+      #log.debug("queryEnc: " + cfg['queryEnc'])
 
-      summaryTimeout = int(cfg['summaryTimeout'])
-      queryTimeout = int(cfg['queryTimeout'])
-      contentTimeout = int(cfg['contentTimeout'])
-
-      maxContentErrors = int(cfg['maxContentErrors'])
-
-      contentTypes = cfg['contentTypes']
 
     except KeyError as e:
       error = 'ERROR: Missing critical configuration data: ' + str(e)
       exitWithError(error)
   
-    baseUrl = proto + host + ':' + port
-    fetcher = Fetcher(client, collectionId, baseUrl, user, password, directory, minX, minY, gsPath, pdftotextPath, sofficePath, sofficeProfilesDir, unrarPath, imageLimit, summaryTimeout, queryTimeout, contentTimeout, maxContentErrors, contentTypes)
     
+    fetcher = Fetcher(cfg, client)
+
     ###QUERY DATA###
     log.info("Executing query")
     client.write_data(json.dumps( { 'collection': { 'id': collectionId, 'state': 'querying' }} ) + '\n') #Tell client that we're querying
     time0 = time.time()
-    numResults = fetcher.runQuery(queryEnc)
+    numResults = fetcher.runQuery()
     log.info(str(numResults) + " sessions returned from query")
     time1 = time.time()
     log.info("Query completed in " + str(time1 - time0) + " seconds")
@@ -146,7 +93,7 @@ def configReceived(cfgObj):
       log.info("Extracting files from sessions")
       client.write_data(json.dumps( { 'collection': { 'id': collectionId, 'state': state }} ) + '\n')
       time0 = time.time()
-      fetcher.pullFiles(distillationTerms, regexDistillationTerms, md5Hashes=md5Hashes, sha1Hashes=sha1Hashes, sha256Hashes=sha256Hashes)
+      fetcher.pullFiles()
       time1 = time.time()
       log.info("Pulled files in " + str(time1 - time0) + " seconds")
 
@@ -208,7 +155,7 @@ def main():
     log.info("afb_worker is starting")
     socketFile = sys.argv[1]
     global client
-    client = communicator(socketFile, configCallback)
+    client = communicator(socketFile, configReceived)
     asyncore.loop(use_poll=True)
     log.info("Exiting afb_worker with code 0")
     sys.exit(0)
