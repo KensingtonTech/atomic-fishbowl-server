@@ -43,10 +43,10 @@ class Hasher():
             num += 1
             continue
           splitLine = line.rstrip().split(delimiter)
-          hashValue = splitLine[valueColumn - 1].lower()
-          hashType = splitLine[typeColumn - 1].lower()
+          hashValue = splitLine[valueColumn].lower()
+          hashType = splitLine[typeColumn].lower()
           if friendlyNameColumn and len(splitLine) >= friendlyNameColumn:
-            friendlyName = splitLine[friendlyNameColumn - 1]
+            friendlyName = splitLine[friendlyNameColumn]
           else:
             friendlyName = None
           if hashType in ['md5', 'sha1', 'sha256']:
@@ -92,10 +92,10 @@ class Hasher():
           num += 1
           continue
         splitLine = line.rstrip().split(delimiter)
-        hashValue = splitLine[valueColumn - 1].lower()
-        hashType = splitLine[typeColumn - 1].lower()
+        hashValue = splitLine[valueColumn].lower()
+        hashType = splitLine[typeColumn].lower()
         if friendlyNameColumn and len(splitLine) >= friendlyNameColumn:
-          friendlyName = splitLine[friendlyNameColumn - 1]
+          friendlyName = splitLine[friendlyNameColumn]
         else:
           friendlyName = None
         if hashType in ['md5', 'sha1', 'sha256']:
@@ -132,7 +132,10 @@ class Hasher():
     for id in feeds:
       feed = feeds[id]
       #log.debug('\n' + pformat(feed) )
-      with open(self.feedsDir + '/' + id + '.feed', 'r', -1 ) as feedFile:
+      filename = self.feedsDir + '/' + id + '.feed' 
+      with open(filename, 'r', -1 ) as feedFile:
+        feedFile.seek(0)
+        #pprint(feedFile.readlines())
         self.feedData[id] = { 'md5': {}, 'sha1': {}, 'sha256': {} }
         
         crc = adler32( feedFile.read() ) #calculate CRC file (faster than hashing, in theory, and is good enough for us)
@@ -155,10 +158,12 @@ class Hasher():
             num += 1
             continue
           splitLine = line.rstrip().split(delimiter)
-          hashValue = splitLine[valueColumn - 1].lower()
-          hashType = splitLine[typeColumn - 1].lower()
+          hashValue = splitLine[valueColumn].lower()
+          hashType = splitLine[typeColumn].lower()
+          #print "hashValue: " + hashValue
+          #print "hashType: " + hashType
           if friendlyNameColumn and len(splitLine) >= friendlyNameColumn:
-            friendlyName = splitLine[friendlyNameColumn - 1]
+            friendlyName = splitLine[friendlyNameColumn]
           else:
             friendlyName = None
           if hashType in ['md5', 'sha1', 'sha256']:

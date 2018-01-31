@@ -204,7 +204,8 @@ const decryptor = new NodeRSA( internalPrivateKey );
 decryptor.setOptions({encryptionScheme: 'pkcs1'});
 
 // Set up feed scheduler
-var scheduler = new feedScheduler(feedsDir, winston, decryptor, () => schedulerUpdatedCallback);
+// var scheduler = new feedScheduler(feedsDir, winston, decryptor, () => schedulerUpdatedCallback);
+var scheduler = new feedScheduler(feedsDir, winston, decryptor, (id) => schedulerUpdatedCallback(id));
 
 // Create LibreOffice profiles dir
 if ( !fs.existsSync(dataDir) ) {
@@ -3061,7 +3062,7 @@ function sortNumber(a, b) {
 var newChunkHandler = (data, chunk, callback) => {
   // Handles socket data received from the feeder process
 
-  winston.debug('Processing update');
+  // winston.debug('Processing update');
   data += chunk
 
   var splt = data.split("\n").filter( (el) => { return el.length != 0});
@@ -3381,7 +3382,7 @@ function startFeeder() {
 }
 
 function schedulerUpdatedCallback(id) {
-  winston.debug('schedulerUpdatedCallback(): id:', id);
+  // winston.debug('schedulerUpdatedCallback(): id:', id);
   writeToSocket( feederSocket, JSON.stringify( { updateFile: true, id: id } ) ); // let feeder server know of our update
 }
 

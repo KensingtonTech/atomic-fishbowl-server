@@ -43,9 +43,9 @@ def exitWithException(message):
   sys.exit(1)
 
 def configReceived(cfg):
-  log.debug("configReceived(): Data received on configuration socket")
+  # log.debug("configReceived(): Data received on configuration socket")
   try:
-    log.debug('configReceived():\n' + pformat(cfg))
+    #log.debug('configReceived():\n' + pformat(cfg))
     global hasher
     
     if 'config' in cfg:

@@ -323,6 +323,7 @@ class ContentProcessor:
     self.pdfsAllowed = False
     self.dodgyArchivesAllowed = False
     self.hashesAllowed = False
+    self.officeAllowed = False
     if 'images' in self.cfg['contentTypes']:
       self.imagesAllowed = True
     if 'pdfs' in self.cfg['contentTypes']:
@@ -1091,105 +1092,112 @@ class ContentProcessor:
         try:
           rarFileHandle = rarfile.RarFile(self.convertPartToStringIO(part), errors='strict')
         except rarfile.PasswordRequired as e:
-          log.exception("ContentProcessor: extractFilesFromMultiPart(): RAR requires password: %s" % e)
+          log.debug("ContentProcessor: extractFilesFromMultiPart(): RAR requires password: %s" % e)
           pass
         except rarfile.BadRarFile as e:
-          log.exception("ContentProcessor: extractFilesFromMultiPart(): Bad RAR file")
+          log.debug("ContentProcessor: extractFilesFromMultiPart(): Bad RAR file")
         except rarfile.NotRarFile as e:
-          log.exception("ContentProcessor: extractFilesFromMultiPart(): Not a RAR file")
+          log.debug("ContentProcessor: extractFilesFromMultiPart(): Not a RAR file")
         except rarfile.BadRarName as e:
-          log.exception("ContentProcessor: extractFilesFromMultiPart(): Cannot guess multipart RAR name components")
+          log.debug("ContentProcessor: extractFilesFromMultiPart(): Cannot guess multipart RAR name components")
         except rarfile.NoRarEntry as e:
-          log.exception("ContentProcessor: extractFilesFromMultiPart(): File not found in RAR")
+          log.debug("ContentProcessor: extractFilesFromMultiPart(): File not found in RAR")
         except rarfile.NeedFirstVolume as e:
-          log.exception("ContentProcessor: extractFilesFromMultiPart(): Need to start from first volume in RAR archive")
+          log.debug("ContentProcessor: extractFilesFromMultiPart(): Need to start from first volume in RAR archive")
         except rarfile.NoCrypto as e:
-          log.exception("ContentProcessor: extractFilesFromMultiPart(): No crypto services available to parse encrypted headers")
+          log.debug("ContentProcessor: extractFilesFromMultiPart(): No crypto services available to parse encrypted headers")
         except rarfile.RarExecError as e:
-          log.exception("ContentProcessor: extractFilesFromMultiPart(): There was a problem reported by unrar")
+          log.debug("ContentProcessor: extractFilesFromMultiPart(): There was a problem reported by unrar")
         except rarfile.RarCRCError as e:
-          log.exception("ContentProcessor: extractFilesFromMultiPart(): CRC error during unpacking of RAR")
+          log.debug("ContentProcessor: extractFilesFromMultiPart(): CRC error during unpacking of RAR")
         except rarfile.RarOpenError as e:
-          log.exception("ContentProcessor: extractFilesFromMultiPart(): Error opening RAR file")
+          log.debug("ContentProcessor: extractFilesFromMultiPart(): Error opening RAR file")
         except rarfile.RarUserError as e:
-          log.exception("ContentProcessor: extractFilesFromMultiPart(): RAR user error")
+          log.debug("ContentProcessor: extractFilesFromMultiPart(): RAR user error")
         except rarfile.RarMemoryError as e:
-          log.exception("ContentProcessor: extractFilesFromMultiPart(): RAR memory error")
+          log.debug("ContentProcessor: extractFilesFromMultiPart(): RAR memory error")
         except rarfile.RarNoFilesError as e:
-          log.exception("ContentProcessor: extractFilesFromMultiPart(): RAR no files that match pattern were found")
+          log.debug("ContentProcessor: extractFilesFromMultiPart(): RAR no files that match pattern were found")
         except rarfile.RarUserBreak as e:
-          log.exception("ContentProcessor: extractFilesFromMultiPart(): RAR user break")
+          log.debug("ContentProcessor: extractFilesFromMultiPart(): RAR user break")
         except rarfile.RarWrongPassword as e:
-          log.exception("ContentProcessor: extractFilesFromMultiPart(): RAR wrong password")
+          log.debug("ContentProcessor: extractFilesFromMultiPart(): RAR wrong password")
         except rarfile.RarUnknownError as e:
-          log.exception("ContentProcessor: extractFilesFromMultiPart(): RAR unknown error")
+          log.debug("ContentProcessor: extractFilesFromMultiPart(): RAR unknown error")
         except rarfile.RarCannotExec as e:
-          log.exception("ContentProcessor: extractFilesFromMultiPart(): RAR executable not found")
+          log.debug("ContentProcessor: extractFilesFromMultiPart(): RAR executable not found")
         except Exception as e:
           log.exception("ContentProcessor: extractFilesFromMultiPart(): Unhandled exception during rar extraction")
           if self.cfg['devmode']:
             log.debug("ContentProcessor: extractFilesFromMultiPart(): extractFilesFromMultipart(): Exiting with code 1") #we only exit if in dev mode, so we can deal with the problem afterwards
             sys.exit(1)
 
-        #print rarFileHandle.needs_password()
-        #print rarFileHandle.namelist()
-        #rarFileHandle.printdir()
-        #print rarFileHandle.testrar()
+          #print rarFileHandle.needs_password()
+          #print rarFileHandle.namelist()
+          #rarFileHandle.printdir()
+          #print rarFileHandle.testrar()
 
-        #we need something here for if the entire rar file table is encrypted
-        table_len = len(rarFileHandle.namelist())
-        #log.debug('ContentProcessor: extractFilesFromMultiPart(): table_len: %s' % table_len)
-        table_content = rarFileHandle.namelist()
-        #log.debug('ContentProcessor: extractFilesFromMultiPart(): table_content: %s' % table_content)
-        table_needs_password = rarFileHandle.needs_password()
-        #log.debug('ContentProcessor: extractFilesFromMultiPart(): table_needs_password: %s' % table_needs_password)
+          #we need something here for if the entire rar file table is encrypted
+          table_len = len(rarFileHandle.namelist())
+          #log.debug('ContentProcessor: extractFilesFromMultiPart(): table_len: %s' % table_len)
+          table_content = rarFileHandle.namelist()
+          #log.debug('ContentProcessor: extractFilesFromMultiPart(): table_content: %s' % table_content)
+          table_needs_password = rarFileHandle.needs_password()
+          #log.debug('ContentProcessor: extractFilesFromMultiPart(): table_needs_password: %s' % table_needs_password)
 
-        #if table_len == 0 and table_needs_password and len(self.cfg['distillationTerms']) == 0 and len(self.cfg['regexDistillationTerms']) == 0 and self.dodgyArchivesAllowed:
-        if table_len == 0 and table_needs_password and not self.cfg['distillationEnabled'] and not self.cfg['regexDistillationEnabled'] and self.dodgyArchivesAllowed:
-          #this means that the archive's table is encrypted and we cannot see anything inside it
-          saveRarFile = True
-          log.debug('ContentProcessor: extractFilesFromMultiPart(): RAR archive %s has an encrypted table!' % filename)
-          contentObj.contentType = 'encryptedRarTable'
-          contentObj.contentFile = filename #this is the rar file itself
-          contentObj.fromArchive = False # if the file is encrypted, it becomes the content itself, not what's inside it,so it's not FROM an archive, it IS the archive
-          contentObj.isArchive = True
-          self.thisSession['images'].append( contentObj.get() )
-
-        for rinfo in rarFileHandle.infolist():
-          contentObj = copy(origContentObj)
-
-          archivedFilename = rinfo.filename
-          contentObj.contentFile = archivedFilename
-          contentObj.archiveFilename = filename
-          archivedFile_is_encrypted = rinfo.needs_password()
-
-          #if archivedFile_is_encrypted and len(self.cfg['distillationTerms']) == 0 and len(self.cfg['regexDistillationTerms']) == 0 and self.dodgyArchivesAllowed: #this means that the RAR file's table is not encrypted, but individual files within it are
-          if archivedFile_is_encrypted and not self.cfg['distillationEnabled'] and not self.cfg['regexDistillationEnabled'] and self.dodgyArchivesAllowed: #this means that the RAR file's table is not encrypted, but individual files within it are
+          #if table_len == 0 and table_needs_password and len(self.cfg['distillationTerms']) == 0 and len(self.cfg['regexDistillationTerms']) == 0 and self.dodgyArchivesAllowed:
+          if table_len == 0 and table_needs_password and not self.cfg['distillationEnabled'] and not self.cfg['regexDistillationEnabled'] and self.dodgyArchivesAllowed:
+            #this means that the archive's table is encrypted and we cannot see anything inside it
             saveRarFile = True
-            log.debug('ContentProcessor: extractFilesFromMultiPart(): RAR contentFile %s from archive %s is encrypted!' % (archivedFilename,filename))
-            contentObj.contentType = 'encryptedRarEntry'
-            contentObj.fromArchive = True
+            log.debug('ContentProcessor: extractFilesFromMultiPart(): RAR archive %s has an encrypted table!' % filename)
+            contentObj.contentType = 'encryptedRarTable'
+            contentObj.contentFile = filename #this is the rar file itself
+            contentObj.fromArchive = False # if the file is encrypted, it becomes the content itself, not what's inside it,so it's not FROM an archive, it IS the archive
+            contentObj.isArchive = True
             self.thisSession['images'].append( contentObj.get() )
-            continue
 
-          else: #identify archived file and save it permanently if a supported file type
-            extractedFileObj = StringIO.StringIO() #we will write the extracted file to this buffer
+          for rinfo in rarFileHandle.infolist():
+            contentObj = copy(origContentObj)
 
-            #extract the file to buffer
-            compressedFileHandle = rarFileHandle.open(archivedFilename) #compressedFileHandle is a handle to the file while it's still in the rar file.  we will extract from this object
-            extractedFileObj.write(compressedFileHandle.read() ) #this is where we extract the file into
-            compressedFileHandle.close()
+            archivedFilename = rinfo.filename
+            contentObj.contentFile = archivedFilename
+            contentObj.archiveFilename = filename
+            archivedFile_is_encrypted = rinfo.needs_password()
+            #log.debug('archivedFile_is_encrypted:' + str(archivedFile_is_encrypted))
 
-            contentObj.setStringIOContent(extractedFileObj)
-            extractedFileObj.close()
-            self.processExtractedFile(contentObj) #now let's process the extracted file
-            extractedFileObj.close()
+            #if archivedFile_is_encrypted and not self.cfg['distillationEnabled'] and not self.cfg['regexDistillationEnabled'] and self.dodgyArchivesAllowed:
+            if archivedFile_is_encrypted and self.dodgyArchivesAllowed:
+              # this means that the RAR file's table is not encrypted, but the file we're trying to extract is, and we don't want to distill it
+              saveRarFile = True
+              log.debug('ContentProcessor: extractFilesFromMultiPart(): RAR contentFile %s from archive %s is encrypted.  Marking archive for save.' % (archivedFilename,filename))
+              contentObj.contentType = 'encryptedRarEntry'
+              contentObj.fromArchive = True
+              self.thisSession['images'].append( contentObj.get() )
+              continue
 
-        if saveRarFile:
-          fp = open(os.path.join(self.cfg['outputDir'], filename), 'wb')
-          fp.write(part.get_payload(decode=True))
-          fp.close()
-        continue
+            elif archivedFile_is_encrypted and not self.dodgyArchivesAllowed:
+              # this means that the RAR file's table is not encrypted, but the file we're trying to extract is, and we do want to distill it, so do nothing
+              log.debug('ContentProcessor: extractFilesFromMultiPart(): RAR contentFile %s from archive %s is encrypted, but not marking for save.' % (archivedFilename,filename))
+              continue
+
+            else: # file isn't encrypted.  identify archived file and process it if a supported file type
+              extractedFileObj = StringIO.StringIO() #we will write the extracted file to this buffer
+
+              #extract the file to buffer
+              compressedFileHandle = rarFileHandle.open(archivedFilename) #compressedFileHandle is a handle to the file while it's still in the rar file.  we will extract from this object
+              extractedFileObj.write(compressedFileHandle.read() ) #this is where we extract the file into
+              compressedFileHandle.close()
+
+              contentObj.setStringIOContent(extractedFileObj)
+              extractedFileObj.close()
+              self.processExtractedFile(contentObj) #now let's process the extracted file
+              extractedFileObj.close()
+
+          if saveRarFile:
+            fp = open(os.path.join(self.cfg['outputDir'], filename), 'wb')
+            fp.write(part.get_payload(decode=True))
+            fp.close()
+          continue
 
     return self.thisSession
 

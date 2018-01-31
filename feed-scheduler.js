@@ -31,7 +31,7 @@ module.exports = class {
         }
 
         this.addFeed(feed);
-        this.updateFeedCallback(id);
+        setTimeout( () => this.updateFeedCallback(id), 10000 ); // delay pulling feeds 10 seconds to avoid race condition with feed_server not having enough time to read feeds at startup
 
       }
     }
