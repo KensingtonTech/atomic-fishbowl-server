@@ -317,7 +317,6 @@ class ContentProcessor:
     rarfile.UNRAR_TOOL = self.cfg['unrarPath']
     #self.contentCount = contentCount # is a manager proxy
     #self.contentErrors = contentErrors # is a manager proxy
-
     
     self.imagesAllowed = False
     self.pdfsAllowed = False
@@ -833,7 +832,7 @@ class ContentProcessor:
         
   def go(self, fileStr, session, sessionId):
     try:
-      if self.cfg['useHashFeed']:
+      if self.hashesAllowed and self.cfg['useHashFeed']:
         log.debug('ContentProcessor: go(): Initializing FeedManager')
         self.socketFile = self.cfg['hashFeederSocket']
         self.hashFeedId = self.cfg['hashFeed']['id']

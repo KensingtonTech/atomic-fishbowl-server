@@ -153,6 +153,8 @@ var feederSocketFile = null;
 var feederInitialized = false;
 var apiInitialized = false;
 
+var tokenExpirationSeconds = 60 * 60 * 24; // 24 hours
+
 // Multipart upload config
 const upload = multer({ dest: tempDir });
 
@@ -277,7 +279,8 @@ var defaultPreferences = {
   queryTimeout: 5,
   contentTimeout: 5,
   queryDelayMinutes: 1,
-  maxContentErrors: 10
+  maxContentErrors: 10,
+  debugLogging: false
 };
 
 
@@ -387,7 +390,7 @@ app.post('/api/login', passport.authenticate('local'), (req,res) => {
     else {
       winston.info("Login successful for user", req.body.username);
       winston.debug("Found user " + req.body.username + ".  Signing token");
-      let token = jwt.sign(user.toObject({versionKey: false, transform: transformUser}), jwtPrivateKey, { subject: user.id, algorithm: 'RS256', expiresIn: 60*60*24, jwtid: uuidV4() }); // expires in 24 hours
+      let token = jwt.sign(user.toObject({versionKey: false, transform: transformUser}), jwtPrivateKey, { subject: user.id, algorithm: 'RS256', expiresIn: tokenExpirationSeconds, jwtid: uuidV4() }); // expires in 24 hours
       res.cookie('access_token', token, { httpOnly: true, secure: true });
       // res.cookie( req.session );
       res.json({
@@ -405,9 +408,10 @@ app.get('/api/logout', passport.authenticate('jwt', { session: false } ), (req,r
   // winston.debug("decoded:", decoded);
   let tokenId = decoded.jti; //store this
   // winston.debug("decoded tokenId:", tokenId);
-  tokenBlacklist[tokenId] = tokenId;
+  // tokenBlacklist[tokenId] = tokenId;
+  blacklistToken(tokenId);
   res.clearCookie('access_token');
-  res.status(200).send(JSON.stringify( { 'status': 'ok' } ));
+  res.status(200).send(JSON.stringify( { success: true } ));
 });
 
 app.get('/api/isloggedin', passport.authenticate('jwt', { session: false } ), (req, res) => {
@@ -467,13 +471,13 @@ app.get('/api/usecases', passport.authenticate('jwt', { session: false } ), (req
 
 //////////////////////USERS//////////////////////
 
-app.get('/api/users', passport.authenticate('jwt', { session: false } ), (req,res) => {
-  winston.info('GET /api/users');
+app.get('/api/user', passport.authenticate('jwt', { session: false } ), (req,res) => {
+  winston.info('GET /api/user');
   try {
     User.find( (err, users) => {
       if (err) {
         winston.error("obtaining users:", err);
-        res.sendStatus(500);
+        res.status(500).send( JSON.stringify( { success: false, error: err } ) );
       }
       else {
         res.json(users);
@@ -482,7 +486,7 @@ app.get('/api/users', passport.authenticate('jwt', { session: false } ), (req,re
     } );
   }
   catch(e) {
-    winston.error('ERROR GET /api/users:',e);
+    winston.error('ERROR GET /api/user:',e);
   }
 });
 
@@ -493,7 +497,7 @@ app.get('/api/user/:uname', passport.authenticate('jwt', { session: false } ), (
     User.findOne( {'username' : uname },(err, user) => {
       if (err) {
         winston.error('ERROR finding user ' + uname + ':', err);
-        res.sendStatus(500);
+        res.status(500).send( JSON.stringify( { success: false, error: err } ) );
       }
       else {
         res.json(user.toObject());
@@ -506,19 +510,20 @@ app.get('/api/user/:uname', passport.authenticate('jwt', { session: false } ), (
   }
 });  
 
-app.post('/api/adduser', passport.authenticate('jwt', { session: false } ), (req, res) => {
-  winston.info("POST /api/adduser for user " + req.body.username);
+app.post('/api/user', passport.authenticate('jwt', { session: false } ), (req, res) => {
+  // add a new user
+  winston.info("POST /api/user for user " + req.body.username);
   let u = req.body;
   let uPassword = decryptor.decrypt(u.password, 'utf8');
   u.password = uPassword;
   User.register(new User({ id: uuidV4(), username : u.username, fullname: u.fullname, email: u.email, enabled: u.enabled }), u.password, (err, user) => {
     if (err) {
       winston.error("Error adding user " + u.username  + " by user " + req.body.username + ' : ' + err);
-      res.status(500).send( JSON.stringify( { 'status': 'error', 'message': err } ) );
+      res.status(500).send( JSON.stringify( { success: false, error: err } ) );
     }
     else {
       winston.info("User " + req.body.username + " added user " + u.username);
-      res.status(201).send( JSON.stringify( { 'status': 'ok' } ) );
+      res.status(201).send( JSON.stringify( { success: true } ) );
     }
   });
 });
@@ -526,24 +531,24 @@ app.post('/api/adduser', passport.authenticate('jwt', { session: false } ), (req
 
 function updateUser(req, res) {
   let u = req.body;
-  User.findOneAndUpdate( { 'id': u.id }, u, (err, doc) => {
+  User.findOneAndUpdate( { id: u.id }, u, (err, doc) => {
     winston.info("Updating user object with id", u.id);
     //now update user object
     if (err) {
       winston.error("modifying user with id" + u.id + ':', err);
-      res.sendStatus(500);
+      res.status(500).send( JSON.stringify( { success: false, error: err } ) );
     }
     else {
       winston.info("Updated user with id:", u.id);
-      // res.sendStatus(201);
-      res.status(201).send( JSON.stringify( { 'status': 'ok' } ) );
+      res.status(201).send( JSON.stringify( { success: true } ) );
     }
   });
 
 }
 
-app.post('/api/updateuser', passport.authenticate('jwt', { session: false } ), (req, res) => {
-  winston.info("POST /api/updateuser");
+app.post('/api/user/edit', passport.authenticate('jwt', { session: false } ), (req, res) => {
+  // edit an existing user
+  winston.info("POST /api/user/edit");
 
   let u = req.body;
   //winston.debug('user:', u);
@@ -573,15 +578,14 @@ app.post('/api/updateuser', passport.authenticate('jwt', { session: false } ), (
               if (err) throw(err);
               delete u.password; //we don't want this getting set when we update the user object
               updateUser(req, res);
-              // res.json( { 'status': 'ok' } );
             });
           });
         });
       });
     }
     catch(e) {
-      winston.error("changing password:", e);
-      res.sendStatus(500);
+      winston.error("Error changing changing password:", e);
+      res.status(500).send( JSON.stringify( { success: false, error: e.message || e } ) );
       return;
     }
   }
@@ -596,13 +600,13 @@ app.delete('/api/user/:id', passport.authenticate('jwt', { session: false } ), (
         throw err;
       }
       else {
-        res.sendStatus(204);
+        res.status(204).send( JSON.stringify( { success: true } ) );
       }
     } );
   }
-  catch(exception) {
-    winston.error("removing user:", exception);
-    res.sendStatus(500);
+  catch(e) {
+    winston.error("Error removing user:", e);
+    res.status(500).send( JSON.stringify( { success: false, error: e.message || e } ) );
   }
 });
 
@@ -624,7 +628,7 @@ app.get('/api/version', passport.authenticate('jwt', { session: false } ), (req,
   }
   catch(e) {
     winston.error('ERROR GET /api/version:', e);
-    res.sendStatus(500);
+    res.status(500).send( JSON.stringify( { success: false, error: e.message || e } ) );
   }
 });
 
@@ -636,14 +640,14 @@ app.get('/api/version', passport.authenticate('jwt', { session: false } ), (req,
 //////////////////////COLLECTIONS//////////////////////
   
 
-app.get('/api/collections', passport.authenticate('jwt', { session: false } ), (req,res) => {
+app.get('/api/collection', passport.authenticate('jwt', { session: false } ), (req,res) => {
   winston.info('GET /api/collections');
   try {
     res.json(collections);
   }
   catch(e) {
-    winston.error('ERROR GET /api/collections:', e);
-    res.sendStatus(500);
+    winston.error('ERROR GET /api/collection:', e);
+    res.status(500).send( JSON.stringify( { success: false, error: e.message || e } ) );
   }
 });
 
@@ -663,21 +667,21 @@ app.delete('/api/collection/:id', passport.authenticate('jwt', { session: false 
     if (collectionsData[id]) {
       delete collectionsData[id];
       delete collections[id];
-      res.status(200).send( JSON.stringify( {'status': 'ok'} ) );
+      res.status(200).send( JSON.stringify( { success: true } ) );
     }
     else {
       res.body="Collection not found";
-      res.sendStatus(400);
+      res.status(400).send( JSON.stringify( { success: false, error: 'collection ' + id + ' not found'} ) );
     }
   }
   catch(e) {
-    res.sendStatus(500);
     winston.error(`ERROR DELETE /api/collection/${id} :`, e);
+    res.status(500).send( JSON.stringify( { success: false, error: e.message || e } ) );
   }
-  db.collection('collections').remove( { 'id': id }, (err, res) => {
+  db.collection('collections').remove( { id: id }, (err, res) => {
     if (err) throw err;
   });
-  db.collection('collectionsData').remove( { 'id': id }, (err, res) => {
+  db.collection('collectionsData').remove( { id: id }, (err, res) => {
     if (err) throw err;
   });
   
@@ -689,20 +693,20 @@ app.delete('/api/collection/:id', passport.authenticate('jwt', { session: false 
   }
 });
 
-app.get('/api/collectiondata/:id', passport.authenticate('jwt', { session: false } ), (req, res) => {
+app.get('/api/collection/data/:id', passport.authenticate('jwt', { session: false } ), (req, res) => {
   let id = req.params.id;
-  winston.info(`GET /api/collectiondata/${id}`);
+  winston.info(`GET /api/collection/data/${id}`);
   try {
     res.json(collectionsData[id]);
   }
   catch(e) {
-    winston.error('ERROR GET /api/collectiondata/:id:', e);
-    res.sendStatus(500);
+    winston.error('ERROR GET /api/collection/data/:id:', e);
+    res.status(500).send( JSON.stringify( { success: false, error: e.message || e } ) );
   }
 });
 
-app.post('/api/addcollection', passport.authenticate('jwt', { session: false } ), (req, res) => {
-  winston.info("POST /api/addcollection");
+app.post('/api/collection', passport.authenticate('jwt', { session: false } ), (req, res) => {
+  winston.info("POST /api/collection");
   // winston.debug(req);
   try {
     let timestamp = new Date().getTime();
@@ -766,25 +770,23 @@ app.post('/api/addcollection', passport.authenticate('jwt', { session: false } )
    
     db.collection('collections').insertOne( collection, (err) => {
       if (err) throw err;
+
       db.collection('collectionsData').insertOne( { id: collection.id, data: JSON.stringify(cDef)}, (err) => {
         if (err) throw err;
-        // res.sendStatus(201);
-        res.status(201).send( JSON.stringify( { 'status': 'ok' } ) );
+        res.status(201).send( JSON.stringify( { success: true } ) );
       });
     });
     
-
-    
   }
   catch(e) {
-    winston.error("POST /api/addcollection:", e);
-    res.sendStatus(500);
+    winston.error("POST /api/collection:", e);
+    res.status(500).send( JSON.stringify( { success: false, error: e.message || e } ) );
   }
 });
 
 
-app.post('/api/editcollection', passport.authenticate('jwt', { session: false } ), (req, res) => {
-  winston.info("POST /api/editcollection");
+app.post('/api/collection/edit', passport.authenticate('jwt', { session: false } ), (req, res) => {
+  winston.info("POST /api/collection/edit");
   try {
     let timestamp = new Date().getTime();
     let collection = req.body;
@@ -795,7 +797,7 @@ app.post('/api/editcollection', passport.authenticate('jwt', { session: false } 
       throw(`Cannot update collection ${collection.name}.  Collection ${id} does not exist`);
     }
 
-    // do something here to stop an existing rolling collection
+    // do something here to stop / reload an existing rolling collection
 
     let modifier = {
       username: req.user.username,
@@ -820,16 +822,14 @@ app.post('/api/editcollection', passport.authenticate('jwt', { session: false } 
       db.collection('collectionsData').updateOne( { id: collection.id }, { $set: { data: JSON.stringify(cDef) } }, (err, result) => {
         // Update collection data in mongo
         if (err) throw err;
-
-        // res.sendStatus(205);
-        res.status(205).send( JSON.stringify( { 'status': 'ok' } ) );
+        res.status(205).send( JSON.stringify( { success: true } ) );
       });
     });
 
   }
   catch(e) {
-    winston.error("POST /api/editcollection:", e);
-    res.sendStatus(500);
+    winston.error("POST /api/collection/edit:", e);
+    res.status(500).send( JSON.stringify( { success: false, error: e.message || e } ) );
   }
 });
 
@@ -847,7 +847,7 @@ app.get('/api/feed', passport.authenticate('jwt', { session: false } ), (req,res
   }
   catch(e) {
     winston.error('ERROR GET /api/feeds:', e);
-    res.sendStatus(500);
+    res.status(500).send( JSON.stringify( { success: false, error: e.message || e } ) );
   }
 });
 
@@ -933,7 +933,7 @@ app.post('/api/feed/manual', passport.authenticate('jwt', { session: false } ), 
           else 
           {
             feeds[id] = feed;
-            res.status(201).send( JSON.stringify( { status: 'ok' } ) );
+            res.status(201).send( JSON.stringify( { success: true } ) );
             // writeToSocket( feederSocket, JSON.stringify( { feeds: feeds } ) );
             writeToSocket( feederSocket, JSON.stringify( { new: true, feed: feed } ) );
           }
@@ -944,7 +944,7 @@ app.post('/api/feed/manual', passport.authenticate('jwt', { session: false } ), 
   }
   catch(e) {
     winston.error("POST /api/feed/manual: " + e);
-    res.status(500).send( JSON.stringify({ error: e.message }));
+    res.status(500).send( JSON.stringify( { success: false, error: e.message || e } ) );
   }
 });
 
@@ -1060,7 +1060,7 @@ app.post('/api/feed/scheduled', passport.authenticate('jwt', { session: false } 
   }
   catch(e) {
     winston.error("POST /api/feed/scheduled: " + e );
-    res.status(500).send( JSON.stringify( { success: false, error: e } ) )
+    res.status(500).send( JSON.stringify( { success: false, error: e.message || e } ) );
   }
 });
 
@@ -1115,7 +1115,7 @@ app.post('/api/feed/edit/withfile', passport.authenticate('jwt', { session: fals
           }
           else {
             feeds[id] = feed;
-            res.status(201).send( JSON.stringify( { status: 'ok' } ) );
+            res.status(201).send( JSON.stringify( { success: true } ) );
             // writeToSocket( feederSocket, JSON.stringify( { feeds: feeds } ) );
             writeToSocket( feederSocket, JSON.stringify( { update: true, feed: feed } ) ); // let feeder server know of our update
           }
@@ -1126,7 +1126,7 @@ app.post('/api/feed/edit/withfile', passport.authenticate('jwt', { session: fals
   }
   catch(e) {
     winston.error("POST /api/feed/edit/withfile: " + e);
-    res.status(500).send( JSON.stringify({ error: e.message }));
+    res.status(500).send( JSON.stringify( { success: false, error: e.message || e } ) );
   }
 
 });
@@ -1175,7 +1175,7 @@ app.post('/api/feed/edit/withoutfile', passport.authenticate('jwt', { session: f
         }
         else {
           feeds[id] = feed;
-          res.status(201).send( JSON.stringify( { status: 'ok' } ) );
+          res.status(201).send( JSON.stringify( { success: true } ) );
           if (oldFeed.type == 'scheduled') {
             // tell scheduler to remove old feed
             scheduler.delFeed(feed.id);
@@ -1236,7 +1236,7 @@ app.post('/api/feed/edit/withoutfile', passport.authenticate('jwt', { session: f
   }
   catch(e) {
     winston.error("POST /api/feed/edit/withoutfile: " + e);
-    res.status(500).send( JSON.stringify({ error: e.message }));
+    res.status(500).send( JSON.stringify( { success: false, error: e.message || e } ) );
   }
 });
 
@@ -1277,7 +1277,8 @@ app.post('/api/feed/testurl', passport.authenticate('jwt', { session: false } ),
   }
   catch(e) {
     winston.error("POST /api/feed/testurl " + e);
-    res.status(500).send(JSON.stringify(e.message || e) );
+    // res.status(500).send(JSON.stringify(e.message || e) );
+    res.status(500).send( JSON.stringify( { success: false, error: e.message || e } ) );
     return;
   }
 
@@ -1424,7 +1425,7 @@ app.get('/api/feed/filehead/:id', passport.authenticate('jwt', { session: false 
   }
   catch(e) {
     winston.error("GET /api/feed/filehead/:id : " + e);
-    res.status(500).send(JSON.stringify({ error: e.message}) );
+    res.status(500).send( JSON.stringify( { success: false, error: e.message || e } ) );
     return;
   }
 });
@@ -1461,7 +1462,7 @@ app.delete('/api/feed/:id', passport.authenticate('jwt', { session: false } ), (
   }
   catch(e) {
     winston.error(`ERROR DELETE /api/feed/${id} :`, e);
-    res.status(500).send( JSON.stringify( { success: false, error: e } ) );
+    res.status(500).send( JSON.stringify( { success: false, error: e.message || e } ) );
   }
   
   /*
@@ -1480,7 +1481,7 @@ app.get('/api/feed/status', passport.authenticate('jwt', { session: false } ), (
   }
   catch(e) {
     winston.error(`ERROR GET /api/feed/status :`, e);
-    res.status(500).send( JSON.stringify( { success: false, error: e } ) );
+    res.status(500).send( JSON.stringify( { success: false, error: e.message || e } ) );
   }
 });
 
@@ -1493,8 +1494,8 @@ app.get('/api/feed/status', passport.authenticate('jwt', { session: false } ), (
 
 //////////////////////NWSERVERS//////////////////////
 
-app.get('/api/nwservers', passport.authenticate('jwt', { session: false } ), (req, res) => {
-  winston.info('GET /api/nwservers');
+app.get('/api/nwserver', passport.authenticate('jwt', { session: false } ), (req, res) => {
+  winston.info('GET /api/nwserver');
   try {
     let servers = JSON.parse(JSON.stringify(nwservers));  // make deep copy of nwservers
     for (let server in servers) {
@@ -1506,8 +1507,8 @@ app.get('/api/nwservers', passport.authenticate('jwt', { session: false } ), (re
     res.json(servers);
   }
   catch(e) {
-    winston.error('ERROR GET /api/nwservers', e);
-    res.sendStatus(500);
+    winston.error('ERROR GET /api/nwserver', e);
+    res.status(500).send( JSON.stringify( { success: false, error: e.message || e } ) );
   }
 });
 
@@ -1516,19 +1517,20 @@ app.delete('/api/nwserver/:id', passport.authenticate('jwt', { session: false } 
   winston.info(`DELETE /api/nwserver/${servId}`);
   try {
     delete nwservers[servId];
-    res.status(200).send( JSON.stringify( {'status': 'ok'} ) );
+    res.status(200).send( JSON.stringify( { success: true } ) );
     db.collection('nwservers').remove( { 'id': servId }, (err, res) => {
       if (err) throw err;
     });
   }
-  catch(exception) {
-    winston.error(`ERROR DELETE /api/nwserver/${servId} :`,exception);
-    res.sendStatus(500);
+  catch(e) {
+    winston.error(`ERROR DELETE /api/nwserver/${servId} :`, e);
+    res.status(500).send( JSON.stringify( { success: false, error: e.message || e } ) );
   }
 });
 
-app.post('/api/addnwserver', passport.authenticate('jwt', { session: false } ), (req, res) => {
-  winston.info("POST /api/addnwserver");
+app.post('/api/nwserver', passport.authenticate('jwt', { session: false } ), (req, res) => {
+  // for adding a netwitness server
+  winston.info("POST /api/nwserver");
   try {
     //winston.debug(req.body);
     let nwserver = req.body;
@@ -1559,18 +1561,17 @@ app.post('/api/addnwserver', passport.authenticate('jwt', { session: false } ), 
       if (err) throw err;
     });
     
-    // res.sendStatus(201);
-    res.status(201).send( JSON.stringify( { 'status': 'ok' } ) );
+    res.status(201).send( JSON.stringify( { success: true } ) );
   }
   catch(e) {
-    winston.error("POST /api/addnwserver: " + e);
-    res.status(500).send( JSON.stringify({ error: e.message }));
+    winston.error("POST /api/nwserver: " + e);
+    res.status(500).send( JSON.stringify( { success: false, error: e.message || e } ) );
   }
 });
 
 
-app.post('/api/editnwserver', passport.authenticate('jwt', { session: false } ), (req, res) => {
-  winston.info("POST /api/editnwserver");
+app.post('/api/nwserver/edit', passport.authenticate('jwt', { session: false } ), (req, res) => {
+  winston.info("POST /api/nwserver/edit");
   try {
     //winston.debug(req.body);
     let nwserver = req.body;
@@ -1602,17 +1603,16 @@ app.post('/api/editnwserver', passport.authenticate('jwt', { session: false } ),
       if (err) throw err;
     });
     
-    // res.sendStatus(200);
-    res.status(200).send( JSON.stringify( { 'status': 'ok' } ) );
+    res.status(200).send( JSON.stringify( { success: true } ) );
   }
   catch(e) {
-    winston.error("POST /api/editnwserver: " + e);
-    res.status(500).send( JSON.stringify({ error: e.message }));
+    winston.error("POST /api/nwserver/edit: " + e);
+    res.status(500).send( JSON.stringify( { success: false, error: e.message || e } ) );
   }
 });
 
-app.post('/api/testnwserver', passport.authenticate('jwt', { session: false } ), (req, res) => {
-  winston.info("POST /api/testnwserver");
+app.post('/api/nwserver/test', passport.authenticate('jwt', { session: false } ), (req, res) => {
+  winston.info("POST /api/nwserver/test");
   try {
     let nwserver = req.body;
     var uPassword = '';
@@ -1644,8 +1644,9 @@ app.post('/api/testnwserver', passport.authenticate('jwt', { session: false } ),
 
   }
   catch(e) {
-    winston.error("POST /api/testnwserver: " + e);
-    res.status(500).send(JSON.stringify({error: e.message}) );
+    winston.error("POST /api/nwserver/test: " + e);
+    // res.status(500).send(JSON.stringify({error: e.message}) );
+    res.status(500).send( JSON.stringify( { success: false, error: e.message || e } ) );
   }
 
   // Now perform test
@@ -1660,7 +1661,6 @@ app.post('/api/testnwserver', passport.authenticate('jwt', { session: false } ),
     else {
       winston.debug(`REST connection test to url ${url} failed.`);  
     }
-    // res.sendStatus(200);
     res.status(response.statusCode).send( JSON.stringify( { error: response.statusMessage } ) );
   }).on('error', err => {
     winston.debug(`REST connection test to url ${url} failed.`);
@@ -1692,7 +1692,7 @@ app.post('/api/testnwserver', passport.authenticate('jwt', { session: false } ),
 
 app.get('/api/ping', (req, res)=>{
   //winston.debug("GET /api/ping");
-  res.status(200).send( JSON.stringify( { 'status': 'ok' } ) );
+  res.status(200).send( JSON.stringify( { success: true } ) );
 });
 
 
@@ -1709,17 +1709,17 @@ app.get('/api/preferences', passport.authenticate('jwt', { session: false } ), (
   }
   catch(e) {
     winston.error('ERROR GET /api/preferences:', e);
-    res.sendStatus(500);
+    res.status(500).send( JSON.stringify( { success: false, error: e.message || e } ) );
   }
 });
 
-app.post('/api/setpreferences', passport.authenticate('jwt', { session: false } ), (req, res) => {
-  winston.info("POST /api/setpreferences");
+app.post('/api/preferences', passport.authenticate('jwt', { session: false } ), (req, res) => {
+  winston.info("POST /api/preferences");
   try {
     let prefs = req.body;
     // winston.debug(prefs);
     
-    // merge in default preferences which we haven't worked into our the UI preferences yet (like summaryTimeout)
+    // merge in default preferences which we haven't worked into our the UI preferences yet (like summaryTimeout) do we need this?
     for (let pref in defaultPreferences) {
       if (defaultPreferences.hasOwnProperty(pref)) {
         if (!prefs.hasOwnProperty(pref)) {
@@ -1728,14 +1728,17 @@ app.post('/api/setpreferences', passport.authenticate('jwt', { session: false } 
       }
     }
 
-    preferences = prefs;
-    // res.sendStatus(201);
-    res.status(201).send( JSON.stringify( { 'status': 'ok' } ) );
-    writePreferences();
+    db.collection('preferences').updateOne( {}, preferences, (err, result) => {
+      if (err) throw err;
+      preferences = prefs;
+      res.status(201).send( JSON.stringify( { success: true } ) );
+    });
+
+
   }
   catch(e) {
-    winston.error("POST /api/setpreferences:", e);
-    res.sendStatus(500);
+    winston.error("POST /api/preferences:", e);
+    res.status(500).send( JSON.stringify( { success: false, error: e.message || e } ) );
   }
 });
 
@@ -1757,9 +1760,9 @@ app.post('/api/setpreferences', passport.authenticate('jwt', { session: false } 
 
 
 // Returns a streaming fixed collection which is in the process of building
-app.get('/api/getbuildingfixedcollection/:id', passport.authenticate('jwt', { session: false } ), (req, res)=>{ 
+app.get('/api/collection/fixed/:id', passport.authenticate('jwt', { session: false } ), (req, res)=>{ 
   var id = req.params.id;
-  winston.info('GET /api/getbuildingfixedcollection/:id', id);
+  winston.info('GET /api/collection/fixed/:id', id);
   //winston.debug('buildingFixedCollections',buildingFixedCollections);
   try {
     if (buildingFixedCollections[id]) {
@@ -1857,9 +1860,9 @@ app.get('/api/getbuildingfixedcollection/:id', passport.authenticate('jwt', { se
       throw('Collection ' + id + ' not found');
     }
   }
-  catch(exception) {
-    winston.error('ERROR GET /api/getbuildingfixedcollection/:id', exception);
-    res.sendStatus(500);
+  catch(e) {
+    winston.error('ERROR GET /api/collection/fixed/:id', e);
+    res.status(500).send( JSON.stringify( { success: false, error: e.message || e } ) );
   }
 });
 
@@ -2060,9 +2063,10 @@ function buildFixedCollection(id) {
 
 }
 
-app.get('/api/buildfixedcollection/:id', passport.authenticate('jwt', { session: false } ), (req, res)=>{
+app.get('/api/collection/fixed/build/:id', passport.authenticate('jwt', { session: false } ), (req, res)=>{
+  // builds a fixed collection
   let id = req.params.id;
-  winston.info('GET /api/buildfixedcollection/:id', id);
+  winston.info('GET /api/collection/fixed/build/' + id);
   let thisCollection = collections[id];
   try {
     if (thisCollection.bound && !('usecase' in thisCollection )) {
@@ -2072,15 +2076,15 @@ app.get('/api/buildfixedcollection/:id', passport.authenticate('jwt', { session:
       throw(`Use case ${thisCollection.usecase} in bound collection ${id} is not a valid use case`);
     }
     if (thisCollection.state === 'initial') {
-      res.sendStatus(202);
+      res.status(202).send( JSON.stringify( { success: true } ) );
     }
     else {
       throw(`Collection ${id} is not in its initial state`);
     }
   }
-  catch (exception) {
-    winston.error(`GET /api/buildfixedcollection/${id}:`, exception);
-    res.sendStatus(500);
+  catch (e) {
+    winston.error(`GET /api/collection/fixed/build/${id}:`, e);
+    res.status(500).send( JSON.stringify( { success: false, error: e.message || e } ) );
     return;
   }
   buildFixedCollection(id);
@@ -2558,26 +2562,26 @@ function runRollingCollection(collectionId, res, clientSessionId='') {
 
 
 
-app.get('/api/pausemonitoringcollection/:id', passport.authenticate('jwt', { session: false } ), (req, res) => {
+app.get('/api/collection/monitoring/pause/:id', passport.authenticate('jwt', { session: false } ), (req, res) => {
   let clientSessionId = req.headers['afbsessionid'];
-  winston.info(`GET /api/pausemonitoringcollection/:id: Pausing monitoring collection ${clientSessionId}`);
+  winston.info(`GET /api/collection/monitoring/pause/:id: Pausing monitoring collection ${clientSessionId}`);
   // rollingCollectionSubjects[id]['paused'] = true;
   rollingCollectionSubjects[clientSessionId]['paused'] = true;
-  res.sendStatus(202);
+  res.status(202).send( JSON.stringify( { success: true } ) );
 });
 
-app.get('/api/unpausemonitoringcollection/:id', passport.authenticate('jwt', { session: false } ), (req, res) => {
+app.get('/api/collection/monitoring/unpause/:id', passport.authenticate('jwt', { session: false } ), (req, res) => {
   // This only gets used by the client if a monitoring collection is paused and then resumed within the minute the run is permitted to continue executing
-  // Otherwise, the client will simply call /api/getrollingcollection/:id again
+  // Otherwise, the client will simply call /api/collection/rolling/:id again
   let clientSessionId = req.headers['afbsessionid'];
-  winston.info(`GET /api/unpausemonitoringcollection/:id: Resuming monitoring collection ${clientSessionId}`);
+  winston.info(`GET /api/collection/monitoring/unpause/:id: Resuming monitoring collection ${clientSessionId}`);
   // rollingCollectionSubjects[id]['paused'] = false;
   rollingCollectionSubjects[clientSessionId]['paused'] = false;
-  res.sendStatus(202);
+  res.status(202).send( JSON.stringify( { success: true } ) );
 });
 
 
-app.get('/api/getrollingcollection/:collectionId', passport.authenticate('jwt', { session: false } ), (req, res) => {
+app.get('/api/collection/rolling/:collectionId', passport.authenticate('jwt', { session: false } ), (req, res) => {
   // Builds and streams a rolling or monitoring collection back to the client.  Handles the client connection and kicks off the process
 
   let collectionId = req.params.collectionId;
@@ -2594,8 +2598,8 @@ app.get('/api/getrollingcollection/:collectionId', passport.authenticate('jwt', 
 //////
 */
 
-  winston.info('GET /api/getrollingcollection/:id', collectionId);
-  // winston.debug('GET /api/getrollingcollection/:id clientSessionId:', clientSessionId);
+  winston.info('GET /api/collection/rolling/:id', collectionId);
+  // winston.debug('GET /api/collection/rolling/:id clientSessionId:', clientSessionId);
 
   let rollingId = collectionId;
   if ( collections[collectionId].type === 'monitoring' ) {
@@ -2625,9 +2629,9 @@ app.get('/api/getrollingcollection/:collectionId', passport.authenticate('jwt', 
       throw("Collection " + collectionId + " is not of type 'rolling' or 'monitoring'");
     }
   }
-  catch (exception) {
-    winston.error('GET /api/getrollingcollection/:id', exception);
-    res.sendStatus(500);
+  catch (e) {
+    winston.error('GET /api/collection/rolling/:id', e);
+    res.status(500).send( JSON.stringify( { success: false, error: e.message || e } ) );
     return;
   }
 
@@ -2823,7 +2827,7 @@ app.get('/api/getrollingcollection/:collectionId', passport.authenticate('jwt', 
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
 function writePreferences() {
-  db.collection('preferences').updateOne({},{'preferences': preferences}, (err, res) => {
+  db.collection('preferences').updateOne( {}, preferences, (err, res) => {
     if (err) throw err;
   });
 }
@@ -2921,15 +2925,19 @@ function connectToDB() {
       if (err) throw err;
 
       let foundPrefs = false;
+      
       for (let i=0; i < cols.length; i++) {
-        if (cols[i].name == "preferences") {
+        let collectionName = cols[i].name;
+        
+        if (collectionName == "preferences") {
            // read prefs
            foundPrefs = true;
            justInstalled = false;
            winston.debug("Reading preferences");
            db.collection('preferences').findOne( (err, res) => {
             let rewritePrefs = false; 
-            preferences = res.preferences;
+            // preferences = res.preferences;
+            preferences = res;
             // merge in default preferences which aren't in our loaded preferences (like for upgrades)
             for (let pref in defaultPreferences) {
               if (defaultPreferences.hasOwnProperty(pref)) {
@@ -2946,7 +2954,7 @@ function connectToDB() {
            });
         }
       
-        if (cols[i].name == "nwservers") {
+        if (collectionName == "nwservers") {
           winston.debug("Reading nwservers");
           db.collection('nwservers').find({}).toArray( (err, res) => {
              for (let x=0; x < res.length; x++) {
@@ -2956,7 +2964,7 @@ function connectToDB() {
            });
         }
 
-        if (cols[i].name == "feeds") {
+        if (collectionName == "feeds") {
           winston.debug("Reading feeds");
           db.collection('feeds').find({}).toArray( (err, res) => {
              for (let x = 0; x < res.length; x++) {
@@ -2964,11 +2972,25 @@ function connectToDB() {
                 feeds[id] = res[x];
              }
              scheduler.updateSchedule(feeds);
-             // cleanRollingDirs();
+           });
+        }
+
+        if (collectionName == "blacklist") {
+          winston.debug("Reading blacklist");
+          db.collection('blacklist').find({}).toArray( (err, res) => {
+            // winston.debug('blacklist:', res); 
+            for (let x = 0; x < res.length; x++) {
+                let id = res[x].id;
+                let timestamp = res[x].timestamp;
+                tokenBlacklist[id] = timestamp;
+             }
+             winston.debug('tokenBlacklist:', tokenBlacklist);
+             setInterval( () => cleanBlackList(), 1000 * 60); // run every minute
+             cleanBlackList();
            });
         }
       
-        if (cols[i].name == "collections") {
+        if (collectionName == "collections") {
           winston.debug("Reading collections");
           db.collection('collections').find({}).toArray( (err, res) => {
              for (let x=0; x < res.length; x++) {
@@ -2979,7 +3001,7 @@ function connectToDB() {
            });
         }
       
-        if (cols[i].name == "collectionsData") {
+        if (collectionName == "collectionsData") {
           winston.debug("Reading collectionsData");
           db.collection('collectionsData').find({}).toArray( (err, res) => {
              for (let x=0; x < res.length; x++) {
@@ -3384,6 +3406,41 @@ function startFeeder() {
 function schedulerUpdatedCallback(id) {
   // winston.debug('schedulerUpdatedCallback(): id:', id);
   writeToSocket( feederSocket, JSON.stringify( { updateFile: true, id: id } ) ); // let feeder server know of our update
+}
+
+function blacklistToken(id) {
+  let timestamp = new Date().getTime();
+  try {
+    db.collection('blacklist').insertOne( { id: id, timestamp: timestamp }, (err) => {
+      if (err) throw err;
+      tokenBlacklist[id] = timestamp;
+    });
+  }
+  catch(e) {
+    winston.error('Error updating token blacklist:', e);
+  }
+}
+
+function cleanBlackList() {
+  // winston.debug('cleanBlackList()');
+  let currentTime = new Date().getTime();
+  for (let id in tokenBlacklist) {
+    if (tokenBlacklist.hasOwnProperty(id)) {
+      let timestamp = tokenBlacklist[id];
+      if ( currentTime >= timestamp + tokenExpirationSeconds * 1000) {
+        winston.debug('cleanBlackList(): cleaning token with id', id);
+        try {
+          db.collection('blacklist').remove( { id: id}, (err, res) => {
+            if (err) throw err;
+            delete tokenBlacklist[id];
+          });
+        }
+        catch(e) {
+          winston.error('Error purging token from blacklist');
+        }
+      }
+    }
+  }
 }
 
 
