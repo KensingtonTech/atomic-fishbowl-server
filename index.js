@@ -130,6 +130,7 @@ process.on('SIGTERM', function() {
 var justInstalled = true;
 var preferences = {};
 var nwservers = {};
+var saservers = {};
 var collections = {}; // holds the high-level definition of a collection but not its content data
 var collectionsData = {}; // holds content data and session data
 var feeds = {}; // holds definitions for hash data CSV's
@@ -234,53 +235,97 @@ if ( !fs.existsSync(tempDir) ) {
 
 // Set default preferences
 var defaultPreferences = {
-  nwInvestigateUrl: '',
-  defaultNwQuery: "filetype = 'jpg','gif','png','pdf','zip','rar','windows executable','x86 pe','windows dll','x64pe','apple executable (pef)','apple executable (mach-o)'",
-  defaultQuerySelection : "All Supported File Types",
+  minX: 255,
+  minY: 255,  
   defaultContentLimit: 1000,
   defaultRollingHours: 1,
-  minX: 255,
-  minY: 255,
-  displayedKeys : [ 
-    "size", 
-    "service", 
-    "ip.src", 
-    "ip.dst", 
-    "alias.host", 
-    "city.dst", 
-    "country.dst", 
-    "action", 
-    "content", 
-    "ad.username.src", 
-    "ad.computer.src", 
-    "filename", 
-    "client"
-  ],
-  masonryKeys : [ 
-    {
-      key : "alias.host",
-      friendly : "Hostname"
-    }, 
-    {
-      key : "ad.username.src",
-      friendly : "AD User"
-    }, 
-    {
-      key : "ad.computer.src",
-      friendly : "AD Computer"
-    }, 
-    {
-      key : "ad.domain.src",
-      friendly : "AD Domain"
-    }
-  ],
   masonryColumnSize: 350,
-  summaryTimeout: 5,
-  queryTimeout: 5,
-  contentTimeout: 5,
-  queryDelayMinutes: 1,
-  maxContentErrors: 10,
-  debugLogging: false
+  debugLogging: false,
+  serviceTypes: { nw: true, sa: false },
+
+  nw: {
+    nwInvestigateUrl: '',
+    summaryTimeout: 5,
+    queryTimeout: 5,
+    contentTimeout: 5,
+    queryDelayMinutes: 1,
+    maxContentErrors: 10,
+    presetQuery: "filetype = 'jpg','gif','png','pdf','zip','rar','windows executable','x86 pe','windows dll','x64pe','apple executable (pef)','apple executable (mach-o)'",
+    defaultQuerySelection : "All Supported File Types",
+    displayedKeys : [ 
+      "size", 
+      "service", 
+      "ip.src", 
+      "ip.dst", 
+      "alias.host", 
+      "city.dst", 
+      "country.dst", 
+      "action", 
+      "content", 
+      "ad.username.src", 
+      "ad.computer.src", 
+      "filename", 
+      "client"
+    ],
+    masonryKeys : [
+      {
+        key : "alias.host",
+        friendly : "Hostname"
+      }, 
+      {
+        key : "ad.username.src",
+        friendly : "AD User"
+      }, 
+      {
+        key : "ad.computer.src",
+        friendly : "AD Computer"
+      }, 
+      {
+        key : "ad.domain.src",
+        friendly : "AD Domain"
+      }
+    ]
+  },
+
+  sa: { // solera
+    url: '',
+    presetQuery: "filetype = 'jpg','gif','png','pdf','zip','rar','windows executable','x86 pe','windows dll','x64pe','apple executable (pef)','apple executable (mach-o)'",
+    defaultQuerySelection : "PDF's", // "All Supported File Types",
+    queryTimeout: 5,
+    contentTimeout: 5,
+    queryDelayMinutes: 1,
+    maxContentErrors: 10,
+    displayedKeys : [ 
+      "total_bytes", 
+      "protocol_family", 
+      "initiator_ip", 
+      "responder_ip", 
+      "aggregate_http_server_hooks", 
+      "responder_country", 
+      "aggregate_http_method_hooks", 
+      "aggregate_file_type_hooks", 
+      // "filename", 
+      "aggregate_user_agent_hooks"
+    ],
+    masonryKeys : [
+      {
+        key : "aggregate_http_server_hooks",
+        friendly : "Hostname"
+      }, 
+      {
+        key : "responder_country",
+        friendly : "Responder Country"
+      }, 
+      /*{
+        key : "aggregate_http_uri_hooks",
+        friendly : "URL"
+      },*/ 
+      {
+        key : "protocol_family",
+        friendly : "Protocol Family"
+      }
+    ]
+  }
 };
 
 
@@ -290,11 +335,35 @@ var defaultPreferences = {
 // { name: '', friendlyName: '', query: "", contentTypes: [], description: '', distillationTerms: [], regexTerms: [] }
 var useCases = [
 
-  { name: 'outboundDocuments', friendlyName: 'Outbound Documents', query: "direction = 'outbound' && filetype = 'pdf','office 2007 document'", contentTypes: [ 'pdfs', 'officedocs' ], description: 'Displays documents which are being transferred outbound' },
+  {
+    name: 'outboundDocuments',
+    friendlyName: 'Outbound Documents',
+    nwquery: "direction = 'outbound' && filetype = 'pdf','office 2007 document'",
+//Need to add outbound and office
+    saquery: "file_type=PDF",
+    contentTypes: [ 'pdfs', 'officedocs' ],
+    description: 'Displays documents which are being transferred outbound'
+  },
   
-  { name: 'ssns', friendlyName: 'Social Security Numbers', query: "filetype = 'pdf','office 2007 document','zip','rar'", contentTypes: [ 'pdfs', 'officedocs' ], description: 'Displays documents which contain social security numbers.  It will look inside ZIP and RAR archives, as well', regexTerms: [ '\\d\\d\\d-\\d\\d-\\d\\d\\d\\d' ] },
+  {
+    name: 'ssns',
+    friendlyName: 'Social Security Numbers',
+    nwquery: "filetype = 'pdf','office 2007 document','zip','rar'",
+// !!! need to add Office and confirm RAR
+    saquery: "file_type=PDF file_type=ZIP file_type=RAR",
+    contentTypes: [ 'pdfs', 'officedocs' ],
+    description: 'Displays documents which contain social security numbers.  It will look inside ZIP and RAR archives, as well',
+    regexTerms: [ '\\d\\d\\d-\\d\\d-\\d\\d\\d\\d' ]
+  },
 
-  { name: 'dob', friendlyName: 'Date of Birth', query: "filetype = 'pdf','office 2007 document','zip','rar'", contentTypes: [ 'pdfs', 'officedocs' ], description: 'Displays documents which contain dates of birth', 
+  {
+    name: 'dob',
+    friendlyName: 'Date of Birth',
+    nwquery: "filetype = 'pdf','office 2007 document','zip','rar'",
+// !!! need to add Office and confirm rar
+    saquery: "file_type=PDF file_type=ZIP file_type=RAR",
+    contentTypes: [ 'pdfs', 'officedocs' ],
+    description: 'Displays documents which contain dates of birth', 
     regexTerms: [ 
       '(?i)(dob|date of birth|birth date|birthdate|birthday|birth day).*\\d\\d?[-/]\\d\\d?[-/]\\d{2}(?:\\d{2})?\\W',
       '(?i)(dob|date of birth|birth date|birthdate|birthday|birth day).*\\d\\d? \\w+,? \\d{2}(?:\\d{2})?\\W',
@@ -302,15 +371,55 @@ var useCases = [
     ]
   },
 
-  { name: 'contentinarchives', friendlyName: 'All Content Contained in Archives', query: "filetype = 'zip','rar' && filetype != 'office 2007 document'", contentTypes: [ 'images', 'pdfs', 'officedocs' ], description: 'Displays any content type contained within a ZIP or RAR archive.  It does not display dodgy archives' },
+  {
+    name: 'contentinarchives',
+    friendlyName: 'All Content Contained in Archives',
+    nwquery: "filetype = 'zip','rar' && filetype != 'office 2007 document'",
+// !!! need to add !Office and confirm RAR
+    saquery: "file_type=ZIP file_type=RAR",
+    contentTypes: [ 'images', 'pdfs', 'officedocs' ],
+    description: 'Displays any content type contained within a ZIP or RAR archive.  It does not display dodgy archives'
+  },
   
-  { name: 'contentinarchivesdodgy', friendlyName: 'All Content Contained in Archives (with Dodgy Archives)', query: "filetype = 'zip','rar' && filetype != 'office 2007 document'", contentTypes: [ 'images', 'pdfs', 'officedocs', 'dodgyarchives' ], description: 'Displays any content type contained within a ZIP or RAR archive.  It also displays dodgy archives' },
+  {
+    name: 'contentinarchivesdodgy',
+    friendlyName: 'All Content Contained in Archives (with Dodgy Archives)',
+    nwquery: "filetype = 'zip','rar' && filetype != 'office 2007 document'",
+// !!! need to add !Office and confirm RAR
+    saquery: "file_type=ZIP file_type=RAR",
+    contentTypes: [ 'images', 'pdfs', 'officedocs', 'dodgyarchives' ],
+    description: 'Displays any content type contained within a ZIP or RAR archive.  It also displays dodgy archives'
+  },
 
-  { name: 'suspiciousdestcountries', friendlyName: 'Documents to Suspicious Destination Countries', query: `country.dst = 'russian federation','china','romania','belarus','iran, islamic republic of',"korea, democratic people's republic of",'ukraine','syrian arab republic','yemen' && filetype = 'zip','rar','pdf','office 2007 document'`, contentTypes: [ 'pdfs', 'officedocs', 'dodgyarchives' ], description: 'Displays documents and dodgy archives transferred to suspicious destination countries: Russia, China, Romania, Belarus, Iran, North Korea, Ukraine, Syra, or Yemen' },
+  {
+    name: 'suspiciousdestcountries',
+    friendlyName: 'Documents to Suspicious Destination Countries',
+    nwquery: `country.dst = 'russian federation','china','romania','belarus','iran, islamic republic of',"korea, democratic people's republic of",'ukraine','syrian arab republic','yemen' && filetype = 'zip','rar','pdf','office 2007 document'`,
+// !!! need to add filetypes
+    saquery: `responder_country="russian federation" responder_country="china" responder_country="romania" responder_country="belarus" responder_country="iran, islamic republic of" responder_country="korea, democratic people's republic of" responder_country="ukraine" responder_country="syrian arab republic" responder_country="yemen"`,
+    contentTypes: [ 'pdfs', 'officedocs', 'dodgyarchives' ],
+    description: 'Displays documents and dodgy archives transferred to suspicious destination countries: Russia, China, Romania, Belarus, Iran, North Korea, Ukraine, Syra, or Yemen'
+  },
 
-  { name: 'dodgyarchives', friendlyName: 'Dodgy Archives', query: "filetype = 'zip','rar'", contentTypes: [ 'dodgyarchives' ], description: 'Displays ZIP and RAR Archives which are encrypted or which contain some encrypted files' },
+  {
+    name: 'dodgyarchives',
+    friendlyName: 'Dodgy Archives',
+    nwquery: "filetype = 'zip','rar'",
+//!!! Need to confirm RAR
+    saquery: "file_type=ZIP file_type=RAR",
+    contentTypes: [ 'dodgyarchives' ],
+    description: 'Displays ZIP and RAR Archives which are encrypted or which contain some encrypted files'
+  },
 
-  { name: 'outboundwebmonitoring', friendlyName: 'Outbound Web Usage Monitoring', query: "direction = 'outbound' && service = 80 && filetype = 'jpg','gif','png'", contentTypes: [ 'images' ], description: 'Displays images from outbound web usage.  Recommended for use in a Monitoring Collection' }
+  {
+    name: 'outboundwebmonitoring',
+    friendlyName: 'Outbound Web Usage Monitoring',
+//!!! Need outbound and combine with web! application_group=Web
+    nwquery: "direction = 'outbound' && service = 80 && filetype = 'jpg','gif','png'",
+    saquery: "file_type~GIF file_type=PNG file_type=JPEG",
+    contentTypes: [ 'images' ],
+    description: 'Displays images from outbound web usage.  Recommended for use in a Monitoring Collection'
+  }
 
 ];
 var useCasesObj = {};
@@ -706,6 +815,8 @@ app.get('/api/collection/data/:id', passport.authenticate('jwt', { session: fals
 });
 
 app.post('/api/collection', passport.authenticate('jwt', { session: false } ), (req, res) => {
+  // add a new collection
+
   winston.info("POST /api/collection");
   // winston.debug(req);
   try {
@@ -721,11 +832,11 @@ app.post('/api/collection', passport.authenticate('jwt', { session: false } ), (
     if (!('name' in collection)) {
       throw("'name' is not defined");
     }
-    if (!('nwserver' in collection)) {
-      throw("'nwserver' is not defined");
+    if (!('nwserver' in collection) && !('saserver' in collection) ) {
+      throw("Either 'nwserver' or 'saserver' is not defined");
     }
-    if (!('nwserverName' in collection)) {
-      throw("'nwserverName' is not defined");
+    if (!('nwserverName' in collection) && !('saserverName' in collection)) {
+      throw("Either 'nwserverName' or 'saserverName' is not defined");
     }
     if (!('bound' in collection)) {
       throw("'bound' is not defined");
@@ -1663,25 +1774,214 @@ app.post('/api/nwserver/test', passport.authenticate('jwt', { session: false } )
     }
     res.status(response.statusCode).send( JSON.stringify( { error: response.statusMessage } ) );
   }).on('error', err => {
-    winston.debug(`REST connection test to url ${url} failed.`);
-    // console.log(err);
-    //winston.info(`The error was:`, err);
+    winston.debug(`REST connection test to url ${url} failed with error: ${err.message}`);
     res.status(403).send( JSON.stringify({ error: err.message }) );
   });
 
-  /*request.on('requestTimeout', function (req) {
-    winston.debug('request has expired');
-    req.abort();
-  });
-  
-  request.on('responseTimeout', function (res) {
-    winston.debug('response has expired');
-  });*/
+});
 
-  // 200 = OK
-  // 403 = Not OK
+
+
+
+
+
+
+
+
+//////////////////////SASERVERS//////////////////////
+
+app.get('/api/saserver', passport.authenticate('jwt', { session: false } ), (req, res) => {
+  winston.info('GET /api/saserver');
+  try {
+    let servers = JSON.parse(JSON.stringify(saservers));  // make deep copy of saservers
+    for (let server in servers) {
+      // delete passwords - they don't need to be transferred back to the client
+      if (servers.hasOwnProperty(server)) {
+        servers[server].password = undefined;
+      }
+    }
+    res.json(servers);
+  }
+  catch(e) {
+    winston.error('ERROR GET /api/saserver', e);
+    res.status(500).send( JSON.stringify( { success: false, error: e.message || e } ) );
+  }
+});
+
+app.delete('/api/saserver/:id', passport.authenticate('jwt', { session: false } ), (req, res) => {
+  let servId = req.params.id;
+  winston.info(`DELETE /api/saserver/${servId}`);
+  try {
+    delete saservers[servId];
+    res.status(200).send( JSON.stringify( { success: true } ) );
+    db.collection('saservers').remove( { 'id': servId }, (err, res) => {
+      if (err) throw err;
+    });
+  }
+  catch(e) {
+    winston.error(`ERROR DELETE /api/saserver/${servId} :`, e);
+    res.status(500).send( JSON.stringify( { success: false, error: e.message || e } ) );
+  }
+});
+
+app.post('/api/saserver', passport.authenticate('jwt', { session: false } ), (req, res) => {
+  // for adding a netwitness server
+  winston.info("POST /api/saserver");
+  try {
+    //winston.debug(req.body);
+    let saserver = req.body;
+    if (!saserver.id) {
+      throw("'id' is not defined");
+    }
+    let id = saserver.id;
+    if (!saserver.friendlyName) {
+      throw("'friendlyName' is not defined");
+    }
+    if (!saserver.host) {
+      throw("'host' is not defined");
+    }
+    if (!saserver.port) {
+      throw("'port' is not defined");
+    }
+    if (!saserver.user) {
+      throw("'user' is not defined");
+    }
+    if (!saserver.password) {
+      throw("'password' is not defined"); // we don't decrypt here.  We only decrypt when we build a worker config
+    }
+    if (typeof saserver.ssl === 'undefined') {
+      throw("'ssl' is not defined");
+    }
+    saservers[id] = saserver;
+    db.collection('saservers').insertOne( saserver, (err, res) => {
+      if (err) throw err;
+    });
+    
+    res.status(201).send( JSON.stringify( { success: true } ) );
+  }
+  catch(e) {
+    winston.error("POST /api/saserver: " + e);
+    res.status(500).send( JSON.stringify( { success: false, error: e.message || e } ) );
+  }
+});
+
+
+app.post('/api/saserver/edit', passport.authenticate('jwt', { session: false } ), (req, res) => {
+  winston.info("POST /api/saserver/edit");
+  try {
+    //winston.debug(req.body);
+    let saserver = req.body;
+    if (!saserver.id) {
+      throw("'id' is not defined");
+    }
+    let id = saserver.id;
+    if (!saserver.friendlyName) {
+      throw("'friendlyName' is not defined");
+    }
+    if (!saserver.host) {
+      throw("'host' is not defined");
+    }
+    if (!saserver.port) {
+      throw("'port' is not defined");
+    }
+    if (!saserver.user) {
+      throw("'user' is not defined");
+    }
+    if (!saserver.password) {
+      // use existing password
+      saserver['password'] = saservers[id].password;
+    }
+    if (typeof saserver.ssl === 'undefined') {
+      throw("'ssl' is not defined");
+    }
+    saservers[id] = saserver;
+    db.collection('saservers').updateOne( { id: id }, { $set: saserver }, (err, res) => {
+      if (err) throw err;
+    });
+    
+    res.status(200).send( JSON.stringify( { success: true } ) );
+  }
+  catch(e) {
+    winston.error("POST /api/saserver/edit: " + e);
+    res.status(500).send( JSON.stringify( { success: false, error: e.message || e } ) );
+  }
+});
+
+app.post('/api/saserver/test', passport.authenticate('jwt', { session: false } ), (req, res) => {
+  winston.info("POST /api/saserver/test");
+  try {
+    let saserver = req.body;
+    var uPassword = '';
+    // console.log(saserver);
+    if (saserver.hasOwnProperty('id') && !(saserver.hasOwnProperty('password'))) {
+      let id = saserver.id;
+      uPassword = decryptor.decrypt(saservers[id].password, 'utf8');
+    }
+    else if (saserver.hasOwnProperty('id') && saserver.hasOwnProperty('password')) {
+      let id = saserver.id;
+      uPassword = decryptor.decrypt(saserver.password, 'utf8');
+    }
+    else {
+      uPassword = decryptor.decrypt(saserver.password, 'utf8');
+    }
+    // console.log(saserver);
+    var host = saserver.host;
+    var ssl = saserver.ssl;
+    var port = saserver.port;
+    var user = saserver.user;
+    
+    //var uPassword = decryptor.decrypt(saservers[id].password, 'utf8');
+    
+    var proto = 'http://'
+    if (ssl) {
+      proto = 'https://';
+    }
+    var url = `${proto}${host}:${port}/api/v6/users/account_info`;
+
+  }
+  catch(e) {
+    winston.error("POST /api/saserver/test: " + e);
+    // res.status(500).send(JSON.stringify({error: e.message}) );
+    res.status(500).send( JSON.stringify( { success: false, error: e.message || e } ) );
+  }
+
+  // Now perform test
+  let options = { user: user, password: uPassword, connection: { rejectUnauthorized: false }}; // {requestConfig: {timeout: 5000}, responseConfig: {timeout: 5000}},
+  let args = { headers: { 'Content-Type': 'application/x-www-form-urlencoded'},
+               data: { '_method': 'GET' } };
+  let client = new restClient(options);
+
+    let request = client.post(url, args, (data, response) => {
+      // console.log(response);
+      if (response.statusCode == 200) {
+        // winston.debug(`REST connection test to url ${url} was successful`);
+        // winston.debug(data.resultCode);
+        if (!('resultCode' in data) || data.resultCode != 'API_SUCCESS_CODE') {
+          winston.debug(`REST connection test to url ${url} failed with error:`, data);
+          res.status(403).send( JSON.stringify( { success: false, error: data.resultCode } ) );
+          return;
+        }
+        res.status(200).send( JSON.stringify( { success: true } ) );
+        return;
+      }
+      else {
+        winston.debug(`REST connection test to url ${url} failed.`);
+        // throw(response.statusCode);
+        res.status(403).send( JSON.stringify( { success: false, error: data.resultCode } ) );
+        return;
+        // winston.debug('res:', res);
+        // winston.debug('body:', res.body);
+      }
+    })
+    .on('error', err => {
+      throw(err);
+    });
 
 });
+
+
+
+
 
 
 
@@ -1719,7 +2019,7 @@ app.post('/api/preferences', passport.authenticate('jwt', { session: false } ), 
     let prefs = req.body;
     // winston.debug(prefs);
     
-    // merge in default preferences which we haven't worked into our the UI preferences yet (like summaryTimeout) do we need this?
+    // merge in default preferences which we haven't worked into our the UI preferences yet (like summaryTimeout) do we need this?  I think we do
     for (let pref in defaultPreferences) {
       if (defaultPreferences.hasOwnProperty(pref)) {
         if (!prefs.hasOwnProperty(pref)) {
@@ -1727,8 +2027,23 @@ app.post('/api/preferences', passport.authenticate('jwt', { session: false } ), 
         }
       }
     }
+    for (let pref in defaultPreferences.nw) {
+      if (defaultPreferences.nw.hasOwnProperty(pref)) {
+        if (!prefs.nw.hasOwnProperty(pref)) {
+          prefs.nw[pref] = defaultPreferences.nw[pref];
+        }
+      }
+    }
+    for (let pref in defaultPreferences.sa) {
+      if (defaultPreferences.sa.hasOwnProperty(pref)) {
+        if (!prefs.sa.hasOwnProperty(pref)) {
+          prefs.sa[pref] = defaultPreferences.sa[pref];
+        }
+      }
+    }
+  
 
-    db.collection('preferences').updateOne( {}, preferences, (err, result) => {
+    db.collection('preferences').updateOne( {}, prefs, (err, result) => {
       if (err) throw err;
       preferences = prefs;
       res.status(201).send( JSON.stringify( { success: true } ) );
@@ -1893,13 +2208,23 @@ function fixedSocketConnectionHandler(id, socket, tempName, subject) {
     sofficeProfilesDir: sofficeProfilesDir,
     unrarPath: unrarPath,
     collectionsDir: collectionsDir,
-    summaryTimeout: preferences.summaryTimeout,
-    queryTimeout: preferences.queryTimeout,
-    contentTimeout: preferences.contentTimeout,
     privateKeyFile: internalPrivateKeyFile,
-    maxContentErrors: preferences.maxContentErrors,
-    useHashFeed: thisCollection.useHashFeed
+    useHashFeed: thisCollection.useHashFeed,
+    serviceType: thisCollection.serviceType
   };
+
+  if (thisCollection.serviceType == 'nw') {
+    cfg['summaryTimeout'] = preferences.nw.summaryTimeout;
+    cfg['queryTimeout'] = preferences.nw.queryTimeout;
+    cfg['contentTimeout'] = preferences.nw.contentTimeout;
+    cfg['maxContentErrors'] = preferences.nw.maxContentErrors;
+  }
+
+  if (thisCollection.serviceType == 'sa') {
+    cfg['queryTimeout'] = preferences.sa.queryTimeout;
+    cfg['contentTimeout'] = preferences.sa.contentTimeout;
+    cfg['maxContentErrors'] = preferences.sa.maxContentErrors;
+  }
 
   if (thisCollection.bound) {
     // This is an OOTB use case
@@ -1957,12 +2282,24 @@ function fixedSocketConnectionHandler(id, socket, tempName, subject) {
     }
   }
 
-  let nwserver = nwservers[thisCollection.nwserver];
-  for (var k in nwserver) {
-    if (k != 'id') {
-      cfg[k] = nwserver[k];  // assign an nwserver to the collection cfg
+  if (thisCollection.serviceType == 'nw') {
+    let nwserver = nwservers[thisCollection.nwserver];
+    for (var k in nwserver) {
+
+      if (nwserver.hasOwnProperty(k) && k != 'id' && k != '_id') {
+        cfg[k] = nwserver[k];  // assign properties of nwserver to the collection cfg
+      }
     }
   }
+  if (thisCollection.serviceType == 'sa') {
+    let saserver = saservers[thisCollection.saserver];
+    for (var k in saserver) {
+      if (saserver.hasOwnProperty(k) && k != 'id' && k != '_id') {
+        cfg[k] = saserver[k];  // assign properties of saserver to the collection cfg
+      }
+    }
+  }
+
   let outerCfg = { workerConfig: cfg };
 
   
@@ -2236,12 +2573,9 @@ function rollingCollectionSocketConnectionHandler(id, socket, tempName, subject,
     sofficeProfilesDir: sofficeProfilesDir,
     unrarPath: unrarPath,
     collectionsDir: collectionsDir,
-    summaryTimeout: preferences.summaryTimeout,
-    queryTimeout: preferences.queryTimeout,
-    contentTimeout: preferences.contentTimeout,
     privateKeyFile: internalPrivateKeyFile,
-    maxContentErrors: preferences.maxContentErrors,
-    useHashFeed: thisCollection.useHashFeed
+    useHashFeed: thisCollection.useHashFeed,
+    serviceType: thisCollection.serviceType
 
     // query: thisCollection.query,
     // regexDistillationEnabled: thisCollection.regexDistillationEnabled,
@@ -2251,6 +2585,19 @@ function rollingCollectionSocketConnectionHandler(id, socket, tempName, subject,
     // contentTypes: collections[id].contentTypes,
     // distillationEnabled: thisCollection.distillationEnabled
   };
+
+  if (thisCollection.serviceType == 'nw') {
+    cfg['summaryTimeout'] = preferences.nw.summaryTimeout;
+    cfg['queryTimeout'] = preferences.nw.queryTimeout;
+    cfg['contentTimeout'] = preferences.nw.contentTimeout;
+    cfg['maxContentErrors'] = preferences.nw.maxContentErrors;
+  }
+
+  if (thisCollection.serviceType == 'sa') {
+    cfg['queryTimeout'] = preferences.sa.queryTimeout;
+    cfg['contentTimeout'] = preferences.sa.contentTimeout;
+    cfg['maxContentErrors'] = preferences.sa.maxContentErrors;
+  }
 
   if (thisCollection.bound) {
     // This is an OOTB use case
@@ -2307,7 +2654,7 @@ function rollingCollectionSocketConnectionHandler(id, socket, tempName, subject,
     } 
   }
 
-  let queryDelaySeconds = preferences.queryDelayMinutes * 60;
+  let queryDelaySeconds = preferences.nw.queryDelayMinutes * 60;
 
   if (thisCollection.type === 'monitoring') {
     // If this is a monitoring collection, then set timeEnd and timeBegin to be a one minute window
@@ -2355,10 +2702,21 @@ function rollingCollectionSocketConnectionHandler(id, socket, tempName, subject,
    cfg['sha256Hashes'] = thisCollection.sha256Hashes;
   }
 
-  let nwserver = nwservers[thisCollection.nwserver];
-  for (var k in nwserver) {
-    if (k != 'id') {
-      cfg[k] = nwserver[k]; // assign an nwserver to the collection cfg
+  if (thisCollection.serviceType == 'nw') {
+    let nwserver = nwservers[thisCollection.nwserver];
+    for (var k in nwserver) {
+
+      if (nwserver.hasOwnProperty(k) && k != 'id' && k != '_id') {
+        cfg[k] = nwserver[k];  // assign properties of nwserver to the collection cfg
+      }
+    }
+  }
+  if (thisCollection.serviceType == 'sa') {
+    let saserver = saservers[thisCollection.saserver];
+    for (var k in saserver) {
+      if (saserver.hasOwnProperty(k) && k != 'id' && k != '_id') {
+        cfg[k] = saserver[k];  // assign properties of saserver to the collection cfg
+      }
     }
   }
   let outerCfg = { workerConfig: cfg };
@@ -2465,7 +2823,7 @@ function runRollingCollection(collectionId, res, clientSessionId='') {
         winston.debug("runRollingCollection(): work(): listen(): Rolling Collection: Spawning worker with socket file " + tempName);
         
         // Start the worker process and assign a reference to it to 'worker'
-        let worker = spawn('./worker_stub.py ',[tempName], {shell:true, stdio: 'inherit'});
+        let worker = spawn('./worker_stub.py ', [tempName, '2>&1'], { shell:true, stdio: 'inherit'});
         // Notice that we don't pass any configuration to the worker on the command line.  It's all done through the UNIX socket for security.
         
         // Add the worker reference to rollingCollectionSubjects so we can work with it later
@@ -2948,6 +3306,24 @@ function connectToDB() {
                 }
               }
             }
+            for (let pref in defaultPreferences.nw) {
+              if (defaultPreferences.nw.hasOwnProperty(pref)) {
+                if (!preferences.nw.hasOwnProperty(pref)) {
+                  winston.info(`Adding new default NetWitness preference for ${pref}`);
+                  preferences.nw[pref] = defaultPreferences.nw[pref];
+                  rewritePrefs = true;
+                }
+              }
+            }
+            for (let pref in defaultPreferences.sa) {
+              if (defaultPreferences.sa.hasOwnProperty(pref)) {
+                if (!preferences.sa.hasOwnProperty(pref)) {
+                  winston.info(`Adding new default Security Analytics preference for ${pref}`);
+                  preferences.sa[pref] = defaultPreferences.sa[pref];
+                  rewritePrefs = true;
+                }
+              }
+            }
             if (rewritePrefs) {
               writePreferences();
             }
@@ -2960,6 +3336,16 @@ function connectToDB() {
              for (let x=0; x < res.length; x++) {
                 let id = res[x].id;
                 nwservers[id] = res[x];
+             }
+           });
+        }
+
+        if (collectionName == "saservers") {
+          winston.debug("Reading saservers");
+          db.collection('saservers').find({}).toArray( (err, res) => {
+             for (let x=0; x < res.length; x++) {
+                let id = res[x].id;
+                saservers[id] = res[x];
              }
            });
         }
@@ -3017,7 +3403,7 @@ function connectToDB() {
       if (!foundPrefs) {
         winston.info("Creating default preferences");
         preferences = defaultPreferences;
-        db.collection('preferences').insertOne( {'preferences': preferences}, (err, res) => {
+        db.collection('preferences').insertOne( preferences, (err, res) => {
           if (err) throw err;
         });
       }
@@ -3189,7 +3575,10 @@ function chunkHandler(collectionRoot, id, subject, data, chunk, clientSessionId=
     let u = d.shift();
     let update = JSON.parse(u);
     
-    
+    if ('heartbeat' in update) {
+      return data;
+    }
+
     if ('collectionUpdate' in update) {
 
       thisCollection.sessions.push(update.collectionUpdate.session);

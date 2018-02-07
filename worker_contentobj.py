@@ -1,5 +1,5 @@
 import email
-import StringIO
+import cStringIO
 from uuid import uuid4
 
 class ContentObj:
@@ -75,10 +75,10 @@ class ContentObj:
         return o
 
     def setPartContent(self, content): # takes an email part object
-        self.fileContent = StringIO.StringIO()
+        self.fileContent = cStringIO.StringIO()
         self.fileContent.write(content.get_payload(decode=True))
 
-    def setStringIOContent(self, content): #takes a StringIO object
+    def setStringIOContent(self, content): #takes a cStringIO object
         self.fileContent = content
 
 
