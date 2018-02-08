@@ -340,7 +340,7 @@ var useCases = [
     friendlyName: 'Outbound Documents',
     nwquery: "direction = 'outbound' && filetype = 'pdf','office 2007 document'",
 //Need to add outbound and office
-    saquery: "file_type=PDF",
+    saquery: '["file_type=PDF"]',
     contentTypes: [ 'pdfs', 'officedocs' ],
     description: 'Displays documents which are being transferred outbound'
   },

@@ -599,7 +599,7 @@ class ContentProcessor:
     # this method is really just for netwitness multiparts
     log.debug("ContentProcessor: extractFilesFromMultipart(): Extracting files of session ID " + str(sessionId) )
 
-    self.poolId = current_process().name
+    
     #log.debug('ContentProcessor: extractFilesFromMultiPart(): My Process Identifier: ' + str(self.processId))
     #log.debug( 'ContentProcessor: extractFilesFromMultiPart(): ' + current_process().name )
     #print("extractFilesFromMultipart(): Extracting files of session ID " + str(sessionId) )
@@ -656,6 +656,8 @@ class ContentProcessor:
   def processInboundFile(self, sessionId, filename, payload, contentType=None):
     # this method processes a file once it's been extracted from whatever its source is, be it a NW multipart message or a solera zip
     # payload is a cStringIO object
+
+    self.poolId = current_process().name
 
     if not contentType:
       log.debug("ContentProcessor: processInboundFile(): Detecting content type")
@@ -831,10 +833,10 @@ class ContentProcessor:
               log.warning("ContentProcessor: processInboundFile(): ZIP file was too large to open: " + contentObj.archiveFilename)
               continue
             except NotImplementedError as e:
-              log.exception("ContentProcessor: processInboundFile(): NotImplemented exception during zip open")
+              log.warning("ContentProcessor: processInboundFile(): NotImplemented exception during zip extraction.  This is often due to Apple app updates.")
               continue
             except Exception as e:
-              log.exception("ContentProcessor: processInboundFile(): Unhandled exception during zip file open")
+              log.warning("ContentProcessor: processInboundFile(): Unhandled exception during zip file open")
               continue
             extractedFileObj.write(compressedFileHandle.read() )  #this is where we extract the file into
             compressedFileHandle.close()

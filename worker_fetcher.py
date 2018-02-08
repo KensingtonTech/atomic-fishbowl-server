@@ -16,7 +16,7 @@ from httplib import BadStatusLine
 from requests_futures.sessions import FuturesSession
 import requests
 from worker_contentprocessor import ContentProcessor
-from threading import Timer
+from threading import Timer, Thread, Event
 
 #logging.getLogger("requests").setLevel(logging.WARNING)
 logging.getLogger("urllib3").setLevel(logging.WARNING)
@@ -41,6 +41,19 @@ class ApiUnsuccessful(Exception):
 
 
 
+
+
+class TimerThread(Thread):
+
+  def __init__(self, event, cb):
+    Thread.__init__(self)
+    self.stopped = event
+    self.cb = cb
+    self.daemon = True
+
+  def run(self):
+    while not self.stopped.wait(5):
+      self.cb()
 
 
 
@@ -106,7 +119,12 @@ class Fetcher:
       log.debug("SaFetcher: sendResult(): no results")
 
   def heartbeat(self):
+    #log.debug( "heartbeat()" )
     self.communicator.write_data( json.dumps( { 'heartbeat': True } ) + '\n' )
+
+  def terminate(self):
+    self.pool.terminate()
+    self.pool.join()
 
 
 
@@ -137,10 +155,10 @@ class SaFetcher(Fetcher): # For Solera
     self.extractResults = {}
     self.extractionComplete = False
     self.extractFutures = []
-
-    # kick off heartbeat timer - every 15 seconds
-    t = Timer(15.0, self.heartbeat)
-    t.start()
+    stopFlag = Event()
+    timerThread = TimerThread(stopFlag, lambda y=self: self.heartbeat())
+    timerThread.start()
+    
     
     # URL to call
     url = self.cfg['url'] + '/api/v6/deepsee_reports/report'
@@ -154,7 +172,7 @@ class SaFetcher(Fetcher): # For Solera
         },
         'field': 'flow_id',
         #'query': self.cfg['saQuery']
-        'query': json.loads(self.cfg['query'])
+        'query': json.loads(self.cfg['query'] )
       },
       'metrics' : '"sessions"',
       'direction' : '"asc"',
@@ -166,7 +184,12 @@ class SaFetcher(Fetcher): # For Solera
     post = self.convertToPostBody(data, 'GET')
     #pprint(post)
     #session = FuturesSession(max_workers=cpu_count() )
-    session = FuturesSession(max_workers=cpu_count() )
+    #cpucount = cpu_count()
+    #if cpucount >= 6:
+    #  cpucount = cpucount - 2
+    #session = FuturesSession(max_workers=cpucount)
+    self.session = FuturesSession()
+    session = self.session
     try:
       self.queryDef = { 'url': url, 'auth': ( self.cfg['user'], self.cfg['dpassword'] ), 'data': post, 'verify': False, 'stream': False }
 
@@ -296,10 +319,10 @@ class SaFetcher(Fetcher): # For Solera
     session.close()
     log.debug('SaFetcher: fetchMeta(): starting download of zip file')
     self.extractDownloadedZip(self.zipFileHandle)
-    t.cancel()
+    #t.cancel()
 
-
-
+    self.pool.terminate()
+    self.pool.join()
     return count
 
 
@@ -552,12 +575,13 @@ vlan_id"""
     
     if status == 'extractor.status.cancel':
       # restart the extraction
-      log.debug('onFileExtractionResults(): Status was extractor.status.cancel.  Restarting extraction')
+      """log.debug('onFileExtractionResults(): Status was extractor.status.cancel.  Restarting extraction')
       extractPostData = self.extractPostData
       extractPostData['restart'] = True
       future = session.post(self.cfg['url'] + '/api/v6/artifacts/artifacts', auth=self.queryDef['auth'], data=self.convertToPostBody(extractPostData, 'GET'), verify=False, stream=False, background_callback=self.onFileExtractionResults )
       self.extractFutures.append(future)
-      return
+      return"""
+      self.exitWithError('onFileExtractionResults(): Extraction was cancelled by Security Analytics.  Exiting with error')
 
     
     elif percent != 100 or (percent == 100 and status != 'extractor.status.finished'):
@@ -611,7 +635,7 @@ vlan_id"""
 
       #pprint(self.extractResults)
       
-      log.debug("onFileExtractionResults(): initiating extraction zip download")
+      log.debug("onFileExtractionResults(): initiating download of extracted artifacts zip")
       idsToDownload = []
       for a in self.extractResults:
         artifact = self.extractResults[a]
@@ -621,7 +645,7 @@ vlan_id"""
         'type': 'zip',
         'ids': idsToDownload
       }
-      future = session.post(self.cfg['url'] + '/api/v6/artifacts/download', auth=self.queryDef['auth'], data=self.convertToPostBody(data, 'GET'), verify=False, stream=False, background_callback=self.onExtractedFileDownload )
+      future = session.post(self.cfg['url'] + '/api/v6/artifacts/download', auth=self.queryDef['auth'], data=self.convertToPostBody(data, 'GET'), verify=False, stream=True, background_callback=self.onExtractedFileDownload )
       self.extractFutures.append(future)
       
 
@@ -674,6 +698,8 @@ vlan_id"""
     log.debug('SaFetcher: extractDownloadedZip()')
     for zinfo in zipHandle.infolist():
       archivedFilename = zinfo.filename
+      #if archivedFilename.startswith('META-INF/') or archivedFilename.startswith('AssetData/'):
+      #  continue
       compressedFileHandle = zipHandle.open(archivedFilename)
       payload = compressedFileHandle.read()
       compressedFileHandle.close()
@@ -697,8 +723,38 @@ vlan_id"""
 
 
 
+  def convertToPostBody(self, data, method):
+    post = {}
+    if len(data) != 0:
+      for k,v in data.items():
+        try:
+          isStr = isinstance(v, basestring)
+        except NameError as e:
+          isStr = isinstance(v, str)
+        else:
+          post[k] = json.dumps(v)
+    post['_method'] = method.upper()
+    return post
 
 
+  def exitWithError(self, message):
+    log.error(message)
+    self.session.close()
+    self.communicator.write_data(json.dumps( { 'error': message} ) + '\n')
+    self.communicator.handle_close()
+    sys.exit(1)
+
+  def exitWithException(self, message):
+    log.exception(message)
+    self.session.close()
+    self.communicator.write_data(json.dumps( { 'error': message} ) + '\n')
+    self.communicator.handle_close()
+    sys.exit(1)
+
+  def terminate(self):
+    self.pool.terminate()
+    self.pool.join()
+    self.session.close()
 
   def pretty_print_POST(self, req):
     """
@@ -715,22 +771,6 @@ vlan_id"""
         '\n'.join('{}: {}'.format(k, v) for k, v in req.headers.items()),
         req.body,
     ))
-
-
-
-  def convertToPostBody(self, data, method):
-    post = {}
-    if len(data) != 0:
-      for k,v in data.items():
-        try:
-          isStr = isinstance(v, basestring)
-        except NameError as e:
-          isStr = isinstance(v, str)
-        else:
-          post[k] = json.dumps(v)
-    post['_method'] = method.upper()
-    return post
-
 
 
 
@@ -871,8 +911,6 @@ class NwFetcher(Fetcher):
       self.exitWithError(error)
     except Exception as e:
       error = "Fetcher: runQuery(): Unhandled exception whilst running query.  Exiting with code 1: " + str(e)
-      #log.exception("Fetcher: runQuery(): Unhandled exception whilst running query.  Exiting with code 1")
-      #sys.exit(1)
       self.exitWithException(error)
     return len(self.sessions)
 
@@ -930,14 +968,8 @@ class NwFetcher(Fetcher):
           
           ##############EXTRACT FILES AND DO THE WORK##############
           log.debug('Fetcher: pullFiles(): Launching extractor from pool')
-          #processor = ContentProcessor(self.directory, self.minX, self.minY, self.gsPath, self.pdftotextPath, self.contentLimit, self.contentCount)
-          #processor = ContentProcessor(self.cfg['url'], self.cfg['user'], self.cfg['dpassword'], self.cfg['directory'], self.cfg['minX'], self.cfg['minY'], self.cfg['gsPath'], self.pdftotextPath, self.cfg['sofficePath'], self.cfg['sofficeProfilesDir'], self.contentLimit, self.contentCount, self.contentErrors, self.maxContentErrors, self.contentTimeout, self.contentTypes)
           processor = ContentProcessor(self.cfg)
-          
-          #self.pool.apply_async(unwrapExtractFilesFromMultipart, args=(processor, payload, self.sessions[sessionId], sessionId, distillationTerms, regexDistillationTerms, md5Hashes, sha1Hashes, sha256Hashes), callback=self.sendResult )
-          #self.pool.apply_async(unwrapExtractFilesFromMultipart, args=(processor, payload, self.sessions[sessionId], sessionId), callback=self.sendResult )
           self.pool.apply_async(unwrapGo, args=(processor, payload, self.sessions[sessionId], sessionId), callback=self.sendResult )
-      
 
     self.pool.close()
     self.pool.join()
@@ -950,12 +982,11 @@ class NwFetcher(Fetcher):
     #This tries to put every content call in its own process but this is actually slower than handling the content call in a single-threaded manner
     for sessionId in self.sessions:
       if not self.cfg['contentCount'].value >= self.cfg['contentLimit']:
-        #processor = ContentProcessor(self.cfg['url'], self.cfg['user'], self.cfg['dpassword'], self.cfg['directory'], self.cfg['minX'], self.cfg['minY'], self.cfg['gsPath'], self.pdftotextPath, self.cfg['sofficePath'], self.contentLimit, self.contentCount, self.contentErrors, self.maxContentErrors, self.contentTimeout)
+
         processor = ContentProcessor(self.cfg)
 
         ##############PULL FILES AND PROCESS THEM##############
         log.debug('Fetcher: newPullFiles(): Launching extractor from pool')
-        #res = self.pool.apply_async(unwrapPullFiles, args=(processor, self.sessions[sessionId], sessionId, self.cfg['distillationTerms'], self.cfg['regexDistillationTerms'], md5Hashes, sha1Hashes, sha256Hashes), callback=self.sendResult )
         res = self.pool.apply_async(unwrapPullFiles, args=(processor, self.sessions[sessionId], sessionId), callback=self.sendResult )
         res.get()
 
@@ -963,4 +994,3 @@ class NwFetcher(Fetcher):
         log.info("Fetcher: newPullFiles(): Image limit of " + str(self.cfg['contentLimit']) + " has been reached.  Ending collection build.  You may want to narrow your result set with a more specific query")
         return
     
-   

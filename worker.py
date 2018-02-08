@@ -19,6 +19,9 @@ from base64 import b64decode
 def sigIntHandler(signal, frame):
   log.info("Worker terminated cleanly by interrupt")
   log.info("Exiting with code 0")
+  global fetcher
+  if fetcher:
+    fetcher.terminate()
   sys.exit(0)
 
 def pkcs1_unpad(text):
@@ -28,6 +31,8 @@ def pkcs1_unpad(text):
     if pos > 0:
       return text[pos+1:]
   return None
+
+fetcher = None
 
 def configReceived(cfgObj):
   try:
@@ -101,6 +106,7 @@ def configReceived(cfgObj):
     
     if serviceType == 'nw':
       # NetWitness
+      global fetcher
       fetcher = NwFetcher(cfg, client)
 
       ###QUERY DATA###
@@ -124,6 +130,7 @@ def configReceived(cfgObj):
 
     if serviceType == 'sa':
       # Solera
+      global fetcher
       fetcher = SaFetcher(cfg, client)
 
       ###QUERY DATA###
@@ -143,12 +150,18 @@ def configReceived(cfgObj):
 
 def exitWithError(message):
   log.error(message)
+  global fetcher
+  if fetcher:
+    fetcher.terminate()
   client.write_data(json.dumps( { 'error': message} ) + '\n')
   client.handle_close()
   sys.exit(1)
 
 def exitWithException(message):
   log.exception(message)
+  global fetcher
+  if fetcher:
+    fetcher.terminate()
   client.write_data(json.dumps( { 'error': message} ) + '\n')
   client.handle_close()
   sys.exit(1)
