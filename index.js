@@ -38,6 +38,7 @@ const path = require('path');
 const buildProperties = require('./build-properties');
 const version = `${buildProperties.major}.${buildProperties.minor}.${buildProperties.patch}.${buildProperties.build}-${buildProperties.level}`;
 const feedScheduler = require('./feed-scheduler.js');
+const rollingCollectionHandler = require('./rolling-collections');
 var development = process.env.NODE_ENV !== 'production';
 // export NODE_ENV='production'
 // export NODE_ENV='development'
@@ -53,6 +54,7 @@ if (development) {
   unrarPath = '/opt/local/bin/unrar';
 }
 // import { Buffer } from 'buffer';
+/*const rollingCollection = require('./rolling-collections');
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////////EXPRESS////////////////////////////////////////////////////////////////
@@ -209,6 +211,7 @@ decryptor.setOptions({encryptionScheme: 'pkcs1'});
 // Set up feed scheduler
 // var scheduler = new feedScheduler(feedsDir, winston, decryptor, () => schedulerUpdatedCallback);
 var scheduler = new feedScheduler(feedsDir, winston, decryptor, (id) => schedulerUpdatedCallback(id));
+
 
 // Create LibreOffice profiles dir
 if ( !fs.existsSync(dataDir) ) {
@@ -2339,7 +2342,6 @@ function fixedSocketConnectionHandler(id, socket, tempName, subject) {
   });
                           
   // Send configuration to worker.  This officially kicks off the work.  After this, we should start receiving data on the socket
-  // socket.write(JSON.stringify(outerCfg) + '\n');
   writeToSocket(socket, JSON.stringify(outerCfg));
   
 }
@@ -2366,7 +2368,7 @@ function buildFixedCollection(id) {
     socketServer.listen(tempName, () => {
       winston.debug('Listening for worker communication');
       winston.debug("Spawning worker with socket file " + tempName);
-      var worker = spawn('./worker_stub.py ',[tempName], {shell:true, stdio: 'inherit'});
+      var worker = spawn('./worker_stub.py', [tempName], { shell: false, stdio: 'inherit'});
       worker.on('exit', (code) => {
         if (typeof code === 'undefined') {
           winston.debug('Worker process exited abnormally without an exit code');
@@ -2452,7 +2454,7 @@ app.get('/api/collection/fixed/build/:id', passport.authenticate('jwt', { sessio
 
 
 
-function rollingSubjectWatcher(req, res, output) {
+/*function rollingSubjectWatcher(req, res, output) {
   //The only job of this function is to take the output of our collection observable, and write it to the HTTP response stream so our client can see it
   
   //winston.debug("rollingSubjectWatcher()", output);
@@ -2460,8 +2462,9 @@ function rollingSubjectWatcher(req, res, output) {
   res.write(JSON.stringify(output) + ',');
   res.flush();
 }
+*/
 
-var rollingCollectionSubjects = {};
+// var rollingCollectionSubjects = {};
 // This contains observables for rolling collections, which can be subscribed to by new connections into a rolling collection
 // One observable per-collection
 /*
@@ -2481,9 +2484,9 @@ rollingCollectionSubjects = {
 */
 
 
-var rollingCollections = {}; // This houses collection data for rolling and monitoring collections.  It is never committed to the DB as these collections are intended to be temporary only
+// var rollingCollections = {}; // This houses collection data for rolling and monitoring collections.  It is never committed to the DB as these collections are intended to be temporary only
 
-
+/*
 function rollingCollectionSocketConnectionHandler(id, socket, tempName, subject, clientSessionId) {
   // For rolling and monitoring collections
   // Handles all dealings with the worker process after it has been spawned, including sending it its configuration, and sending data received from it to the chunkHandler() function
@@ -2743,17 +2746,22 @@ function rollingCollectionSocketConnectionHandler(id, socket, tempName, subject,
     fs.unlink(tempName, () => {}); // Delete the temporary UNIX socket file
   });
 
+  
+  
   // Send configuration to worker.  This officially kicks off the work.  After this, we should start receiving data on the socket
-  // socket.write(JSON.stringify(outerCfg) + '\n'); 
   writeToSocket(socket, JSON.stringify(outerCfg));
-  socket.end();
+  // writeToSocket(socket, JSON.stringify({ 'heartbeat' : true }));
+  
+  
+  // socket.end();
   
 }
+*/
 
 
 
 
-
+/*
 function runRollingCollection(collectionId, res, clientSessionId='') {
   // Executes the building of a rolling or monitoring collection
 
@@ -2775,6 +2783,14 @@ function runRollingCollection(collectionId, res, clientSessionId='') {
   let thisRollingCollectionSubject = rollingCollectionSubjects[rollingId];
   let thisCollection = collections[collectionId];
 
+  let myHeartbeat = setInterval( () => {
+    winston.debug('running heartbeat')
+    // writeToSocket(socket, JSON.stringify({ 'heartbeat' : true }));
+    res.write(JSON.stringify({ 'heartbeat' : true }) + ',');
+    res.flush();
+  }, 15000 );
+  thisRollingCollectionSubject['heartbeatInterval'] = myHeartbeat;
+
   var work = ( () => {
     // Main body of worker execution
     // This is wrapped in an arrow function so that it will retain the local scope of 'collectionId'
@@ -2794,7 +2810,8 @@ function runRollingCollection(collectionId, res, clientSessionId='') {
         // Check if there's already a python worker process already running which has overrun the 60 second mark, and if so, kill it
         winston.info('runRollingCollection(): work(): Timer expired for running worker.  Terminating worker');
         let oldWorker = thisRollingCollectionSubject['worker'];
-        oldWorker.kill('SIGINT');
+        // oldWorker.kill('SIGINT');
+        // process.kill(oldWorker, 'SIGINT');
         // delete thisRollingCollectionSubject['worker']; // we don't want to do this here as it will be handled when the worker exits
       }
 
@@ -2810,6 +2827,8 @@ function runRollingCollection(collectionId, res, clientSessionId='') {
       let socketServer = net.createServer( (socket) => { 
         // Add our socket to rollingCollectionSubjects[] so we can handle it later
         thisRollingCollectionSubject['socket'] = socket;
+        //socket.setNoDelay(true);
+        socket.setKeepAlive(true, 15000)
         rollingCollectionSocketConnectionHandler(collectionId, socket, tempName, subject, clientSessionId);
         // We won't write any more data to the socket, so we will call close() on socketServer.  This prevents the server from accepting any new connections
         socketServer.close();
@@ -2823,7 +2842,7 @@ function runRollingCollection(collectionId, res, clientSessionId='') {
         winston.debug("runRollingCollection(): work(): listen(): Rolling Collection: Spawning worker with socket file " + tempName);
         
         // Start the worker process and assign a reference to it to 'worker'
-        let worker = spawn('./worker_stub.py ', [tempName, '2>&1'], { shell:true, stdio: 'inherit'});
+        let worker = spawn('./worker_stub.py', [tempName, '2>&1'], { shell: false, stdio: 'inherit'});
         // Notice that we don't pass any configuration to the worker on the command line.  It's all done through the UNIX socket for security.
         
         // Add the worker reference to rollingCollectionSubjects so we can work with it later
@@ -2888,11 +2907,6 @@ function runRollingCollection(collectionId, res, clientSessionId='') {
               return;
             }
             
-            /*// Save the collection data to the DB -- WE SHOULDN'T HAVE TO DO THIS AS THESE DON'T PERSIST!!!!!!!
-            db.collection('collectionsData').update( {'id': collectionId }, {'id': collectionId, 'data': JSON.stringify(collectionsData[collectionId])}, (err, res) => {
-              if (err) throw err;
-            });*/
-            
             if (rollingId in rollingCollectionSubjects && 'worker' in thisRollingCollectionSubject) {
               delete thisRollingCollectionSubject.worker;
             }
@@ -2916,7 +2930,7 @@ function runRollingCollection(collectionId, res, clientSessionId='') {
   // This will not initially execute work() until the first 60 seconds have elapsed, which is why we run work() once before this
   thisRollingCollectionSubject['interval'] = setInterval( () => work(), 60000);
 }
-
+*/
 
 
 
@@ -2939,22 +2953,29 @@ app.get('/api/collection/monitoring/unpause/:id', passport.authenticate('jwt', {
 });
 
 
+
+app.get('/api/collection/rolling/:collectionId', passport.authenticate('jwt', { session: false } ), (req, res) => {
+  rollingHandler.handleRollingConnection(req, res);
+});
+
+
+function updateConnectionsDbCallback(collectionId) {
+  winston.debug('updateConnectionsDbCallback()');
+  let collection = collections[collectionId];
+  winston.debug('updateConnectionsDbCallback(): collection:', collection);
+  db.collection('collections').update( { id: collectionId }, collection, (err, res) => {
+    if (err) throw err;
+  });
+}
+
+
+/*
 app.get('/api/collection/rolling/:collectionId', passport.authenticate('jwt', { session: false } ), (req, res) => {
   // Builds and streams a rolling or monitoring collection back to the client.  Handles the client connection and kicks off the process
 
   let collectionId = req.params.collectionId;
   let clientSessionId = req.headers['afbsessionid'];
 
-
-/*
-//DEBUG  
-  if (! 'clientSessionId' in req.headers ) {
-    winston.error('clientSessionId missing from HTTP header!!!');
-    process.exit(1);
-  }
-  winston.debug(`clientSessionID: ${clientSessionId}`);
-//////
-*/
 
   winston.info('GET /api/collection/rolling/:id', collectionId);
   // winston.debug('GET /api/collection/rolling/:id clientSessionId:', clientSessionId);
@@ -2993,29 +3014,36 @@ app.get('/api/collection/rolling/:collectionId', passport.authenticate('jwt', { 
     return;
   }
 
-
-
+  
+  
+  
 
   ///////////////////////////////////////////////////////////////////////
   ///////////////////////CLIENT DISCONNECT HANDLER///////////////////////
   ///////////////////////////////////////////////////////////////////////
-
+  
   req.on('close', () => {
     // Run this block when the client disconnects from the session
 
+    
     if ( rollingId in rollingCollectionSubjects) {
       winston.debug("Client disconnected from rolling collection with rollingId", rollingId);
       rollingCollectionSubjects[rollingId].observers -= 1;
 
+      if ('heartbeatInterval' in rollingCollectionSubjects[rollingId]) {
+        // terminate heartbeat
+        clearInterval(rollingCollectionSubjects[rollingId]['heartbeatInterval']);
+      }
+      
       if (rollingCollectionSubjects[rollingId].observers === 0) {
         winston.debug("Last client disconnected from rolling collection with rollingId " + rollingId + '.  Destroying observable');
         
         // end execution of work() for this collection
         clearInterval(rollingCollectionSubjects[rollingId].interval);
-
+        
         // destroy subject
         rollingCollectionSubjects[rollingId].subject.complete();
-
+        
         try {
           winston.debug("Deleting output directory for collection", rollingId);
           rimraf( collectionsDir + '/' + rollingId, () => {} ); // Delete output directory
@@ -3026,7 +3054,8 @@ app.get('/api/collection/rolling/:collectionId', passport.authenticate('jwt', { 
         
         if ('worker' in rollingCollectionSubjects[rollingId]) {
           winston.debug("Killing worker for collection", rollingId);
-          rollingCollectionSubjects[rollingId].worker.kill('SIGINT');
+          let oldWorker = rollingCollectionSubjects[rollingId]['worker'];
+          oldWorker.kill('SIGINT');
         }
         delete rollingCollectionSubjects[rollingId];
         res.end();
@@ -3034,12 +3063,14 @@ app.get('/api/collection/rolling/:collectionId', passport.authenticate('jwt', { 
       }
     }
   });
-
-
+  
+  
   /////////////////////////////////////////
   /////////////NEW ROLLING RUN/////////////
   /////////////////////////////////////////
-
+  
+  
+  
   if ( thisCollection.type === 'rolling' && !(collectionId in rollingCollectionSubjects) ) {
     // This is a new rolling collection as there are no existing subscribers to it
     // Let's start building it
@@ -3155,7 +3186,7 @@ app.get('/api/collection/rolling/:collectionId', passport.authenticate('jwt', { 
   }
 
 });
-
+*/
 
 
 
@@ -3698,12 +3729,12 @@ function purgeSessions(thisRollingCollection, sessionsToPurge) {
         }
       }
     }
-
   }
 }
 
 function writeToSocket(socket, data) {
   socket.write(data + '\n');
+  // socket.flush();
 }
 
 function feederSocketCommunicationHandler(socket, tempName) {
@@ -3770,7 +3801,8 @@ function startFeeder() {
       winston.debug("Spawning feeder_srv with socket file " + tempName);
 
       // spawn the feeder process
-      var feederSrv = spawn('./feeder_stub.py ', [tempName], { shell: true, stdio: 'inherit' });
+      var feederSrv = spawn('./feeder_stub.py', [tempName], { shell: false, stdio: 'inherit' });
+      
 
       // wait for the feeder to exit (ideally it shouldn't until we shutdown)
       feederSrv.on('exit', (code) => {
@@ -3834,7 +3866,7 @@ function cleanBlackList() {
 
 
 
-
+var rollingHandler = null;
 
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -3844,6 +3876,7 @@ function cleanBlackList() {
 function listener() {
   // Start listening for client traffic and away we go
   // app.listen(listenPort, '127.0.0.1');
+  rollingHandler = new rollingCollectionHandler( () => updateConnectionsDbCallback, winston, collections, collectionsDir, feederSocketFile, gsPath, pdftotextPath, sofficePath, sofficeProfilesDir, unrarPath, internalPrivateKeyFile, useCasesObj, preferences, nwservers, saservers, collectionsUrl);
   app.listen(listenPort);
   apiInitialized = true;
   winston.info('Serving on localhost:' + listenPort);

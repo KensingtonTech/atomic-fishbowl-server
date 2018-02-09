@@ -7,16 +7,16 @@ import base64
 import json
 from pprint import pprint, pformat
 import cStringIO
-from worker_communicator import communicator
 import time
 import zipfile
 from multiprocessing import Pool, Manager, Value, current_process, cpu_count
 import socket
 from httplib import BadStatusLine
-from requests_futures.sessions import FuturesSession
 import requests
 from worker_contentprocessor import ContentProcessor
 from threading import Timer, Thread, Event
+from requests_futures.sessions import FuturesSession
+import concurrent.futures.thread
 
 #logging.getLogger("requests").setLevel(logging.WARNING)
 logging.getLogger("urllib3").setLevel(logging.WARNING)
@@ -52,9 +52,15 @@ class TimerThread(Thread):
     self.daemon = True
 
   def run(self):
-    while not self.stopped.wait(5):
+    while not self.stopped.wait(15):
       self.cb()
 
+
+class FutureSessionWithShutdown(FuturesSession):
+
+  def terminate(self):
+    self.executor._threads.clear()
+    concurrent.futures.thread._threads_queues.clear()
 
 
 
@@ -147,18 +153,25 @@ class Fetcher:
 
 class SaFetcher(Fetcher): # For Solera
 
-
-  def runQuery(self):
-    self.queryTime0 = time.time()
+  def __init__(self, cfg, communicator):
+    Fetcher.__init__(self, cfg, communicator)
     self.sessionIds = []
     self.extractFilesMap = {}
     self.extractResults = {}
     self.extractionComplete = False
     self.extractFutures = []
     stopFlag = Event()
-    timerThread = TimerThread(stopFlag, lambda y=self: self.heartbeat())
-    timerThread.start()
-    
+    #timerThread = TimerThread(stopFlag, lambda y=self: self.heartbeat())
+    #timerThread.start()
+    #cpucount = cpu_count()
+    #if cpucount >= 6:
+    #  cpucount = cpucount - 2
+    #session = FuturesSession(max_workers=cpucount)
+    self.session = FutureSessionWithShutdown()
+
+
+  def runQuery(self):
+    self.queryTime0 = time.time()
     
     # URL to call
     url = self.cfg['url'] + '/api/v6/deepsee_reports/report'
@@ -184,11 +197,8 @@ class SaFetcher(Fetcher): # For Solera
     post = self.convertToPostBody(data, 'GET')
     #pprint(post)
     #session = FuturesSession(max_workers=cpu_count() )
-    #cpucount = cpu_count()
-    #if cpucount >= 6:
-    #  cpucount = cpucount - 2
-    #session = FuturesSession(max_workers=cpucount)
-    self.session = FuturesSession()
+
+    
     session = self.session
     try:
       self.queryDef = { 'url': url, 'auth': ( self.cfg['user'], self.cfg['dpassword'] ), 'data': post, 'verify': False, 'stream': False }
@@ -696,6 +706,7 @@ vlan_id"""
 
   def extractDownloadedZip(self, zipHandle):
     log.debug('SaFetcher: extractDownloadedZip()')
+    poolResults = []
     for zinfo in zipHandle.infolist():
       archivedFilename = zinfo.filename
       #if archivedFilename.startswith('META-INF/') or archivedFilename.startswith('AssetData/'):
@@ -714,10 +725,13 @@ vlan_id"""
           # now fire!!!
           #log.debug('SaFetcher: extractDownloadedZip(): Launching extractor from pool')
           processor = ContentProcessor(self.cfg)
-          r = self.pool.apply_async( unwrapGo, args=(processor, payload, session, flowId, archivedFilename), callback=self.sendResult )
+          result = self.pool.apply_async( unwrapGo, args=(processor, payload, session, flowId, archivedFilename), callback=self.sendResult )
+          poolResults.append(result)
           #r.get() # useful to see if an error was thrown during apply_sync()
     
     self.pool.close()
+    for result in poolResults:
+      result.wait(timeout=9999999) #we use this because pool join can't be interrupted in Python 2.  This allows us to gracefully interrupt workers
     self.pool.join()
     #pprint(self.sessions)
 
@@ -752,9 +766,9 @@ vlan_id"""
     sys.exit(1)
 
   def terminate(self):
+    self.session.terminate()
     self.pool.terminate()
     self.pool.join()
-    self.session.close()
 
   def pretty_print_POST(self, req):
     """
@@ -919,6 +933,7 @@ class NwFetcher(Fetcher):
   def pullFiles(self):
 
     error = ''
+    poolResults = []
 
     for sessionId in self.sessions:
 
@@ -969,9 +984,12 @@ class NwFetcher(Fetcher):
           ##############EXTRACT FILES AND DO THE WORK##############
           log.debug('Fetcher: pullFiles(): Launching extractor from pool')
           processor = ContentProcessor(self.cfg)
-          self.pool.apply_async(unwrapGo, args=(processor, payload, self.sessions[sessionId], sessionId), callback=self.sendResult )
+          result = self.pool.apply_async(unwrapGo, args=(processor, payload, self.sessions[sessionId], sessionId), callback=self.sendResult )
+          poolResults.append(result)
 
     self.pool.close()
+    for result in poolResults:
+      result.wait(timeout=9999999) #we use this because pool join can't be interrupted in Python 2.  This allows us to gracefully interrupt workers
     self.pool.join()
 
 

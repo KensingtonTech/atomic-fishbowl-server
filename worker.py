@@ -9,12 +9,16 @@ import time
 import calendar
 import asyncore
 from worker_fetcher import NwFetcher, SaFetcher
-from worker_communicator import communicator
+from worker_communicator import Communicator
 from pprint import pprint, pformat
 import logging
 import signal
 from Crypto.PublicKey import RSA
 from base64 import b64decode
+
+fetcher = None
+
+#raise Exception('Some exception')
 
 def sigIntHandler(signal, frame):
   log.info("Worker terminated cleanly by interrupt")
@@ -32,9 +36,8 @@ def pkcs1_unpad(text):
       return text[pos+1:]
   return None
 
-fetcher = None
-
 def configReceived(cfgObj):
+  global fetcher
   try:
 
     try:
@@ -103,15 +106,15 @@ def configReceived(cfgObj):
       error = 'ERROR: Missing critical configuration data: ' + str(e)
       exitWithError(error)
   
-    
+    signal.signal(signal.SIGINT, signal.SIG_IGN) # disable SIGINT handler before pool is created in fetcher constructor.  we don't want its threads catching ctrl-c
     if serviceType == 'nw':
       # NetWitness
-      global fetcher
-      fetcher = NwFetcher(cfg, client)
+      fetcher = NwFetcher(cfg, communicator)
+      signal.signal(signal.SIGINT, sigIntHandler)  # restore signal handler
 
       ###QUERY DATA###
       log.info("Executing NetWitness query")
-      client.write_data(json.dumps( { 'collection': { 'id': collectionId, 'state': 'querying' }} ) + '\n') #Tell client that we're querying
+      communicator.write_data(json.dumps( { 'collection': { 'id': collectionId, 'state': 'querying' }} ) + '\n') #Tell communicator that we're querying
       time0 = time.time()
       numResults = fetcher.runQuery()
       log.info(str(numResults) + " sessions returned from query")
@@ -121,28 +124,28 @@ def configReceived(cfgObj):
       ###PULL FILES###
       if (numResults > 0):
         log.info("Extracting files from sessions")
-        client.write_data(json.dumps( { 'collection': { 'id': collectionId, 'state': state }} ) + '\n')
+        communicator.write_data(json.dumps( { 'collection': { 'id': collectionId, 'state': state }} ) + '\n')
         time0 = time.time()
         fetcher.pullFiles()
         time1 = time.time()
         log.info("Pulled files in " + str(time1 - time0) + " seconds")
-        client.handle_close()
+        communicator.handle_close()
 
     if serviceType == 'sa':
       # Solera
-      global fetcher
-      fetcher = SaFetcher(cfg, client)
+      fetcher = SaFetcher(cfg, communicator)
+      signal.signal(signal.SIGINT, sigIntHandler)  # restore signal handler
 
       ###QUERY DATA###
       log.info("Executing SA query")
-      client.write_data(json.dumps( { 'collection': { 'id': collectionId, 'state': 'querying' }} ) + '\n') #Tell client that we're querying
+      communicator.write_data(json.dumps( { 'collection': { 'id': collectionId, 'state': 'querying' }} ) + '\n') #Tell communicator that we're querying
       numResults = fetcher.runQuery( )
       log.info(str(numResults) + " sessions returned from query")
-      client.handle_close() # this will have to get moved into SaFetcher
+      communicator.handle_close() # this will have to get moved into SaFetcher
 
   except Exception as e:
     #log.exception("Unhandled exception in configReceived() - exiting worker with code 1: " + str(e) )
-    #client.handle_close()
+    #communicator.handle_close()
     #sys.exit(1)
     error = "configReceived(): Unhandled exception.  Exiting worker with code 1: " + str(e)
     exitWithException(error)
@@ -153,8 +156,8 @@ def exitWithError(message):
   global fetcher
   if fetcher:
     fetcher.terminate()
-  client.write_data(json.dumps( { 'error': message} ) + '\n')
-  client.handle_close()
+  communicator.write_data(json.dumps( { 'error': message} ) + '\n')
+  communicator.handle_close()
   sys.exit(1)
 
 def exitWithException(message):
@@ -162,8 +165,8 @@ def exitWithException(message):
   global fetcher
   if fetcher:
     fetcher.terminate()
-  client.write_data(json.dumps( { 'error': message} ) + '\n')
-  client.handle_close()
+  communicator.write_data(json.dumps( { 'error': message} ) + '\n')
+  communicator.handle_close()
   sys.exit(1)
 
   
@@ -201,8 +204,8 @@ def main():
     #Handle rest of startup
     log.info("afb_worker is starting")
     socketFile = sys.argv[1]
-    global client
-    client = communicator(socketFile, configReceived)
+    global communicator
+    communicator = Communicator(socketFile, configReceived)
     asyncore.loop(use_poll=True)
     log.info("Exiting afb_worker with code 0")
     sys.exit(0)

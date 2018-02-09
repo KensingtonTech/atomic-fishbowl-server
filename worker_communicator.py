@@ -5,14 +5,16 @@ import socket
 import asynchat
 import json
 import logging
+import pprint
 
 log = logging.getLogger(__name__)
 
-class communicator(asynchat.async_chat):
+class Communicator(asynchat.async_chat):
 
   def __init__(self, file, callback):
     asynchat.async_chat.__init__(self)
     self.create_socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    #self.socket.settimeout(None)
     self.connect( file )
     self.set_terminator('\n')
     self.in_buffer = []
@@ -32,10 +34,15 @@ class communicator(asynchat.async_chat):
       log.exception("Exception in found_terminator().  Exiting with code 1")
       sys.exit(1)
 
-    if 'workerConfig' in obj:
+    #pprint.pprint(obj)
+
+    if 'heartbeat' in obj: # this is just to keep the socket open
+      pass
+      log.debug("got heartbeat")
+    elif 'workerConfig' in obj:
       self.callback(obj)
     else:
-      log.error("No workerConfig found in received payload.  Exiting with code 1")  #this should in theory never happen
+      log.error("No identifiable attribute was found in received payload.  Exiting with code 1")  #this should in theory never happen
       sys.exit(1)
   
   def write_data(self, data):
