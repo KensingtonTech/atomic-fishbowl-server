@@ -107,6 +107,8 @@ def configReceived(cfgObj):
       exitWithError(error)
   
     signal.signal(signal.SIGINT, signal.SIG_IGN) # disable SIGINT handler before pool is created in fetcher constructor.  we don't want its threads catching ctrl-c
+
+
     if serviceType == 'nw':
       # NetWitness
       fetcher = NwFetcher(cfg, communicator)
@@ -116,10 +118,13 @@ def configReceived(cfgObj):
       log.info("Executing NetWitness query")
       communicator.write_data(json.dumps( { 'collection': { 'id': collectionId, 'state': 'querying' }} ) + '\n') #Tell communicator that we're querying
       time0 = time.time()
+      communicator.write_data(json.dumps( { 'queryResultsCount': 0 } ) + '\n')
       numResults = fetcher.runQuery()
       log.info(str(numResults) + " sessions returned from query")
       time1 = time.time()
       log.info("Query completed in " + str(time1 - time0) + " seconds")
+
+      communicator.write_data(json.dumps( { 'queryResultsCount': numResults } ) + '\n')
 
       ###PULL FILES###
       if (numResults > 0):
@@ -129,8 +134,11 @@ def configReceived(cfgObj):
         fetcher.pullFiles()
         time1 = time.time()
         log.info("Pulled files in " + str(time1 - time0) + " seconds")
-        communicator.handle_close()
+      
+      communicator.handle_close()
 
+    
+    
     if serviceType == 'sa':
       # Solera
       fetcher = SaFetcher(cfg, communicator)

@@ -49,7 +49,6 @@ module.exports = class {
   
   handleRollingConnection(req, res) {
     // Builds and streams a rolling or monitoring collection back to the client.  Handles the client connection and kicks off the process
-
     
     let collectionId = req.params.collectionId;
     let clientSessionId = req.headers['afbsessionid'];
@@ -80,19 +79,71 @@ module.exports = class {
     let rollingCollectionManager = null;
     if ( !(rollingId in this.rollingCollectionManagers)) {
       // there is no RollingCollectionManager yet for the chosen collection.  So create one
-      rollingCollectionManager = new RollingCollectionManager(collection, collectionId, rollingId, this.rollingCollectionManagerRemovalCallback, this.dbUpdateCallback);
-      this.rollingCollectionManagers[rollingId] = rollingCollectionManager;
+      rollingCollectionManager = new RollingCollectionManager(collection, collectionId, rollingId, () => this.rollingCollectionManagerRemovalCallback, this.dbUpdateCallback);
+      this.rollingCollectionManagers[rollingId] = { collectionId: collectionId, manager: rollingCollectionManager };
     }
     else {
       // there's already a manager for the chosen collection
-      rollingCollectionManager = this.rollingCollectionManagers[rollingId];
+      rollingCollectionManager = this.rollingCollectionManagers[rollingId]['manager'];
     }
 
     // give the client connection object the rolling collection manager to attach itself to
     clientConnection.addManager(rollingCollectionManager);
     
   }
+
+
+
+  collectionEdited(collectionId, collection) {
+    winston.info('collectionEdited()');
+    let managers = []
+    if (collectionId in this.rollingCollectionManagers) {
+      // manager = { rollingId: { collectionId: collectionId, manager: manager } }
+      let manager = this.rollingCollectionManagers[collectionId]['manager'];
+      managers.push(manager);
+    }
+    else {
+      // didn't find the collectionId, but it could still be in there if it's a monitoring collection
+      for (let i in this.rollingCollectionManagers) {
+        if (this.rollingCollectionManagers.hasOwnProperty(i) && this.rollingCollectionManagers[i]['collectionId'] == collectionId ) {
+          let manager = this.rollingCollectionManagers[i]['manager'];
+          managers.push(manager);
+        }
+      }
+    }
+    for (let i = 0; i < managers.length; i++) {
+      // there should only be one unless it's a monitoring collection with multiple clients
+      let manager = managers[i];
+      manager.onCollectionEdited(collection);
+    }
+  }
+
+
   
+  collectionDeleted(collectionId, user) {
+    winston.info('collectionDeleted()');
+    let managers = []
+    if (collectionId in this.rollingCollectionManagers) {
+      // manager = { rollingId: { collectionId: collectionId, manager: manager } }
+      let manager = this.rollingCollectionManagers[collectionId]['manager'];
+      managers.push(manager);
+    }
+    else {
+      // didn't find the collectionId, but it could still be in there if it's a monitoring collection
+      for (let i in this.rollingCollectionManagers) {
+        if (this.rollingCollectionManagers.hasOwnProperty(i) && this.rollingCollectionManagers[i]['collectionId'] == collectionId ) {
+          let manager = this.rollingCollectionManagers[i]['manager'];
+          managers.push(manager);
+        }
+      }
+    }
+    for (let i = 0; i < managers.length; i++) {
+      // there should only be one unless it's a monitoring collection with multiple clients
+      let manager = managers[i];
+      manager.onCollectionDeleted(user);
+    }
+  }
+
 
   
   rollingCollectionManagerRemovalCallback(id) {
@@ -101,23 +152,36 @@ module.exports = class {
   }
 
 
-  handlePauseMonitoringCollection(req, res) {
+
+  pauseMonitoringCollection(req, res) {
     let clientSessionId = req.headers['afbsessionid'];
     winston.info(`handlePauseMonitoringCollection(): Pausing monitoring collection ${clientSessionId}`);
-    let manager = this.rollingCollectionManagers[clientSessionId];
+    let manager = this.rollingCollectionManagers[clientSessionId]['manager'];
     manager.pause();
     res.status(202).send( JSON.stringify( { success: true } ) );
   }
 
 
-  handleUnpauseMonitoringCollection(req, res) {
+
+  unpauseMonitoringCollection(req, res) {
     // This only gets used by the client if a monitoring collection is paused and then resumed within the minute the run is permitted to continue executing
     // Otherwise, the client will simply call /api/collection/rolling/:id again
     let clientSessionId = req.headers['afbsessionid'];
     winston.info(`handleUnpauseMonitoringCollection(): Resuming monitoring collection ${clientSessionId}`);
-    let manager = this.rollingCollectionManagers[clientSessionId];
+    let manager = this.rollingCollectionManagers[clientSessionId]['manager'];
     manager.unpause();
     res.status(202).send( JSON.stringify( { success: true } ) );
+  }
+
+
+
+  killall() {
+    for (let rollingId in this.collectionManagers) {
+      if (this.collectionManagers.hasOwnProperty(rollingId)) {
+        let manager = this.collectionManagers[rollingId];
+        manager.abort();
+      }
+    }
   }
 
 }
@@ -149,7 +213,10 @@ class ClientConnection {
     
     this.manager = null;
     this.heartbeatInterval = null;
+    this.disconnected = false;
   }
+
+
 
   addManager(manager) {
     winston.info('ClientConnection: addManager()');
@@ -157,24 +224,45 @@ class ClientConnection {
     this.manager.addClient(this.id, this);
   }
 
+
+
   send(data) {
-    winston.info('ClientConnection: send()');
+    // winston.info('ClientConnection: send()');
     // sends data to the client
-    this.res.write( JSON.stringify(data) + ',');
-    this.res.flush();
+    if (!this.disconnected) {
+      this.res.write( JSON.stringify(data) + ',');
+      this.res.flush();
+    }
   }
+
+
 
   sendRaw(data) {
     winston.info('ClientConnection: sendRaw()');
     // sends data to the client
-    this.res.write( data );
-    this.res.flush();
+    if (!this.disconnected) {
+      this.res.write( data );
+      this.res.flush();
+    }
   }
+
+
 
   end() {
     winston.info('ClientConnection: end()');
-    this.res.end()
+    if (this.heartbeatInterval) {
+      // stop sending heartbeats to client
+      clearInterval(this.heartbeatInterval);
+      this.heartbeatInterval = null;
+    }
+    this.sendRaw('{"close":true}]'); // Close the array so that oboe knows we're done
+    this.manager = null;
+    this.res.end() // not sure if this will work if already disconnected
+    if (!this.disconnected) {
+    }
   }
+
+
 
   onConnect(collection) {
 
@@ -186,7 +274,7 @@ class ClientConnection {
   
     try {
       // Write the response headers
-      if (collection.bound && !('usecase' in collection )) {
+      if (collection.bound && !( 'usecase' in collection )) {
         throw(`Bound collection ${this.collectionId} does not have a use case defined`);
       }
       if (collection.bound && !(collection.usecase in useCasesObj) ) {
@@ -202,7 +290,7 @@ class ClientConnection {
       }
     }
     catch (e) {
-      winston.error('GET /api/collection/rolling/:id', e);
+      winston.error('ClientConnection: onConnect():', e);
       this.res.status(500).send( JSON.stringify( { success: false, error: e.message || e } ) );
       return false;
     }
@@ -214,11 +302,14 @@ class ClientConnection {
     
     this.req.on('close', () => {
       winston.info('ClientConnection: close()');
+      this.disconnected = true;
       // This block runs when the client disconnects from the session
+      // But NOT when we terminate the session from the server
       
       if (this.heartbeatInterval) {
         // stop sending heartbeats to client
         clearInterval(this.heartbeatInterval);
+        this.heartbeatInterval = null;
       }
       
       this.manager.removeClient(this.id);
@@ -227,8 +318,6 @@ class ClientConnection {
     });
 
     this.heartbeatInterval = setInterval( () => {
-      // winston.debug('running heartbeat')
-      // writeToSocket(socket, JSON.stringify({ 'heartbeat' : true }));
       this.send( { heartbeat : true } );
     }, 15000 );
     
@@ -250,11 +339,15 @@ class ClientConnection {
 
 
 
+
+
+
+
+
 class RollingCollectionManager {
 
   constructor(collection, collectionId, rollingId, removalCallback, dbUpdateCallback) {
     winston.info('RollingCollectionManager: constructor()');
-    this.worker = null;
     this.clients = {};
     this.socket = null;
     this.removalCallback = removalCallback;
@@ -268,12 +361,14 @@ class RollingCollectionManager {
     this.destroyThreshold = 3600; // wait one hour to destroy
     this.destroyTimeout;  // holds setTimeout for destroy().  Cancel if we get another connection within timeframe
     this.runs = 0;
-    this.sessions = []; // or {} ?
+    this.sessions = [];
     this.images = [];
     this.search = [];
     this.monitoringCollection = false;
     this.lastrun = null;
+    this.destroyed = false;
   }
+
 
 
   run() {
@@ -286,6 +381,7 @@ class RollingCollectionManager {
   }
 
 
+
   setMonitoring() {
     winston.info('RollingCollectionManager: setMonitoring()');
     this.monitoring = false;
@@ -294,27 +390,27 @@ class RollingCollectionManager {
   }
 
 
+
   selfDestruct() {
     winston.info('RollingCollectionManager: selfDestruct()');
-    winston.debug("No clients reconnected to rolling collection " + this.rollingId + " within " + self.destroyThreshold + " seconds. Self-destructing");
+    /*if (isDestroyed) {
+      winston.debug('Not self-destructing as we\'re already being deleted');
+      return;
+    }*/
+    this.collection['state'] = 'disconnected';
+    winston.debug("No clients reconnected to rolling collection " + this.rollingId + " within " + this.destroyThreshold + " seconds. Self-destructing");
     clearInterval(this.workInterval);
-    // this.subject.complete();
-    if (!this.monitoring) {
-      try {
-        winston.debug("Deleting output directory for collection", this.rollingId);
-        rimraf( collectionsDir + '/' + this.rollingId, () => {} ); // Delete output directory
-      }
-      catch(exception) {
-        winston.error('ERROR deleting output directory ' + collectionsDir + '/' + this.rollingId, exception);
-      }
+    this.killWorker();
+    try {
+      winston.debug("Deleting output directory for collection", this.rollingId);
+      rimraf( collectionsDir + '/' + this.rollingId, () => {} ); // Delete output directory
     }
-    if (this.workerProcess) {
-      winston.debug("Killing worker for collection", this.rollingId);
-      let oldWorker = this.workerProcess;
-      oldWorker.kill('SIGINT');
+    catch(exception) {
+      winston.error('ERROR deleting output directory ' + collectionsDir + '/' + this.rollingId, exception);
     }
     this.removalCallback(this.rollingId);
   }
+
 
 
   addClient(id, client) {
@@ -361,9 +457,134 @@ class RollingCollectionManager {
       }
       client.send(resp);
 
+      if (this.observers == 1) {
+        // If all clients have disconnected, and then one reconnects, the worker should start immediately
+        clearInterval(this.workInterval);
+        this.workInterval = null;
+        this.run();
+      }
+
     }
 
   }
+
+
+
+  onCollectionEdited(collection) {
+    // If the collection gets edited, we must assume that some critical element has changed...
+    // and that we must blow away the existing data and work jobs, and start over
+
+    winston.debug('RollingCollectionManager: onCollectionEdited()');
+    
+    // stop the work loop
+    if (this.workInterval) {
+      clearInterval(this.workInterval);
+      this.workInterval = null;
+    }
+    
+    // stop any running workers
+    this.killWorker();
+    
+    this.collection = collection
+
+    this.sessions = [];
+    this.images = [];
+    this.search = [];
+    this.runs = 0;
+
+    this.sendToClients( { wholeCollection: { images: [], sessions: {}, search: [] } } );
+
+    // don't re-run.  The clients will cause this themselves when they reconnect
+    // this d.run();
+
+  }
+
+
+
+  onCollectionDeleted(user) {
+    winston.debug('RollingCollectionManager: onCollectionDeleted()');
+    this.destroyed = true;
+
+    // stop the work loop
+    if (this.workInterval) {
+      clearInterval(this.workInterval);
+      this.workInterval = null;
+    }
+    
+    // stop any running workers
+    this.killWorker();
+    
+    if (this.destroyTimeout) {
+      clearTimeout(this.destroyTimeout);
+      this.destroyTimeout = null;
+    }
+
+    if (this.monitoring) {
+      // we only do this for monitoring collections as this helps us to...
+      // clean up after all the different client instances of a particular monitoring collection
+      // the collection delete handler will otherwise handle deletion
+      try {
+        winston.debug("Deleting output directory for collection", this.rollingId);
+        rimraf( collectionsDir + '/' + this.rollingId, () => {} ); // Delete output directory
+      }
+      catch(exception) {
+        winston.error('ERROR deleting output directory ' + collectionsDir + '/' + this.rollingId, exception);
+      }
+    }
+
+    this.sendToClients( { collectionDeleted: this.collectionId, user: user } );
+    this.endClients();
+
+    this.removalCallback(this.rollingId);
+  }
+
+
+
+  abort() {
+    winston.info('RollingCollectionManager: abort()');
+
+    try {
+      winston.debug("Deleting output directory for collection", this.collectionId);
+      rimraf( collectionsDir + '/' + this.collectionId, () => {} ); // Delete output directory
+    }
+    catch(exception) {
+      winston.error('ERROR deleting output directory ' + collectionsDir + '/' + this.collectionId, exception);
+    }
+
+    // stop the work loop
+    if (this.workInterval) {
+      clearInterval(this.workInterval);
+      this.workInterval = null;
+    }
+
+    this.killWorker();
+    
+    if (this.destroyTimeout) {
+      clearTimeout(this.destroyTimeout);
+      this.destroyTimeout = null;
+    }
+    
+    this.sendToClients( { collectionDeleted: this.collectionId } );
+    this.endClients();
+    this.removalCallback(this.collectionId);
+  }
+
+
+
+  killWorker() {
+
+    if (this.socket) {
+      this.socket.removeAllListeners();
+      this.socket = null;
+    }
+
+    if (this.workerProcess){
+      this.workerProcess.removeAllListeners(); // not sure whether we need this or not - probably do
+      this.workerProcess.kill('SIGINT');
+      this.workerProcess = null;
+    }
+  }
+
 
 
   removeClient(id) {
@@ -380,10 +601,12 @@ class RollingCollectionManager {
   }
 
 
+
   pause() {
     winston.info('RollingCollectionManager: pause()');
     this.paused = true;
   }
+
 
 
   unpause() {
@@ -392,10 +615,12 @@ class RollingCollectionManager {
   }
 
 
+
   sendToWorker(data) {
     winston.info('RollingCollectionManager: sendToWorker()');
     this.socket.write( JSON.stringify(data) + '\n' );
   }
+
 
 
   sendToClients(data) {
@@ -408,6 +633,8 @@ class RollingCollectionManager {
     }
   }
 
+
+
   sendToClientsRaw(data) {
     winston.info('RollingCollectionManager: sendToClientsRaw()');
     for (let id in this.clients) {
@@ -418,6 +645,8 @@ class RollingCollectionManager {
     }
   }
 
+
+
   endClients() {
     winston.info('RollingCollectionManager: endClients()');
     for (let id in this.clients) {
@@ -427,6 +656,7 @@ class RollingCollectionManager {
       }
     }
   }
+
 
 
   workLoop() {
@@ -460,7 +690,7 @@ class RollingCollectionManager {
       // Now open the UNIX domain socket that will talk to worker script by creating a handler (or server) to handle communications
       let socketServer = net.createServer( (socket) => { 
         this.socket = socket;
-        this.rollingCollectionSocketConnectionHandler(tempName);
+        this.onConnectionFromWorker(tempName);
         // We won't write any more data to the socket, so we will call close() on socketServer.  This prevents the server from accepting any new connections
         socketServer.close();
       });
@@ -473,64 +703,10 @@ class RollingCollectionManager {
         winston.debug("workLoop(): listen(): Rolling Collection: Spawning worker with socket file " + tempName);
         
         // Start the worker process and assign a reference to it to 'worker'
-        this.workerProcess = spawn('./worker_stub.py', [tempName, '2>&1'], { shell: false, stdio: 'inherit'});
         // Notice that we don't pass any configuration to the worker on the command line.  It's all done through the UNIX socket for security.
+        this.workerProcess = spawn('./worker_stub.py', [tempName, '2>&1'], { shell: false, stdio: 'inherit'});
 
-        this.workerProcess.on('exit', (code, signal) => {
-          // This is where we handle the exiting of the worker process
-
-          if (typeof code === 'undefined') {
-            // Handle really abnormal worker exit with no error code - maybe because we couldn't spawn it at all?  We likely won't ever enter this block
-            winston.debug('workLoop(): listen(): onExit(): Worker process exited abnormally without an exit code');
-
-            this.collection['state'] = 'error';
-            this.sendToClients( { collection: { id: this.collectionId, state: 'error' } } );
-            if (this.workerProcess) {
-              this.workerProcess = null;
-            }
-          }
-
-          else if (code !== null || signal !== null) {
-            // Handle normal worker exit code 0
-            if (code !== null && code === 0) {
-              winston.debug('workLoop(): listen(): onExit(): Worker process exited normally with exit code 0');
-              // Tell clients that we're resting
-              this.sendToClients( { collection: { id: this.collectionId, state: 'resting' } } );
-            }
-            else if (code !== null && code !== 0) {
-              // Handle worker exit with non-zero (error) exit code
-              winston.debug('workLoop(): listen(): onExit(): Worker process exited in bad state with non-zero exit code', code.toString() );
-              this.collection['state'] = 'error';
-              this.sendToClients( { collection: { id: this.collectionId, state: 'error' } } );
-              if (this.workerProcess) {
-                this.workerProcess = null;
-              }
-            }
-            else {
-              winston.debug('workLoop(): listen(): onExit(): Worker process was terminated by signal', signal);
-              // Tell client that we're resting
-              this.sendToClients( { collection: { id: this.collectionId, state: 'resting' } } );
-            }
-
-            // Save the collection to the DB
-            this.dbUpdateCallback();
-            
-            if (this.monitoring && this.paused) {
-              // Monitoring collection is paused
-              // Now we end and delete this monitoring collection, except for its files (which still may be in use on the client)
-              winston.debug('workLoop(): listen(): onExit(): Completing work for paused monitoring collection', this.rollingId);
-              clearInterval(this.workInterval); // stop work() from being called again
-              this.sendToClientsRaw('{"close":true}]'); // Close the array so that oboe knows we're done
-              this.endClients();
-              return;
-            }
-            
-            if (this.workerProcess) {
-              this.workerProcess = null;
-            }
-          }
-
-        });
+        this.workerProcess.on('exit', (code, signal) => this.onWorkerExit(code, signal) );
       });
     }
 
@@ -542,16 +718,72 @@ class RollingCollectionManager {
 
 
 
+  onWorkerExit(code, signal) {
+    // This is where we handle the exiting of the worker process
 
-  rollingCollectionSocketConnectionHandler(tempName) {
-    winston.info('RollingCollectionManager: rollingCollectionSocketConnectionHandler()');
+    if (this.workerProcess) {
+      this.workerProcess = null;
+    }
+
+    if (typeof code === 'undefined') {
+      // Handle really abnormal worker exit with no error code - maybe because we couldn't spawn it at all?  We likely won't ever enter this block
+      winston.debug('workLoop(): listen(): onExit(): Worker process exited abnormally without an exit code');
+
+      this.collection['state'] = 'error';
+      this.sendToClients( { collection: { id: this.collectionId, state: 'error' } } );
+    }
+
+    else if (code !== null || signal !== null) {
+
+      // Handle normal worker exit code 0
+      if (code !== null && code === 0) {
+        winston.debug('workLoop(): listen(): onExit(): Worker process exited normally with exit code 0');
+        // Tell clients that we're resting
+        this.collection['state'] = 'resting';
+        this.sendToClients( { collection: { id: this.collectionId, state: 'resting' } } );
+      }
+
+      else if (code !== null && code !== 0) {
+        // Handle worker exit with non-zero (error) exit code
+        winston.debug('workLoop(): listen(): onExit(): Worker process exited in bad state with non-zero exit code', code.toString() );
+        this.collection['state'] = 'error';
+        this.sendToClients( { collection: { id: this.collectionId, state: 'error' } } );
+      }
+
+      else {
+        winston.debug('workLoop(): listen(): onExit(): Worker process was terminated by signal', signal);
+        // Tell client that we're resting
+        this.collection['state'] = 'resting';
+        this.sendToClients( { collection: { id: this.collectionId, state: 'resting' } } );
+      }
+
+      if (this.monitoring && this.paused) {
+        // Monitoring collection is paused
+        // Now we end and delete this monitoring collection, except for its files (which still may be in use on the client)
+        winston.debug('workLoop(): listen(): onExit(): Completing work for paused monitoring collection', this.rollingId);
+        clearInterval(this.workInterval); // stop work() from being called again
+        this.workInterval = null;
+        this.endClients();
+        this.dbUpdateCallback(this.collectionId);
+        return;
+      }
+    }
+
+    // Save the collection to the DB
+    this.dbUpdateCallback(this.collectionId);
+  }
+
+
+
+  onConnectionFromWorker(tempName) {
+    winston.info('RollingCollectionManager: onConnectionFromWorker()');
     // For rolling and monitoring collections
-    // Handles all dealings with the worker process after it has been spawned, including sending it its configuration, and sending data received from it to the chunkHandler() function
+    // Handles all dealings with the worker process after it has been spawned, including sending it its configuration, and sending data received from it to the onDataFromWorker() function
     // It also purges old data from the collection as defined by the type of collection and number of hours back to retain
     
     this.runs++;
     
-    winston.debug("rollingCollectionSocketConnectionHandler(): Connection received from worker to build rolling or monitoring collection", this.rollingId);
+    winston.debug("onConnectionFromWorker(): Connection received from worker to build rolling or monitoring collection", this.rollingId);
     
     let ourState = '';
     // Tell our subscribed clients that we're rolling, so they can start their spinny icon and whatnot
@@ -561,6 +793,7 @@ class RollingCollectionManager {
     else if (!this.monitoring) {
       ourState = 'rolling';
     }
+    this.collection['state'] = ourState;
     this.sendToClients( { collection: { id: this.collectionId, state: ourState}} );
   
   
@@ -725,7 +958,7 @@ class RollingCollectionManager {
     
     else if (this.runs == 1) {
       // This is the first run of a rolling collection
-      winston.debug('rollingCollectionSocketConnectionHandler(): Got first run');
+      winston.debug('onConnectionFromWorker(): Got first run');
       cfg['timeEnd'] = moment().startOf('minute').unix() - 61 - queryDelaySeconds; // the beginning of the last minute minus one second, to give time for sessions to leave the assembler
       cfg['timeBegin'] = ( cfg['timeEnd'] - (this.collection.lastHours * 60 * 60) ) + 1;
     }
@@ -733,14 +966,14 @@ class RollingCollectionManager {
     else if (this.runs == 2 && (moment().unix() - this.lastRun >= 61) ) {
       // This is the second run of a rolling collection - this allows the first run to exceed one minute of execution and will take up whatever excess time has elapsed
       // It will only enter this block if more than 61 seconds have elapsed since the last run
-      winston.debug('rollingCollectionSocketConnectionHandler(): Got second run');
+      winston.debug('onConnectionFromWorker(): Got second run');
       cfg['timeBegin'] = this.lastRun + 1; // one second after the last run
       cfg['timeEnd'] = moment().startOf('minute').unix() - 61 - queryDelaySeconds; // the beginning of the last minute minus one second, to give time for sessions to leave the assembler
     }  
   
     else {
       // This is the third or greater run of a rolling collection
-      winston.debug('rollingCollectionSocketConnectionHandler(): Got subsequent run');
+      winston.debug('onConnectionFromWorker(): Got subsequent run');
       cfg['timeBegin'] = this.lastRun + 1; // one second after the last run
       cfg['timeEnd'] = cfg['timeBegin'] + 60; //add one minute to cfg[timeBegin]
     }
@@ -794,18 +1027,24 @@ class RollingCollectionManager {
     this.socket.setEncoding('utf8');
     
     // Handle data received from the worker over the socket (this really builds the collection)
-    this.socket.on('data', chunk => data = this.chunkHandler(data, chunk) );
+    this.socket.on('data', chunk => data = this.onDataFromWorker(data, chunk) );
+    // this.onDataFromWorkerFunc = (chunk) => this.onDataFromWorker(data, chunk);
+    // this.socket.on('data', this.onDataFromWorkerFunc );
                                 
                                 
     // Once the worker has exited, delete the socket temporary file
-    this.socket.on('end', () => {
-      winston.debug('Worker disconnected.  Rolling collection update cycle complete.');
-      fs.unlink(tempName, () => {}); // Delete the temporary UNIX socket file
-    });
+    this.socket.on('end', () => this.onWorkerDisconnected(tempName) );
     
     // Send configuration to worker.  This officially kicks off the work.  After this, we should start receiving data on the socket
     this.sendToWorker(outerCfg);
     
+  }
+
+  
+
+  onWorkerDisconnected(tempName) {
+    winston.debug('Worker disconnected.  Rolling collection update cycle complete.');
+    fs.unlink(tempName, () => {} ); // Delete the temporary UNIX socket file
   }
 
 
@@ -884,10 +1123,13 @@ class RollingCollectionManager {
   }
 
 
-  chunkHandler(data, chunk) {
+  
+  onDataFromWorker(data, chunk) {
+  // onDataFromWorker(chunk) {
+  // onDataFromWorker = (chunk) => {
     // Handles socket data received from the worker process
     // This actually builds the collection data structures and sends updates to the client
-    winston.debug('RollingCollectionManager: chunkHandler(): Processing update from worker');
+    winston.debug('RollingCollectionManager: onDataFromWorker(): Processing update from worker');
     data += chunk
 
     var splt = data.split("\n").filter( (el) => {return el.length != 0}) ;
@@ -964,7 +1206,7 @@ class RollingCollectionManager {
     }
 
     return data;
-  }
+  };
 
 
 }
