@@ -1,52 +1,813 @@
+import logging
 import os
 import sys
-import urllib2
+import urllib, urllib2, urlparse
 import ssl
 import base64
 import json
-import email
-import mimetypes
 from pprint import pprint, pformat
-import StringIO
-from PIL import Image ##install
-from worker_communicator import communicator
+import cStringIO
 import time
-from subprocess import Popen, PIPE
 import zipfile
-import shutil
-import magic ##install
-import hashlib
-import rarfile ##install
-import re
-import logging
-from worker_contentobj import ContentObj
-from copy import deepcopy, copy
-from multiprocessing import Pool, Manager, Value, current_process
-import shlex
+from multiprocessing import Pool, Manager, Value, current_process, cpu_count
 import socket
 from httplib import BadStatusLine
-from worker_feedmanager import FeedManager
-import asyncore
-import traceback
-import threading
+import requests
+from worker_contentprocessor import ContentProcessor
+from threading import Timer, Thread, Event
+from requests_futures.sessions import FuturesSession
+import concurrent.futures.thread
 
+#logging.getLogger("requests").setLevel(logging.WARNING)
+logging.getLogger("urllib3").setLevel(logging.WARNING)
 log = logging.getLogger(__name__)
+requests.packages.urllib3.disable_warnings()
 
 def unwrapExtractFilesFromMultipart(*arg, **kwarg):
   #print "unwrapExtractFilesFromMultipart()"
   return ContentProcessor.extractFilesFromMultipart(*arg, **kwarg)
 
 def unwrapGo(*arg, **kwarg):
-  #print "unwrapExtractFilesFromMultipart()"
+  #log.debug("unwrapGo()")
   return ContentProcessor.go(*arg, **kwarg)
 
 def unwrapPullFiles(*arg, **kwarg):
   #print "unwrapExtractFilesFromMultipart()"
   return ContentProcessor.pullFiles(*arg, **kwarg)
 
+class ApiUnsuccessful(Exception):
+  pass
+
+
+
+
+
+
+class TimerThread(Thread):
+
+  def __init__(self, event, cb):
+    Thread.__init__(self)
+    self.stopped = event
+    self.cb = cb
+    self.daemon = True
+
+  def run(self):
+    while not self.stopped.wait(15):
+      self.cb()
+
+
+class FutureSessionWithShutdown(FuturesSession):
+
+  def terminate(self):
+    self.executor._threads.clear()
+    concurrent.futures.thread._threads_queues.clear()
+
+
+
 class Fetcher:
 
-  #def __init__(self, communicator, collectionId, url, user, password, directory, minX, minY, gsPath, pdftotextPath, sofficePath, sofficeProfilesDir, unrarPath, contentLimit, summaryTimeout, queryTimeout, contentTimeout, maxContentErrors, contentTypes):
+  # Base class for product-specific fetcher classes
+
+  def __init__(self, cfg, communicator):
+    self.cfg = cfg
+    self.communicator = communicator
+    self.cfg['devmode'] = True
+    self.pool = Pool()
+    self.manager = Manager()
+    self.cfg['contentCount'] = self.manager.Value('I', 0)
+    self.cfg['contentErrors'] = self.manager.Value('I', 0)
+    self.summary = {}
+    self.sessions = {}
+
+    self.cfg['thumbnailSize'] = 350, 350
+    proto='http://'
+    if 'ssl' in cfg and cfg['ssl'] == True:
+      proto='https://'
+    host = cfg['host']
+    port = str(cfg['port'])
+    baseUrl = proto + host + ':' + port
+    self.cfg['url'] = baseUrl
+    
+    #convert to integers
+    if 'minX' in self.cfg and 'minY' in self.cfg:
+      self.cfg['minX'] = int(self.cfg['minX'])
+      self.cfg['minY'] = int(self.cfg['minY'])
+      log.debug("Fetcher: __init__(): Minimum dimensions are: " + str(self.cfg['minX']) + " x " + str(self.cfg['minY']))
+    self.cfg['contentLimit'] = int(self.cfg['contentLimit'])
+    # self.cfg['summaryTimeout'] = int(self.cfg['summaryTimeout'])
+    self.cfg['queryTimeout'] = int(self.cfg['queryTimeout'])
+    self.cfg['contentTimeout'] = int(self.cfg['contentTimeout'])
+    self.cfg['maxContentErrors'] = int(self.cfg['maxContentErrors'])
+
+  def exitWithError(self, message):
+    log.error(message)
+    self.communicator.write_data(json.dumps( { 'error': message} ) + '\n')
+    self.communicator.handle_close()
+    sys.exit(1)
+
+  def exitWithException(self, message):
+    log.exception(message)
+    self.communicator.write_data(json.dumps( { 'error': message} ) + '\n')
+    self.communicator.handle_close()
+    sys.exit(1)
+
+  def sendResult(self, res):
+    #log.debug('Fetcher: sendResult()')
+    #log.debug( 'Fetcher(): sendResult(): ' + str(type(res)) )
+    if res and isinstance(res, list):
+      #log.error('Fetcher: sendResult(): Caught error in worker:\n' + str(res))
+      for l in res:
+        print l.rstrip()
+    elif res and len(res['images']) != 0:
+      #log.debug("Fetcher: sendResult(): Worker sending update")
+      self.communicator.write_data(json.dumps( { 'collectionUpdate': res } ) + '\n')
+    elif not res:
+      log.debug("SaFetcher: sendResult(): no results")
+
+  def heartbeat(self):
+    #log.debug( "heartbeat()" )
+    self.communicator.write_data( json.dumps( { 'heartbeat': True } ) + '\n' )
+
+  def terminate(self):
+    self.pool.terminate()
+    self.pool.join()
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+class SaFetcher(Fetcher): # For Solera
+
+  def __init__(self, cfg, communicator):
+    Fetcher.__init__(self, cfg, communicator)
+    self.sessionIds = []
+    self.extractFilesMap = {}
+    self.extractResults = {}
+    self.extractionComplete = False
+    self.extractFutures = []
+    stopFlag = Event()
+    #timerThread = TimerThread(stopFlag, lambda y=self: self.heartbeat())
+    #timerThread.start()
+    #cpucount = cpu_count()
+    #if cpucount >= 6:
+    #  cpucount = cpucount - 2
+    #session = FuturesSession(max_workers=cpucount)
+    self.session = FutureSessionWithShutdown()
+
+
+  def runQuery(self):
+    self.queryTime0 = time.time()
+    
+    # URL to call
+    url = self.cfg['url'] + '/api/v6/deepsee_reports/report'
+
+    # params
+    data = {
+      'identityPath': {
+        'timespan': {
+          'start': self.cfg['time1'],
+          'end': self.cfg['time2']
+        },
+        'field': 'flow_id',
+        #'query': self.cfg['saQuery']
+        'query': json.loads(self.cfg['query'] )
+      },
+      'metrics' : '"sessions"',
+      'direction' : '"asc"',
+      'pageSize': 100,
+      'page': 0,
+      'restart': True
+    }
+    #pprint(data)
+    post = self.convertToPostBody(data, 'GET')
+    #pprint(post)
+    #session = FuturesSession(max_workers=cpu_count() )
+
+    
+    session = self.session
+    try:
+      self.queryDef = { 'url': url, 'auth': ( self.cfg['user'], self.cfg['dpassword'] ), 'data': post, 'verify': False, 'stream': False }
+
+      resultCode = None
+      state = None
+
+      while state != 'complete':
+        response = requests.post( self.queryDef['url'], auth=self.queryDef['auth'], data=self.queryDef['data'], verify=self.queryDef['verify'], stream=self.queryDef['stream'] )
+        #print response.text
+        if response.status_code >= 400:
+          self.exitWithError('Received HTTP error code on query response: ' + str(response.status_code))
+        res = response.json()
+        #self.pretty_print_POST(response.request)
+        #pprint(res)
+        resultCode = res['resultCode']
+        if resultCode != 'API_SUCCESS_CODE':
+          raise ApiUnsuccessful("API call returned " + resultCode)
+        state = res['result']['result']['status']['state']
+        if state == 'error':
+          raise ApiUnsuccessful("API call returned an error")
+
+      count = res['result']['result']['total_count']
+      log.debug('SaFetcher: runQuery(): count: ' + str(count))
+
+      for f in res['result']['result']['data']:
+        flow = int( f['columns'][0] )
+        self.sessionIds.append(flow)
+
+      if count == 0:
+        return count
+      elif count <= 100:
+        # move on to pulling meta
+        pass
+      else:
+        # break up the remaining queries into async tasks, so as to pull them all at the same time
+        remainingCount = count - 100
+        numTasks, remainder = divmod(remainingCount, 100)
+        if remainder > 0:
+          numTasks += 1
+        log.debug('The remaining number of query pages is ' + str(numTasks))
+        futures = []
+        for i in xrange(numTasks):
+          # Pull remaining report results
+          data['page'] += 1
+          future = session.post(self.queryDef['url'], auth=self.queryDef['auth'], data=self.convertToPostBody(data, 'GET'), verify=self.queryDef['verify'], stream=self.queryDef['stream'], background_callback=self.checkForQueryResult )
+          futures.append(future)
+
+        for future in futures:
+          # wait for all results to complete
+          future.result()
+
+    except requests.ConnectTimeout as e:
+      error = "Query timed out"
+      self.exitWithError(error)
+    except requests.ConnectionError as e:
+      error = "A connection error occurred whilst executing query: " + str(e)
+      self.exitWithError(error)
+    except requests.HTTPError as e:
+      error = "An HTTP error occured whilst executing query: " + str(e)
+      self.exitWithError(error)
+    except requests.URLRequired as e:
+      error = "A valid URL is required to issue a query: " + str(e)
+      self.exitWithError(error)
+    except requests.TooManyRedirects as e:
+      error = "Too many redirects whilst executing query"
+      self.exitWithError(error)
+    except requests.RequestException as e:
+      error = "Ambiguous exception whilst executing query: " + str(e)
+      self.exitWithError(error)
+    except KeyError as e:
+      error = "Could not locate initial query state"
+      self.exitWithError(error)
+    except ApiUnsuccessful as e:
+      self.exitWithError(str(e))
+    except Exception as e:
+      error = "SaFetcher: runQuery(): Unhandled exception whilst running query.  Exiting with code 1: " + str(e)
+      self.exitWithException(error)
+
+    # We now have our initial query results
+    time1 = time.time()
+    log.info("Query completed in " + str(time1 - self.queryTime0) + " seconds")    
+    
+    
+    # Initiate file extraction immediately after the query, so that it has time to build
+    self.extractionTime0 = time.time()
+    flowsToPull = str(self.sessionIds[0])
+    count = 0
+    for f in self.sessionIds:
+      if count > 0:
+        flowsToPull = flowsToPull + '_or_' + str(f)
+      count += 1
+    data = {
+      'identityPath': '/timespan/' + self.cfg['time1'] + '_' + self.cfg['time2'] + '/flow_id/' + flowsToPull,
+      'pageSize': 100,
+      'page': 1,
+      'mediapanel': None,
+      'restart': True
+    }
+    self.extractPostData = data
+    extractFuture = session.post(self.cfg['url'] + '/api/v6/artifacts/artifacts', auth=self.queryDef['auth'], data=self.convertToPostBody(data, 'GET'), verify=False, stream=False, background_callback=self.onFileExtractionResults )
+    self.extractFutures.append(extractFuture)
+
+    
+    
+    # Initiate extraction of metadata
+    fetchTime0 = time.time()
+    if len(self.sessionIds) > 0:
+      self.fetchMeta(self.sessionIds, session)
+    # Wait for all meta extraction results to complete
+    for future in self.metaExtractionFutures:
+      future.result()
+    fetchTime1 = time.time()
+    log.info("SaFetcher: fetchMeta(): Meta extraction completed in " + str(fetchTime1 - fetchTime0) + " seconds")
+    log.debug('SaFetcher: fetchMeta(): Number of flows in meta list: ' + str(len(self.sessions)))
+
+    
+    
+    # Wait for file extraction to complete
+    log.debug('SaFetcher: fetchMeta(): waiting for file extraction to complete')
+    while len(self.extractFutures) != 0:
+      future = self.extractFutures.pop()
+      future.result()
+    log.debug('SaFetcher: fetchMeta(): we think the download is complete')
+
+    
+    # Our zip download is complete.  Now extract the results and do the rest
+    session.close()
+    log.debug('SaFetcher: fetchMeta(): starting download of zip file')
+    self.extractDownloadedZip(self.zipFileHandle)
+    #t.cancel()
+
+    self.pool.terminate()
+    self.pool.join()
+    return count
+
+
+
+
+  def checkForQueryResult(self, session, result):  #session = requests_futures.sessions.FuturesSession
+    log.debug('SaFetcher: checkForQueryResult()')
+    request = result.request
+
+    res = result.json()
+    resultCode = res['resultCode']
+    if resultCode != 'API_SUCCESS_CODE':
+      raise ApiUnsuccessful("API call returned " + resultCode)
+    state = res['result']['result']['status']['state']
+    if state == 'error':
+      raise ApiUnsuccessful("API call returned an error")
+    if state != 'complete':
+      log.debug('SaFetcher: checkForQueryResult(): trying to launch another session')
+      parsedBody = urlparse.parse_qs(request.body)
+      page = int(parsedBody['page'][0])
+      data = self.queryDef['data']
+      data['page'] = page
+      data['restart'] = False
+      session.post(self.queryDef['url'], auth=self.queryDef['auth'], data=self.convertToPostBody(data, 'GET'), verify=self.queryDef['verify'], stream=self.queryDef['stream'], background_callback=self.checkForQueryResult )
+      return
+
+    for f in res['result']['result']['data']:
+      # add our results to the total query results
+      flow = int( f['columns'][0] )
+      self.sessionIds.append(flow)
+
+
+
+
+  def fetchMeta(self, sessionIds, futuresSession):
+
+    log.debug('SaFetcher: fetchMeta(): Fetching metadata')
+    self.lastFileExtractionStatus = None
+
+    limit = 25 # the current max imposed by Solera
+
+    numTasks, remainder = divmod( len(sessionIds), 25)
+    if remainder > 0:
+      numTasks += 1
+
+    fieldStr = """aggregate_database_query_hooks
+aggregate_dns_query_hooks
+aggregate_dns_web_application_info_hooks
+aggregate_email_address_hooks
+aggregate_email_recipient_hooks
+aggregate_email_sender_hooks
+aggregate_file_type_hooks
+aggregate_filename_hooks
+aggregate_http_code_hooks
+aggregate_http_content_disposition_hooks
+aggregate_http_forward_addr_hooks
+aggregate_http_method_hooks
+aggregate_http_server_hooks
+aggregate_http_uri_hooks
+aggregate_machine_id_hooks
+aggregate_mime_type_hooks
+aggregate_password_hooks
+aggregate_referer_hooks
+aggregate_social_persona_hooks
+aggregate_ssl_cipher_suite_hooks
+aggregate_ssl_common_name_hooks
+aggregate_ssl_protocol_version_hooks
+aggregate_ssl_serial_number_hooks
+aggregate_ssl_server_name_hooks
+aggregate_ssl_validity_not_after_hooks
+aggregate_ssl_validity_not_before_hooks
+aggregate_subject_hooks
+aggregate_user_agent_hooks
+aggregate_voip_id_hooks
+aggregate_web_query_hooks
+aggregate_web_server_hooks
+application_ids
+autogenerated_domain
+autogenerated_domain_score
+connection_flags
+dns_ancount
+dns_host_ipv4_addr
+dns_host_ipv6_addr
+dns_name
+dns_ttl
+domain_user_ids
+element_id
+file_extension
+first_slot_id
+flow_duration
+flow_flags
+flow_id
+http_content_len
+http_location
+import_id
+initiator_country
+initiator_ip
+initiator_mac
+initiator_port
+interfaceXXX
+ip_bad_csums
+ip_fragments
+layer3_id
+layer4_id
+mail_uri
+packet_count
+protocol_family
+responder_country
+responder_ip
+responder_mac
+responder_port
+slot_id
+start_time
+stop_time
+tls_heartbeat_attack_attempt
+tls_heartbeat_mismatch
+total_bytes
+tunnel_initiator_ip
+tunnel_responder_ip
+vlan_id"""
+    
+    fields = fieldStr.split('\n')
+
+    #data = { 
+    #  'path': '/timespan/2018-02-01T10:46:00_2018-02-01T11:01:00/flow_id/10065_or_10079',
+    #  'fields': fields
+    #}
+    #res = s.callAPI("GET", "/pcap/download/raw", data, 'tsv.tsv' )
+
+    self.metaExtractionFutures = []
+
+    for i in xrange(numTasks):
+      idsToPull = []
+      #print "numtasks: " + str(numTasks)
+      #print "!!!i: " + str(i)
+      for n in xrange(limit):
+        #print "!!!n: " + str(n)
+        if i == numTasks - 1 and n == remainder: # remainder - 1
+          break
+        idsToPull.append(sessionIds.pop())
+
+      path = '/timespan/' + self.cfg['time1'] + '_' + self.cfg['time2'] + '/flow_id/'
+      count = 0
+      
+      for f in idsToPull:
+        if count == 0:
+          path = path + str(f)
+        else:
+          path = path + '_or_' + str(f)
+        count += 1
+      
+      data = { 
+        #'path': '/timespan/2018-02-01T10:46:00_2018-02-01T11:01:00/flow_id/10065_or_10079',
+        'path': path,
+        'fields': fields
+      }
+
+      post = self.convertToPostBody(data, 'GET')
+      future = futuresSession.post(self.cfg['url'] + '/api/v6/pcap/download/raw', auth=self.queryDef['auth'], data=self.convertToPostBody(data, 'GET'), verify=False, stream=False, background_callback=self.onMetaReceived )
+      self.metaExtractionFutures.append(future)
+
+
+
+
+
+
+
+  def onMetaReceived(self, session, result):
+    log.debug('SaFetcher: onMetaReceived()')
+    #request = result.request
+    if result.status_code >= 400:
+      self.exitWithError('Received error on response')
+
+    res = result.text
+    #print res
+    csvLines = res.split('\n')
+    keys = []
+    keyPositions = {}
+    flowidPos = None
+    count = 0
+    log.debug('SaFetcher: onMetaReceived(): number of lines received: ' + str(len(csvLines)))
+
+    if len(csvLines) == 1:
+      log.warning('SaFetcher: onMetaReceived(): Only a single line received! :\n' + result.text )
+
+    for line in csvLines:
+      #print "line: " + line
+      if len(line) in [ 0, 1 ] :
+        #print "continuing from line: " + line
+        continue
+      
+      if count == 0:
+        #header line
+        keys = line.split('\t')
+        for i in xrange(len(keys)):
+          key = keys[i]
+          keyPositions[i] = key
+          if key == 'flow_id':
+            flowidPos = i
+      else:
+        values = line.split('\t')
+        flowid = values[flowidPos]
+        thisSession = { 'images': [], 'session': { 'id': flowid, 'meta': {} } }
+        for i in xrange(len(values)):
+          metaKey = keyPositions[i]
+          metaValue = values[i]
+          if len(metaValue) > 0:
+            decodedValue = urllib2.unquote(metaValue).decode('utf8')
+            valueList = decodedValue.split(',')
+            #print 'valueList: ' + str(valueList)
+            if metaKey == 'aggregate_user_agent_hooks':
+              newValueList = []
+              for x in xrange(len(valueList)):
+                if valueList[x].startswith(' like '):
+                  newValue = valueList[x - 1] + valueList[x]
+                  newValueList.append(newValue)
+              valueList = newValueList
+            #pprint(valueList)
+            #print 'valueList: ' + str(valueList)
+            #if len(valueList) > 1:
+            thisSession['session']['meta'][metaKey] = valueList
+            #elif len(valueList) == 1:
+            #  thisSession['session']['meta'][metaKey] = valueList.pop()
+        self.sessions[int(flowid)] = thisSession
+      count += 1
+
+
+
+
+
+
+  def onFileExtractionResults(self, session, result):
+    log.debug('SaFetcher: onFileExtractionResults()')
+    
+    if result.status_code >= 400:
+      self.exitWithError('onFileExtractionResults(): Received HTTP error code on file extraction initiate or update response: ' + str(result.status_code))
+    
+    res = result.json()
+    resultCode = res['resultCode']
+    if resultCode != 'API_SUCCESS_CODE':
+      raise ApiUnsuccessful("API call returned " + resultCode)
+    
+    searchId = res['result']['artifact_search_id']
+    percent = int(res['result']['percentcomplete'])
+    numresults = res['result']['numResults']
+    status = res['result']['search_status']  #extractor.status.finished     #extractor.status.initializing
+
+    if percent == 100 and status != 'extractor.status.finished' and status != 'extractor.status.cancel':
+      log.debug('onFileExtractionResults(): 100% progress but status not finished.  Status: ' + status)
+    
+    if status == 'extractor.status.cancel':
+      # restart the extraction
+      """log.debug('onFileExtractionResults(): Status was extractor.status.cancel.  Restarting extraction')
+      extractPostData = self.extractPostData
+      extractPostData['restart'] = True
+      future = session.post(self.cfg['url'] + '/api/v6/artifacts/artifacts', auth=self.queryDef['auth'], data=self.convertToPostBody(extractPostData, 'GET'), verify=False, stream=False, background_callback=self.onFileExtractionResults )
+      self.extractFutures.append(future)
+      return"""
+      self.exitWithError('onFileExtractionResults(): Extraction was cancelled by Security Analytics.  Exiting with error')
+
+    
+    elif percent != 100 or (percent == 100 and status != 'extractor.status.finished'):
+      fileExtractionStatus = "percent: " + str(percent) + " status: " + status
+      if self.lastFileExtractionStatus != fileExtractionStatus:
+        log.debug( fileExtractionStatus )
+        self.lastFileExtractionStatus = fileExtractionStatus
+      # loop again
+      extractPostData = self.extractPostData
+      extractPostData['restart'] = False
+      future = session.post(self.cfg['url'] + '/api/v6/artifacts/artifacts', auth=self.queryDef['auth'], data=self.convertToPostBody(extractPostData, 'GET'), verify=False, stream=False, background_callback=self.onFileExtractionResults )
+      self.extractFutures.append(future)
+      return
+    
+    elif percent == 100 and status == 'extractor.status.finished' and numresults > 0:
+      # now get all the results, which we'll need to map our extracted files back to the meta
+
+      print "got to 1"
+      
+      for a in res['result']['sorted_artifacts']:
+        artifact = a['Artifact']
+        filename = os.path.basename( artifact['filename'] )
+        flow_id = artifact['flow_id']
+        self.extractFilesMap[filename] = artifact
+        self.extractResults[flow_id] = artifact
+
+      
+
+      if numresults > 100:
+        print "got to 2"
+        # fire off new API calls to obtain remaining pages
+        extractionPageFutures = []
+        numresults = numresults - 100
+        numTasks, remainder = divmod(numresults, 100)
+        if remainder > 0:
+          numTasks += 1
+        for i in xrange(numTasks):
+          self.extractPostData['page'] += 1 #increment the page count by 1
+          log.debug( "onFileExtractionResults(): obtaining page " + str(self.extractPostData['page']) + " of file extraction results")
+          extractPostData = self.extractPostData
+          extractPostData['restart'] = False
+          future = session.post(self.cfg['url'] + '/api/v6/artifacts/artifacts', auth=self.queryDef['auth'], data=self.convertToPostBody(extractPostData, 'GET'), verify=False, stream=False, background_callback=self.extractionPageGetter )
+          extractionPageFutures.append(future)
+        for f in extractionPageFutures:
+          #print "got to 4"
+          # we have to wait to get all the page results so we know all the appropriate download id's to pass to the download api call
+          f.result()
+        log.debug("onFileExtractionResults(): we think we've got all pages of file extraction results")
+        
+      # now download the extracted files
+
+      #pprint(self.extractResults)
+      
+      log.debug("onFileExtractionResults(): initiating download of extracted artifacts zip")
+      idsToDownload = []
+      for a in self.extractResults:
+        artifact = self.extractResults[a]
+        idsToDownload.append(artifact['id'])
+      data = {
+        'searchId': searchId,
+        'type': 'zip',
+        'ids': idsToDownload
+      }
+      future = session.post(self.cfg['url'] + '/api/v6/artifacts/download', auth=self.queryDef['auth'], data=self.convertToPostBody(data, 'GET'), verify=False, stream=True, background_callback=self.onExtractedFileDownload )
+      self.extractFutures.append(future)
+      
+
+
+
+
+  def extractionPageGetter(self, session, result):
+    log.debug('SaFetcher: extractionPageGetter()')
+
+    if result.status_code >= 400:
+      self.exitWithError('Received HTTP error code on extraction page response: ' + str(result.status_code))
+    
+    res = result.json()
+    resultCode = res['resultCode']
+    if resultCode != 'API_SUCCESS_CODE':
+      raise ApiUnsuccessful("API call returned " + resultCode)
+
+    for a in res['result']['sorted_artifacts']:
+      artifact = a['Artifact']
+      filename = os.path.basename( artifact['filename'] )
+      flow_id = artifact['flow_id']
+      self.extractFilesMap[filename] = artifact
+      self.extractResults[flow_id] = artifact
+
+
+
+
+
+
+  def onExtractedFileDownload(self, session, result):
+    log.debug('SaFetcher: onExtractedFileDownload()')
+
+    if result.status_code >= 400:
+      self.exitWithError('Received HTTP error code on file extraction download response: ' + str(result.status_code))
+
+    if result.headers['content-type'] == 'application/zip':
+      zipFile = cStringIO.StringIO()
+      zipFile.write(result.content)
+      self.zipFileHandle = zipfile.ZipFile(zipFile)
+    
+    else:
+      self.exitWithError('Did not receive zip response.  Formatted response: ' + pformat(result.json()) )
+
+
+
+
+
+
+  def extractDownloadedZip(self, zipHandle):
+    log.debug('SaFetcher: extractDownloadedZip()')
+    poolResults = []
+    for zinfo in zipHandle.infolist():
+      archivedFilename = zinfo.filename
+      #if archivedFilename.startswith('META-INF/') or archivedFilename.startswith('AssetData/'):
+      #  continue
+      compressedFileHandle = zipHandle.open(archivedFilename)
+      payload = compressedFileHandle.read()
+      compressedFileHandle.close()
+      flowId = self.extractFilesMap[archivedFilename]['flow_id']
+      if flowId:
+        if not flowId in self.sessions:
+          log.warning('Flow ' + str(flowId) + ' was not found amongst extracted meta.  Skipping processing for this flow.')
+          continue
+        session = self.sessions[flowId]
+        #pprint(session)
+        if session:
+          # now fire!!!
+          #log.debug('SaFetcher: extractDownloadedZip(): Launching extractor from pool')
+          processor = ContentProcessor(self.cfg)
+          result = self.pool.apply_async( unwrapGo, args=(processor, payload, session, flowId, archivedFilename), callback=self.sendResult )
+          poolResults.append(result)
+          #r.get() # useful to see if an error was thrown during apply_sync()
+    
+    self.pool.close()
+    for result in poolResults:
+      result.wait(timeout=9999999) #we use this because pool join can't be interrupted in Python 2.  This allows us to gracefully interrupt workers
+    self.pool.join()
+    #pprint(self.sessions)
+
+
+
+  def convertToPostBody(self, data, method):
+    post = {}
+    if len(data) != 0:
+      for k,v in data.items():
+        try:
+          isStr = isinstance(v, basestring)
+        except NameError as e:
+          isStr = isinstance(v, str)
+        else:
+          post[k] = json.dumps(v)
+    post['_method'] = method.upper()
+    return post
+
+
+  def exitWithError(self, message):
+    log.error(message)
+    self.session.close()
+    self.communicator.write_data(json.dumps( { 'error': message} ) + '\n')
+    self.communicator.handle_close()
+    sys.exit(1)
+
+  def exitWithException(self, message):
+    log.exception(message)
+    self.session.close()
+    self.communicator.write_data(json.dumps( { 'error': message} ) + '\n')
+    self.communicator.handle_close()
+    sys.exit(1)
+
+  def terminate(self):
+    self.session.terminate()
+    self.pool.terminate()
+    self.pool.join()
+
+  def pretty_print_POST(self, req):
+    """
+    At this point it is completely built and ready
+    to be fired; it is "prepared".
+
+    However pay attention at the formatting used in 
+    this function because it is programmed to be pretty 
+    printed and may differ from the actual request.
+    """
+    print('{}\n{}\n{}\n\n{}'.format(
+        '-----------START-----------',
+        req.method + ' ' + req.url,
+        '\n'.join('{}: {}'.format(k, v) for k, v in req.headers.items()),
+        req.body,
+    ))
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+class NwFetcher(Fetcher):
+
+  """
   def __init__(self, cfg, communicator):
     self.cfg = cfg
     self.communicator = communicator
@@ -80,19 +841,7 @@ class Fetcher:
     
     #self.contentTypes = contentTypes
 
-  """curl "http://admin:netwitness@172.16.0.55:50104/sdk?msg=query&query=$query&force-content-type=application/json"""
-
-  def exitWithError(self, message):
-    log.error(message)
-    self.communicator.write_data(json.dumps( { 'error': message} ) + '\n')
-    self.communicator.handle_close()
-    sys.exit(1)
-
-  def exitWithException(self, message):
-    log.exception(message)
-    self.communicator.write_data(json.dumps( { 'error': message} ) + '\n')
-    self.communicator.handle_close()
-    sys.exit(1)
+  '''curl "http://admin:netwitness@172.16.0.55:50104/sdk?msg=query&query=$query&force-content-type=application/json'''
 
   def fetchSummary(self):
     request = urllib2.Request(self.cfg['url'] + '/sdk?msg=summary')
@@ -104,6 +853,7 @@ class Fetcher:
     for e in summaryResult['string'].split():
       (k, v) = e.split('=')
       self.summary[k] = v
+  """
 
 
 
@@ -175,28 +925,15 @@ class Fetcher:
       self.exitWithError(error)
     except Exception as e:
       error = "Fetcher: runQuery(): Unhandled exception whilst running query.  Exiting with code 1: " + str(e)
-      #log.exception("Fetcher: runQuery(): Unhandled exception whilst running query.  Exiting with code 1")
-      #sys.exit(1)
       self.exitWithException(error)
     return len(self.sessions)
 
 
 
-  def sendResult(self, res):
-    #log.debug('Fetcher: sendResult()')
-    #log.debug( 'Fetcher(): sendResult(): ' + str(type(res)) )
-    if isinstance(res, list):
-      #log.error('Fetcher: sendResult(): Caught error in worker:\n' + str(res))
-      for l in res:
-        print l.rstrip()
-    elif len(res['images']) != 0:
-      #log.debug("Fetcher: sendResult(): Worker sending update")
-      self.communicator.write_data(json.dumps( { 'collectionUpdate': res } ) + '\n')
-
-
   def pullFiles(self):
 
     error = ''
+    poolResults = []
 
     for sessionId in self.sessions:
 
@@ -242,20 +979,17 @@ class Fetcher:
         if 'res' in locals() and res.info().getheader('Content-Type').startswith('multipart/mixed'):
           contentType = res.info().getheader('Content-Type')
           mimeVersion = res.info().getheader('Mime-Version')
-          newFileStr = 'Content-Type: ' + contentType + '\n' + 'Mime-Version: ' + mimeVersion + '\n' + res.read()
+          payload = 'Content-Type: ' + contentType + '\n' + 'Mime-Version: ' + mimeVersion + '\n' + res.read()
           
           ##############EXTRACT FILES AND DO THE WORK##############
           log.debug('Fetcher: pullFiles(): Launching extractor from pool')
-          #processor = ContentProcessor(self.directory, self.minX, self.minY, self.gsPath, self.pdftotextPath, self.contentLimit, self.contentCount)
-          #processor = ContentProcessor(self.cfg['url'], self.cfg['user'], self.cfg['dpassword'], self.cfg['directory'], self.cfg['minX'], self.cfg['minY'], self.cfg['gsPath'], self.pdftotextPath, self.cfg['sofficePath'], self.cfg['sofficeProfilesDir'], self.contentLimit, self.contentCount, self.contentErrors, self.maxContentErrors, self.contentTimeout, self.contentTypes)
           processor = ContentProcessor(self.cfg)
-          
-          #self.pool.apply_async(unwrapExtractFilesFromMultipart, args=(processor, newFileStr, self.sessions[sessionId], sessionId, distillationTerms, regexDistillationTerms, md5Hashes, sha1Hashes, sha256Hashes), callback=self.sendResult )
-          #self.pool.apply_async(unwrapExtractFilesFromMultipart, args=(processor, newFileStr, self.sessions[sessionId], sessionId), callback=self.sendResult )
-          self.pool.apply_async(unwrapGo, args=(processor, newFileStr, self.sessions[sessionId], sessionId), callback=self.sendResult )
-      
+          result = self.pool.apply_async(unwrapGo, args=(processor, payload, self.sessions[sessionId], sessionId), callback=self.sendResult )
+          poolResults.append(result)
 
     self.pool.close()
+    for result in poolResults:
+      result.wait(timeout=9999999) #we use this because pool join can't be interrupted in Python 2.  This allows us to gracefully interrupt workers
     self.pool.join()
 
 
@@ -266,12 +1000,11 @@ class Fetcher:
     #This tries to put every content call in its own process but this is actually slower than handling the content call in a single-threaded manner
     for sessionId in self.sessions:
       if not self.cfg['contentCount'].value >= self.cfg['contentLimit']:
-        #processor = ContentProcessor(self.cfg['url'], self.cfg['user'], self.cfg['dpassword'], self.cfg['directory'], self.cfg['minX'], self.cfg['minY'], self.cfg['gsPath'], self.pdftotextPath, self.cfg['sofficePath'], self.contentLimit, self.contentCount, self.contentErrors, self.maxContentErrors, self.contentTimeout)
+
         processor = ContentProcessor(self.cfg)
 
         ##############PULL FILES AND PROCESS THEM##############
         log.debug('Fetcher: newPullFiles(): Launching extractor from pool')
-        #res = self.pool.apply_async(unwrapPullFiles, args=(processor, self.sessions[sessionId], sessionId, self.cfg['distillationTerms'], self.cfg['regexDistillationTerms'], md5Hashes, sha1Hashes, sha256Hashes), callback=self.sendResult )
         res = self.pool.apply_async(unwrapPullFiles, args=(processor, self.sessions[sessionId], sessionId), callback=self.sendResult )
         res.get()
 
@@ -279,977 +1012,3 @@ class Fetcher:
         log.info("Fetcher: newPullFiles(): Image limit of " + str(self.cfg['contentLimit']) + " has been reached.  Ending collection build.  You may want to narrow your result set with a more specific query")
         return
     
-   
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-class ContentProcessor:
-
-  #def __init__(self, url, user, password, directory, minX, minY, gsPath, pdftotextPath, sofficePath, sofficeProfilesDir, contentLimit, contentCount, contentErrors, maxContentErrors, timeout, contentTypes):
-  def __init__(self, cfg):
-    self.cfg = cfg
-
-
-    #pprint(self.cfg)
-
-    rarfile.UNRAR_TOOL = self.cfg['unrarPath']
-    #self.contentCount = contentCount # is a manager proxy
-    #self.contentErrors = contentErrors # is a manager proxy
-    
-    self.imagesAllowed = False
-    self.pdfsAllowed = False
-    self.dodgyArchivesAllowed = False
-    self.hashesAllowed = False
-    self.officeAllowed = False
-    if 'images' in self.cfg['contentTypes']:
-      self.imagesAllowed = True
-    if 'pdfs' in self.cfg['contentTypes']:
-      self.pdfsAllowed = True
-    if 'dodgyarchives' in self.cfg['contentTypes']:
-      self.dodgyArchivesAllowed = True
-    if 'hashes' in self.cfg['contentTypes']:
-      self.hashesAllowed = True
-    if 'officedocs' in self.cfg['contentTypes']:
-      self.officeAllowed = True
-    #log.debug('My Process Identifier: ' + str(self.processId))
-    #print current_process()
-    
-
-
-  def pullFiles(self, session, sessionId):
-    ctx = ssl.create_default_context()
-    ctx.check_hostname = False
-    ctx.verify_mode = ssl.CERT_NONE
-    request = urllib2.Request(self.cfg['url'] + '/sdk/content?render=107&session=' + str(sessionId))
-    base64string = base64.b64encode('%s:%s' % (self.cfg['user'], self.cfg['dpassword']))
-    request.add_header("Authorization", "Basic %s" % base64string)
-    request.add_header('Content-type', 'application/json')
-    request.add_header('Accept', 'application/json')
-    while self.cfg['contentErrors'].value < self.cfg['maxContentErrors']:
-      try:
-        res = urllib2.urlopen(request, context=ctx, timeout=self.cfg['contentTimeout'])
-        break
-      except urllib2.HTTPError as e:
-        if self.cfg['contentErrors'].value == self.cfg['maxContentErrors']:
-          log.warning("ContentProcessor: pullFiles(): Maximum allowable errors reached whilst pulling content for session " + str(sessionId) + ".  Try either increasing the Query Delay setting or increasing the Max. Content Errors setting.  Exiting with code 1")
-          sys.exit(1)
-        self.cfg['contentErrors'].value += 1
-        log.warning("ContentProcessor: pullFiles(): HTTP error pulling content for session " + str(sessionId) + ".  Retrying")
-        continue
-      except urllib2.URLError as e:
-        if self.cfg['contentErrors'].value == self.cfg['maxContentErrors']:
-          log.warning("ContentProcessor: pullFiles(): Maximum retries reached whilst pulling content for session " + str(sessionId) + ".  Try either increasing the Query Delay setting or increasing the Max. Content Errors setting.  Exiting with code 1")
-          sys.exit(1)
-        self.cfg['contentErrors'].value += 1
-        log.warning("ContentProcessor: pullFiles(): ERROR: URL error pulling content for session " + str(sessionId) + ".  Retrying")
-        continue
-
-    if res.info().getheader('Content-Type').startswith('multipart/mixed'):
-      contentType = res.info().getheader('Content-Type')
-      mimeVersion = res.info().getheader('Mime-Version')
-      newFileStr = 'Content-Type: ' + contentType + '\n' + 'Mime-Version: ' + mimeVersion + '\n' + res.read()
-      
-      ##############EXTRACT FILES AND DO THE WORK##############
-      #log.debug('Launching extractor from pool')
-      #processor = ContentProcessor(self.directory, self.minX, self.minY, self.gsPath, self.pdftotextPath, self.contentLimit, self.contentCount)
-      #self.pool.apply_async(unwrapExtractFilesFromMultipart, args=(processor, newFileStr, self.sessions[sessionId], sessionId, distillationTerms, regexDistillationTerms, md5Hashes, sha1Hashes, sha256Hashes), callback=self.sendResult )
-      return self.extractFilesFromMultipart(newFileStr, session, sessionId)
-        
-
-  
-  def processImage(self, contentObj): #must specify either part or stringFile
-    log.debug("ContentProcessor: processImage(): Analyzing image " + contentObj.contentFile)
-    contentObj.contentType = 'image'
-    output = contentObj.getFileContent()
-      
-    try:
-      im = Image.open(output)
-      (x,y) = im.size
-    except Exception as e:
-      log.warning("ContentProcessor: Could not identify image file " + contentObj.contentFile + ".  This is likely due to file corruption")
-      return False
-      
-    #check file for dimensions and only write if minimum
-    if x >= int(self.cfg['minX']) and y >= int(self.cfg['minY']):
-      log.debug("ContentProcessor: processImage(): Keeping image " + contentObj.contentFile + " of resolution " + str(x) + ' x ' + str(y) )
-      fp = open(os.path.join(self.cfg['outputDir'], contentObj.contentFile), 'wb')
-      fp.write(output.getvalue())
-      fp.close()
-
-      log.debug("ContentProcessor: processImage(): Generating thumbnail for image " + contentObj.contentFile)
-      thumbnailName = 'thumbnail_' + contentObj.contentFile
-      
-      try:
-        im.thumbnail(self.cfg['thumbnailSize'], Image.ANTIALIAS)
-      except IOError as e: #we don't want to keep corrupt files.  we know it's corrupt if we can't generate a thumbnail
-        log.warning("ContentProcessor: processImage(): Image appears to be corrupt: " + contentObj.contentFile)
-        return False
-      except Exception as e:
-        log.exception("ContentProcessor: processImage(): Unhandled exception whilst generating thumbnail")
-        return False
-      
-      im.save(os.path.join(self.cfg['outputDir'], thumbnailName), im.format)
-      contentObj.thumbnail = thumbnailName
-      
-      self.cfg['contentCount'].value += 1
-
-      #self.sessions[contentObj.session]['images'].append( contentObj.get() )
-      self.thisSession['images'].append( contentObj.get() )
-      
-
-    else:
-      log.debug("ContentProcessor: processImage(): Discarding image " + contentObj.contentFile + " due to minimum size requirements")
-      return False
-    
-    return True
-
-
-
-
-  
-
-
-  def processOfficeDoc(self, contentObj):
-    contentObj.contentType = 'office'
-    #log.debug('ContentProcessor: processOfficeDoc(): contentObj:' + pformat(contentObj.get()) )
-
-    baseName = os.path.splitext(contentObj.contentFile)[0]
-    pdfOutName = baseName + '.pdf'
-    firstPageOutName = baseName + '.jpg'
-    
-    #write document to disk
-    log.debug("ContentProcessor: processOfficeDoc(): Session " + str(contentObj.session) + ". Writing document to " + os.path.join(self.cfg['outputDir'], contentObj.contentFile) )
-    fp = open(os.path.join(self.cfg['outputDir'], contentObj.contentFile), 'wb')
-    shutil.copyfileobj(contentObj.getFileContent(), fp)
-    fp.close()
-    
-
-
-    #convert document to PDF
-    sofficeCmd = self.cfg['sofficePath'] + " --headless --norestore -env:SingleAppInstance='false' -env:UserInstallation=file://" + self.cfg['sofficeProfilesDir'] + "/" + self.poolId + " --convert-to pdf --outdir " + self.cfg['outputDir'] + " '" + os.path.join(self.cfg['outputDir'], contentObj.contentFile) + "'"
-    log.debug("ContentProcessor: processOfficeDoc(): Session " + str(contentObj.session) + ". soffice command line: " + sofficeCmd)
-    args = shlex.split(sofficeCmd)
-    try:
-      process = Popen(args, stdout=PIPE, stderr=PIPE, shell = False)
-      (output, err) = process.communicate()
-      exit_code = process.wait()
-    except OSError as e:
-      if ('No such file or directory' in str(e)):
-        log.error("ContentProcessor: processOfficeDoc(): Session " + str(contentObj.session) + ". Could not run soffice command as " + self.cfg['sofficePath'] + " was not found")
-      else:
-        log.exception(str(e))
-      return False
-    except Exception as e:
-      #soffice couldn't even be run
-      log.exception("ContentProcessor: processOfficeDoc(): Session " + str(contentObj.session) + ": Could not run soffice command for file " + contentObj.contentFile + " at " + self.cfg['sofficePath'] )
-      return False
-    if exit_code != 0:
-      #soffice exited with a non-zero exit code, and thus was unsuccessful
-      log.warning("ContentProcessor: processOfficeDoc(): Session " + str(contentObj.session) + ". soffice exited abnormally for file " + contentObj.contentFile + " with exit code " + str(exit_code) )
-      log.warning("ContentProcessor: processOfficeDoc(): Session " + str(contentObj.session) + ". The 'soffice' command output was: " + output)
-      return False
-    log.debug('ContentProcessor: processOfficeDoc(): returned from soffice')
-    contentObj.proxyContentFile = pdfOutName
-    log.debug('ContentProcessor: processOfficeDoc(): returned from soffice 2')
-
-    #extract first page of pdf
-    #gs -dNOPAUSE -sDEVICE=jpeg -r144 -sOutputFile="p%o3d.jpg" -dFirstPage=1 -dLastPage=1 -dBATCH "$filename"
-    log.debug("ContentProcessor: processOfficeDoc(): Session " + str(contentObj.session) + ". Extracting first page of pdf " + contentObj.proxyContentFile)
-    outputfile = "page1-" + firstPageOutName
-    contentObj.pdfImage = outputfile
-    log.debug("ContentProcessor: processOfficeDoc(): Session " + str(contentObj.session) + ". Running gs on file " + contentObj.proxyContentFile)
-    
-    
-    gsCmd = self.cfg['gsPath'] + " -dNOPAUSE -sDEVICE=jpeg -r144 -sOutputFile='" + os.path.join(self.cfg['outputDir'], outputfile) + "' -dNoVerifyXref -dPDFSTOPONERROR -dFirstPage=1 -dLastPage=1 -dBATCH '" +  os.path.join(self.cfg['outputDir'], contentObj.proxyContentFile) + "'"
-    log.debug("ContentProcessor: processOfficeDoc(): Session " + str(contentObj.session) + ". Ghostscript command line: " + gsCmd)
-    args = shlex.split(gsCmd)
-    try:
-      process = Popen(args, stdout=PIPE, stderr=PIPE, shell = False)
-      (output, err) = process.communicate()
-      exit_code = process.wait()
-    
-    except OSError as e:
-      if ('No such file or directory' in str(e)):
-        log.error("ContentProcessor: processOfficeDoc(): Session " + str(contentObj.session) + ". Could not run ghostscript command as " + self.cfg['gsPath'] + " was not found")
-      else:
-        log.exception(str(e))
-      return False
-
-    except Exception as e:
-      #Ghostscript couldn't even be run
-      log.exception("ContentProcessor: processOfficeDoc(): Session " + str(contentObj.session) + ": Could not run GhostScript command for file " + contentObj.contentFile + " at " + self.cfg['gsPath'] )
-      return False
-
-    if exit_code != 0:
-      #Ghostscript exited with a non-zero exit code, and thus was unsuccessful
-      log.warning("ContentProcessor: processOfficeDoc(): Session " + str(contentObj.session) + ". GhostScript exited abnormally for file " + contentObj.contentFile + " with exit code " + str(exit_code) )
-      #log.warning("ContentProcessor: processOfficeDoc(): The 'gs' command was: " + gsCmd)
-      log.warning("ContentProcessor: processOfficeDoc(): Session " + str(contentObj.session) + ". The 'gs' command output was: " + output)
-      return False
-
-    if exit_code == 0: #this means we successfully generated an image of the pdf and we want to keep it
-      keep = True
-      ###keep means we want to keep the file.  We choose to not keep the file (by making keep = False) on these conditions:
-      ###1: if an error is generated by gs whilst trying to render an image of the first page
-      ###2: if we have distillationTerms and/or regexDistillationTerms and they aren't matched
-
-      returnObj = self.getPdfText(contentObj)
-      keep = returnObj['keep']
-      contentObj = returnObj['contentObj']
-
-      if keep == False:
-        return False #return if we've chosen to not keep the file
-      
-      try:
-        #now let's try generating a thumbnail - if we already have an image, this should succeed.  If not, there's something screwy...
-        #but we'll keep it anyway and use the original image as the thumbnail and let the browser deal with any potential corruption
-        log.debug("ContentProcessor: processOfficeDoc(): Session " + str(contentObj.session) + ". Generating thumbnail for pdf " + outputfile)
-        thumbnailName = 'thumbnail_' + outputfile
-        pdfim = Image.open(os.path.join(self.cfg['outputDir'], outputfile))
-        pdfim.thumbnail(self.cfg['thumbnailSize'], Image.ANTIALIAS)
-        pdfim.save(os.path.join(self.cfg['outputDir'], thumbnailName), pdfim.format)
-        #pdfim.close()
-
-        #set thumbnail to our generated thumbnail
-        contentObj.thumbnail = thumbnailName
-        self.thisSession['images'].append( contentObj.get() )
-        self.cfg['contentCount'].value += 1
-        return True
-      except Exception as e:
-        log.exception("ContentProcessor: processOfficeDoc(): Session " + str(contentObj.session) + ". Error generating thumbnail for pdf " + contentObj.proxyContentFile)
-        #thumbnail generation failed, so set thumbnail to be the original image generated by gs
-        contentObj.thumbnail = outputfile
-        self.thisSession['images'].append( contentObj.get() )
-        self.cfg['contentCount'].value += 1
-        return True
-
-
-
-
-
-
-
-  def processPdf(self, contentObj):
-    contentObj.contentType = 'pdf'
-    # log.debug('ContentProcessor: processPdf(): contentObj:' + pformat(contentObj.get()) )
-
-    # write pdf to disk
-    log.debug("ContentProcessor: processPdf(): Session " + str(contentObj.session) + ". Writing pdf to " + os.path.join(self.cfg['outputDir'], contentObj.contentFile) )
-    fp = open(os.path.join(self.cfg['outputDir'], contentObj.contentFile), 'wb')
-    shutil.copyfileobj(contentObj.getFileContent(), fp)
-    fp.close()
-    
-    # extract first page of pdf
-    # gs -dNOPAUSE -sDEVICE=jpeg -r144 -sOutputFile="p%o3d.jpg" -dFirstPage=1 -dLastPage=1 -dBATCH "$filename"
-    log.debug("ContentProcessor: processPdf(): Session " + str(contentObj.session) + ". Extracting first page of pdf " + contentObj.contentFile)
-    outputfile = "page1-" + contentObj.contentFile + ".jpg"
-    contentObj.pdfImage = outputfile
-    log.debug("ContentProcessor: processPdf(): Session " + str(contentObj.session) + ". Running gs on file " + contentObj.contentFile)
-    
-    
-    gsCmd = self.cfg['gsPath'] + " -dNOPAUSE -sDEVICE=jpeg -r144 -sOutputFile='" + os.path.join(self.cfg['outputDir'], outputfile) + "' -dNoVerifyXref -dPDFSTOPONERROR -dFirstPage=1 -dLastPage=1 -dBATCH '" +  os.path.join(self.cfg['outputDir'], contentObj.contentFile) + "'"
-    log.debug("ContentProcessor: processPdf(): Session " + str(contentObj.session) + ". Ghostscript command line: " + gsCmd)
-    args = shlex.split(gsCmd)
-    try:
-      #process = Popen(gsCmd, stdout=PIPE, stderr=PIPE, shell = True)
-      process = Popen(args, stdout=PIPE, stderr=PIPE, shell = False)
-      (output, err) = process.communicate()
-      exit_code = process.wait()
-    
-    except OSError as e:
-      if ('No such file or directory' in str(e)):
-        log.error("ContentProcessor: processPdf(): Session " + str(contentObj.session) + ". Could not run ghostscript command as " + self.cfg['gsPath'] + " was not found")
-      else:
-        log.exception(str(e))
-      return False
-
-    except Exception as e:
-      #Ghostscript couldn't even be run
-      log.exception("ContentProcessor: processPdf(): Session " + str(contentObj.session) + ": Could not run GhostScript command for file " + contentObj.contentFile + " at " + self.cfg['gsPath'] )
-      return False
-
-    if exit_code != 0:
-      #Ghostscript exited with a non-zero exit code, and thus was unsuccessful
-      log.warning("ContentProcessor: processPdf(): Session " + str(contentObj.session) + ". GhostScript exited abnormally for file " + contentObj.contentFile + " with exit code " + str(exit_code) )
-      #log.warning("ContentProcessor: processPdf(): The 'gs' command was: " + gsCmd)
-      log.warning("ContentProcessor: processPdf(): Session " + str(contentObj.session) + ". The 'gs' command output was: " + output)
-      return False
-
-    if exit_code == 0: #this means we successfully generated an image of the pdf and we want to keep it
-      keep = True
-      ###keep means we want to keep the file.  We choose to not keep the file (by making keep = False) on these conditions:
-      ###1: if an error is generated by gs whilst trying to render an image of the first page
-      ###2: if we have distillationTerms and/or regexDistillationTerms and they aren't matched
-
-      returnObj = self.getPdfText(contentObj)
-      keep = returnObj['keep']
-      contentObj = returnObj['contentObj']
-
-      if keep == False:
-        return False #return if we've chosen to not keep the file
-      
-      try:
-        #now let's try generating a thumbnail - if we already have an image, this should succeed.  If not, there's something screwy...
-        #but we'll keep it anyway and use the original image as the thumbnail and let the browser deal with any potential corruption
-        log.debug("ContentProcessor: processPdf(): Session " + str(contentObj.session) + ". Generating thumbnail for pdf " + outputfile)
-        thumbnailName = 'thumbnail_' + outputfile
-        pdfim = Image.open(os.path.join(self.cfg['outputDir'], outputfile))
-        pdfim.thumbnail(self.cfg['thumbnailSize'], Image.ANTIALIAS)
-        pdfim.save(os.path.join(self.cfg['outputDir'], thumbnailName), pdfim.format)
-        #pdfim.close()
-
-        #set thumbnail to our generated thumbnail
-        contentObj.thumbnail = thumbnailName
-        self.thisSession['images'].append( contentObj.get() )
-        self.cfg['contentCount'].value += 1
-        return True
-      except Exception as e:
-        log.exception("ContentProcessor: processPdf(): Session " + str(contentObj.session) + ". Error generating thumbnail for pdf " + contentObj.contentFile)
-        #thumbnail generation failed, so set thumbnail to be the original image generated by gs
-        contentObj.thumbnail = outputfile
-        self.thisSession['images'].append( contentObj.get() )
-        self.cfg['contentCount'].value += 1
-        return True
-        
-
-
-
-  def getPdfText(self, contentObj):
-    try: #now extract pdf text
-      #log.debug('ContentProcessor: getPdfText(): session: ' + str(contentObj.session))
-      sessionId = contentObj.session
-
-      fileToExtractFrom = contentObj.contentFile
-      if contentObj.proxyContentFile:
-        fileToExtractFrom = contentObj.proxyContentFile
-
-      pdftotextCmd = self.cfg['pdftotextPath'] + " -enc UTF-8 -eol unix -nopgbrk -q '" + os.path.join(self.cfg['outputDir'], fileToExtractFrom) + "' -"
-      log.debug("ContentProcessor: getPdfText(): Session " + str(contentObj.session) + ". pdftotextCmd: " + pdftotextCmd)
-      args = shlex.split(pdftotextCmd)
-      try:
-        #pdftotextProcess = Popen(pdftotextCmd, stdout=PIPE, stderr=PIPE, shell = True)
-        pdftotextProcess = Popen(args, stdout=PIPE, stderr=PIPE, shell = False)
-        (output, err) = pdftotextProcess.communicate()
-        exit_code = pdftotextProcess.wait()
-      
-      except OSError as e:
-        if ('No such file or directory' in str(e)):
-          log.error("ContentProcessor: getPdfText(): Session " + str(contentObj.session) + ". Could not run pdftotext command as " + self.cfg['pdftotextPath'] + " was not found")
-        else:
-          log.exception(str(e))
-        if not self.cfg['distillationEnabled'] and not self.cfg['regexDistillationEnabled']:
-          return { 'keep': True, 'contentObj': contentObj }
-        return { 'keep': False, 'contentObj': contentObj }
-
-      except Exception as e:
-        log.exception("ContentProcessor: getPdfText(): Session " + str(contentObj.session) + ". Could not run pdftotext command at " + self.cfg['pdftotextPath'] )
-        if not self.cfg['distillationEnabled'] and not self.cfg['regexDistillationEnabled']:
-          return { 'keep': True, 'contentObj': contentObj }
-        return { 'keep': False, 'contentObj': contentObj }
-
-      returnObj = { 'keep': False, 'contentObj': {} }
-      
-      textTermsMatched = []
-      regexTermsMatched = []
-      contentObj.distillationEnabled = False
-      contentObj.regexDistillationEnabled = False
-      
-      if self.cfg['distillationEnabled'] and 'distillationTerms' in self.cfg and len(self.cfg['distillationTerms']) > 0:
-        contentObj.distillationEnabled = True
-      if self.cfg['regexDistillationEnabled'] and 'regexDistillationTerms' in self.cfg and len(self.cfg['regexDistillationTerms']) > 0:
-        contentObj.regexDistillationEnabled = True
-
-      if exit_code == 0:
-        #extracted successfully, get output
-        joinedText = output.replace('\n', ' ').replace('\r', '')
-
-        if contentObj.distillationEnabled:
-          for term in self.cfg['distillationTerms']:
-            #log.debug( "ContentProcessor: getPdfText(): Text search term: " + term)
-            if term.decode('utf-8').lower() in joinedText.decode('utf-8').lower():
-              textTermsMatched.append(term)
-              log.debug("ContentProcessor: getPdfText(): Session " + str(contentObj.session) + ". Matched text search term " + term)
-        
-        if contentObj.regexDistillationEnabled:
-          for t in self.cfg['regexDistillationTerms']:
-            origTerm =  t.decode('utf-8')
-            term = '(' + t.decode('utf-8') + ')'
-            #log.debug( "ContentProcessor: getPdfText(): Regex search term: " + term)
-            compiledTerm = re.compile(term)
-            res = compiledTerm.search(joinedText.decode('utf-8')) #MatchObject
-            if res != None:
-              regexTermsMatched.append(origTerm)
-              log.debug("ContentProcessor: getPdfText(): Session " + str(contentObj.session) + ". Matched regex search term " + term)
-              log.debug("ContentProcessor: getPdfText(): Session " + str(contentObj.session) + ". Matched group: " + pformat(res.groups()))
-
-        #'keep' is a variable that gets returned which indicates whether the document and session should be retained as part of a collection, if a term has been matched or if there were no terms
-        if not contentObj.distillationEnabled and not contentObj.regexDistillationEnabled: #no search terms defined - distillation is not enabled - definitely keep this session
-          returnObj['keep'] = True
-        if contentObj.distillationEnabled and len(textTermsMatched) > 0: #we had text search terms and had at least one match, so we will keep this session
-          returnObj['keep'] = True
-          contentObj.textTermsMatched = textTermsMatched
-        if contentObj.regexDistillationEnabled and len(regexTermsMatched) > 0: #we had regex search terms and had at least one match, so we will keep this session
-          returnObj['keep'] = True
-          contentObj.regexTermsMatched = regexTermsMatched
-        
-        returnObj['contentObj'] = contentObj #pass our modified contentObj back to the caller
-
-        if returnObj['keep'] == True:
-          log.debug("ContentProcessor: getPdfText(): Session " + str(contentObj.session) + ". Keeping file " + contentObj.contentFile)
-          searchObj = { 'id': contentObj.id, 'session': sessionId, 'contentFile': contentObj.contentFile, 'searchString': joinedText }
-          if not 'search' in self.thisSession:
-            self.thisSession['search'] = []
-          #pprint(self.thisSession['search'])
-          self.thisSession['search'].append(searchObj)
-
-        return returnObj
-        
-    except Exception as e:
-      log.exception("ContentProcessor: getPdfText(): Session " + str(contentObj.session) + ". Unhandled exception in getPdfText()")
-      #print "Error Message:", str(e)
-      #continue
-      #if searchForText:
-      #if len(searchForText) != 0:
-      #  return True #keep session if pdftotext has issues.
-      return returnObj
-
-
-
-
-
-  def onFeederResponse(self, res, contentObj):
-    #log.debug('ContentProcessor: feederResponse():\n' + pformat(res))
-    log.debug("ContentProcessor: genHash(): Session " + str(contentObj.session) + ". Matched " + res['type'] + " hash " + res['hash'])
-    fp = open(os.path.join(self.cfg['outputDir'], contentObj.contentFile), 'wb')
-    contentFileObj = contentObj.getFileContent()
-    fp.write(contentFileObj.getvalue())
-    fp.close()
-    contentObj.hashValue = res['hash']
-    if 'friendlyName' in res:
-      contentObj.hashFriendly = res['friendlyName']
-    self.thisSession['images'].append( contentObj.get() )
-
-
-  def genHash(self, contentObj): #must specify either part or stringFile
-    #print "genHash()"
-    contentObj.contentType = 'hash'
-    log.debug("ContentProcessor: genHash(): Session " + str(contentObj.session) + ". Generating " + contentObj.hashType + " hash for " + contentObj.contentFile)
-
-    contentFileObj = contentObj.getFileContent()
-    fileContent = contentFileObj.getvalue()
-
-    if self.cfg['useHashFeed']:
-      # we first need to know what types of hashes are in this feed
-      hashTypes = self.feedManager.getTypes()
-      log.debug('ContentProcessor: genHash(): types: ' + pformat(hashTypes))
-      
-      if hashTypes['md5']:
-        hasher = hashlib.md5()
-        hashRes = hasher.update(fileContent)
-        calcHash = hasher.hexdigest().decode('utf-8').lower()
-        contentObj.hashType = 'md5'
-        self.feedManager.submit(calcHash, 'md5', contentObj.getCopy() )
-        log.debug("ContentProcessor: genHash(): Session " + str(contentObj.session) + ". MD5 hash for " + contentObj.contentFile + " is " + calcHash)
-      
-      if hashTypes['sha1']:
-        hasher = hashlib.sha1()
-        hashRes = hasher.update(fileContent)
-        calcHash = hasher.hexdigest().decode('utf-8').lower()
-        contentObj.hashType = 'sha1'
-        log.debug("ContentProcessor: genHash(): Session " + str(contentObj.session) + ". SHA1 hash for " + contentObj.contentFile + " is " + calcHash)
-        self.feedManager.submit(calcHash, 'sha1', contentObj.getCopy())
-      
-      if hashTypes['sha256']:
-        hasher = hashlib.sha256()
-        hashRes = hasher.update(fileContent)
-        calcHash = hasher.hexdigest().decode('utf-8').lower()
-        contentObj.hashType = 'sha256'
-        log.debug("ContentProcessor: genHash(): Session " + str(contentObj.session) + ". SHA256 hash for " + contentObj.contentFile + " is " + calcHash)
-        self.feedManager.submit(calcHash, 'sha256', contentObj.getCopy())
-
-
-    
-    if not self.cfg['useHashFeed']:
-
-      def hashFinder(hash, hashes):
-        for h in hashes:
-          if hash == h['hash'].lower():
-            log.debug("ContentProcessor: genHash(): Session " + str(contentObj.session) + ". Matched " + contentObj.hashType + " hash " + h['hash'])
-            fp = open(os.path.join(self.cfg['outputDir'], contentObj.contentFile), 'wb')
-            fp.write(contentFileObj.getvalue())
-            fp.close()
-            ###imgObj = { 'session': sessionId, 'contentType': 'md5Matched', 'contentFile': filename, 'image': filename, 'md5Hash': hash_md5.hexdigest() }
-            contentObj.hashValue = hash
-            if 'friendly' in h:
-              contentObj.hashFriendly = h['friendly']
-            self.thisSession['images'].append( contentObj.get() )
-      
-      if contentObj.hashType == 'md5':
-        hasher = hashlib.md5()
-        hashRes = hasher.update(contentFileObj.getvalue())
-        calcHash = hasher.hexdigest().decode('utf-8').lower()
-        log.debug("ContentProcessor: genHash(): Session " + str(contentObj.session) + ". " + contentObj.hashType + " hash for " + contentObj.contentFile + " is " + calcHash)
-        hashFinder(calcHash, self.cfg['md5Hashes'])
-      if contentObj.hashType == 'sha1':
-        hasher = hashlib.sha1()
-        hashRes = hasher.update(contentFileObj.getvalue())
-        calcHash = hasher.hexdigest().decode('utf-8').lower()
-        log.debug("ContentProcessor: genHash(): Session " + str(contentObj.session) + ". " + contentObj.hashType + " hash for " + contentObj.contentFile + " is " + calcHash)
-        hashFinder(calcHash, self.cfg['sha1Hashes'])
-      if contentObj.hashType == 'sha256':
-        hasher = hashlib.sha256()
-        hashRes = hasher.update(contentFileObj.getvalue())
-        calcHash = hasher.hexdigest().decode('utf-8').lower()
-        log.debug("ContentProcessor: genHash(): Session " + str(contentObj.session) + ". " + contentObj.hashType + " hash for " + contentObj.contentFile + " is " + calcHash)
-        hashFinder(calcHash, self.cfg['sha256Hashes'])
-      
-    
-    
-
-
-        
-  def go(self, fileStr, session, sessionId):
-    try:
-      if self.hashesAllowed and self.cfg['useHashFeed']:
-        log.debug('ContentProcessor: go(): Initializing FeedManager')
-        self.socketFile = self.cfg['hashFeederSocket']
-        self.hashFeedId = self.cfg['hashFeed']['id']
-        self.feedManager = FeedManager(self.socketFile, self.onFeederResponse, self.hashFeedId)
-        self.thread =  threading.Thread(target = asyncore.loop, kwargs = { 'use_poll': True, 'timeout': .25 } )
-        self.thread.start()
-        res = self.extractFilesFromMultipart(fileStr, session, sessionId)
-        #raise Exception('test exception')
-        self.feedManager.end()
-        self.thread.join()
-        return res
-      else:
-        return self.extractFilesFromMultipart(fileStr, session, sessionId)
-    except Exception as e:
-      #log.debug("ContentProcessor: go(): caught exception: " + str(e) )
-      t, v, tb = sys.exc_info()
-      eMessage = traceback.format_exception(t, v, tb)
-      if hasattr(self, 'feedManager'):
-        self.feedManager.end()
-        self.thread.join()
-      return eMessage
-
-
-
-  def extractFilesFromMultipart(self, fileStr, session, sessionId):
-    log.debug("ContentProcessor: extractFilesFromMultipart(): Extracting files of session ID " + str(sessionId) )
-
-    self.poolId = current_process().name
-    #log.debug('ContentProcessor: extractFilesFromMultiPart(): My Process Identifier: ' + str(self.processId))
-    #log.debug( 'ContentProcessor: extractFilesFromMultiPart(): ' + current_process().name )
-    #print("extractFilesFromMultipart(): Extracting files of session ID " + str(sessionId) )
-    msg = email.message_from_string(fileStr)
-    counter = 1
-
-    self.thisSession = session
-
-
-    for part in msg.walk():
-
-      # multipart/* are just containers
-      maintype = part.get_content_maintype()
-      subtype = part.get_content_subtype()
-
-      log.debug("ContentProcessor: extractFilesFromMultiPart(): maintype: " + maintype)
-      log.debug("ContentProcessor: extractFilesFromMultiPart(): subtype: " + subtype)
-
-      if maintype == 'multipart' and subtype == 'mixed':
-        continue
-      elif maintype == 'image':
-        contentType = 'image'
-      elif maintype == 'application' and subtype == 'pdf':
-        contentType = 'pdf'
-        ext = '.pdf'
-      else:
-        log.debug("ContentProcessor: extractFilesFromMultiPart(): Mime type not recognized.  maintype: " + str(maintype))
-        log.debug("ContentProcessor: extractFilesFromMultiPart(): subtype:" + str(subtype))
-        log.debug("ContentProcessor: extractFilesFromMultiPart(): Detecting content type")
-        
-        payload = part.get_payload(decode=True)
-        mimeType = magic.from_buffer( payload, mime=True)
-        magicType = magic.from_buffer( payload, mime=False)
-        log.debug("ContentProcessor: extractFilesFromMultiPart(): Magic type is " + mimeType)
-        if magicType == 'Microsoft Word 2007+':
-          contentType = 'office'
-          contentSubType = 'word'
-          ext = '.docx'
-        elif magicType == 'Microsoft Excel 2007+':
-          contentType = 'office'
-          contentSubType = 'excel'
-          ext = '.xlsx'
-        elif magicType == 'Microsoft PowerPoint 2007+':
-          contentType = 'office'
-          contentSubType = 'powerpoint'
-          ext = '.pptx'
-        elif mimeType == 'application/zip':
-          contentType = 'zip'
-          ext = '.zip'
-        elif mimeType == 'application/x-rar':
-          contentType = 'rar' #confirm this type
-          ext = '.rar'
-        elif mimeType in ['application/x-msdownload', 'application/x-ms-installer', 'application/x-elf', 'application/x-dosexec', 'application/x-executable']: #and len(md5Hashes) != 0: #fix this for known executable types
-          contentType = 'executable'
-        else: #should we make else generate hash instead of continue?  stick with just exe's for now
-          continue
-      
-      # Applications should really sanitize the given filename so that an
-      # email message can't be used to overwrite important files
-      filename = part.get_filename().decode('utf-8')
-      if (contentType == 'office'):
-        (f, e) = os.path.splitext(filename)
-        if contentSubType == 'word' and e != '.docx':
-          e = '.docx'
-        if contentSubType == 'excel' and e != '.xlsx':
-          e = '.xlsx'
-        if contentSubType == 'powerpoint' and e != '.pptx':
-          e = '.pptx'
-        filename = f + e
-
-      if not filename:
-        log.debug("ContentProcessor: extractFilesFromMultiPart(): No filename")
-        if not ext:
-          ext = mimetypes.guess_extension(part.get_content_type())
-        if not ext:
-          # Use a generic bag-of-bits extension
-          ext = '.bin'
-        filename = 'session-%d-part-%03d%s' % (sessionId, counter, ext)
-      counter += 1
-      
-      #print filename, part.get_content_maintype(), part.get_content_subtype()
-
-      if self.cfg['contentCount'].value >= self.cfg['contentLimit']:
-        #return
-        log.debug("ContentProcessor: extractFilesFromMultiPart(): Reached content limit")
-        return self.thisSession
-
-      ##############################################################################
-      #We're going to keep the content - so now start doing things with the content#
-      ##############################################################################
-      contentObj = ContentObj()
-      contentObj.session = contentObj.session = sessionId
-
-      if self.hashesAllowed: #hash check everything, including archives
-        contentObj.contentFile = filename
-        contentObj.setPartContent(part)
-        #if len(md5Hashes) != 0:
-        if not self.cfg['useHashFeed'] and self.cfg['md5Enabled'] and 'md5Hashes' in self.cfg and len(self.cfg['md5Hashes']) != 0:
-          contentObj.hashType = 'md5'
-          self.genHash(contentObj)
-        #if len(sha1Hashes) != 0:
-        if not self.cfg['useHashFeed'] and self.cfg['sha1Enabled'] and 'sha1Hashes' in self.cfg and len(self.cfg['sha1Hashes']) != 0:
-          contentObj.hashType = 'sha1'
-          self.genHash(contentObj)
-        #if len(sha256Hashes) != 0:
-        if not self.cfg['useHashFeed'] and self.cfg['sha256Enabled'] and 'sha256Hashes' in self.cfg and len(self.cfg['sha256Hashes']) != 0:
-          contentObj.hashType = 'sha256'
-          self.genHash(contentObj)
-        if self.cfg['useHashFeed']:
-          self.genHash(contentObj)
-
-      #if contentType == 'image' and len(self.cfg['distillationTerms']) == 0 and len(self.cfg['regexDistillationTerms']) == 0 and self.imagesAllowed:
-      #if contentType == 'image' and not self.cfg['distillationEnabled'] and not self.cfg['regexDistillationEnabled'] and self.imagesAllowed:
-      if contentType == 'image' and self.imagesAllowed:
-        contentObj.contentFile = filename
-        contentObj.setPartContent(part)
-        if not self.processImage(contentObj):
-          continue
-        
-      elif contentType == 'pdf' and self.pdfsAllowed:
-        contentObj.contentFile = filename
-        contentObj.setPartContent(part)
-        if not self.processPdf(contentObj):
-          continue
-
-      elif contentType == 'office' and self.officeAllowed:
-        contentObj.contentFile = filename
-        contentObj.contentSubType = contentSubType
-        contentObj.setPartContent(part)
-        if not self.processOfficeDoc(contentObj):
-          continue
-      
-
-
-      ######################################################
-      #################Process ZIP ARCHIVES#################
-      ######################################################
-
-      elif contentType == 'zip':
-        log.debug("ContentProcessor: extractFilesFromMultiPart(): Attempting to extract zip archive " + filename)
-        contentObj.fromArchive = True
-        contentObj.archiveType = 'zip'
-        saveZipFile = False
-        origContentObj = copy(contentObj)
-        
-        try:
-          zipFileHandle = zipfile.ZipFile(self.convertPartToStringIO(part))
-        except zipfile.BadZipfile as e:
-          log.warning("ContentProcessor: extractFilesFromMultiPart(): Bad ZIP File (file was not opened): " + contentObj.archiveFilename)
-        except zipfile.LargeZipFile as e:
-          log.warning("ContentProcessor: extractFilesFromMultiPart(): ZIP file was too large to open: " + contentObj.archiveFilename)
-        except NotImplementedError as e:
-          log.exception("ContentProcessor: extractFilesFromMultiPart(): NotImplemented exception during zip open")
-        except Exception as e:
-          log.exception("ContentProcessor: extractFilesFromMultiPart(): Unhandled exception during zip file open")
-         
-        try:
-          for zinfo in zipFileHandle.infolist():
-            contentObj = copy(origContentObj)
-            
-            archivedFilename = zinfo.filename
-            contentObj.contentFile = archivedFilename
-            contentObj.archiveFilename = filename
-            is_encrypted = zinfo.flag_bits & 0x1
-            #print "DEBUG: zip compression type is",str(zinfo.compress_type)
-            unsupported_compression = zinfo.compress_type == 99
-
-            if not self.dodgyArchivesAllowed and (is_encrypted or unsupported_compression):
-              continue
-            
-            #elif is_encrypted and len(self.cfg['distillationTerms']) == 0 and len(self.cfg['regexDistillationTerms']) == 0:
-            elif is_encrypted and not self.cfg['distillationEnabled'] and not self.cfg['regexDistillationEnabled']:
-              saveZipFile = True
-              log.debug('ContentProcessor: extractFilesFromMultiPart(): ZIP contentFile %s from archive %s is encrypted!' % (archivedFilename, filename))
-              contentObj.contentType = 'encryptedZipEntry'
-              #contentObj.contentFile = filename #this is the zip file itself
-              contentObj.fromArchive = True
-              self.thisSession['images'].append( contentObj.get() )
-              continue
-
-            #elif unsupported_compression and len(self.cfg['distillationTerms']) == 0 and len(self.cfg['regexDistillationTerms']) == 0:
-            elif unsupported_compression and not self.cfg['distillationEnabled'] and not self.cfg['regexDistillationEnabled']:
-              saveZipFile = True
-              log.debug('ContentProcessor: extractFilesFromMultiPart(): ZIP archive %s uses an unsupported compression type!' % filename)
-              contentObj.contentType = 'unsupportedZipEntry'
-              contentObj.contentFile = filename #this is the zip file itself
-              contentObj.fromArchive = False # if the file is unsupported, it becomes the content itself, not what's inside it,so it's not FROM an archive, it IS the archive
-              contentObj.isArchive = True
-              self.thisSession['images'].append( contentObj.get() )
-              break
-            
-            else: #identify archived file and save it permanently if a supported file type
-              extractedFileObj = StringIO.StringIO() #we will write the extracted file to this buffer
-
-              #extract the file to buffer
-              compressedFileHandle = zipFileHandle.open(archivedFilename) #compressedFileHandle is a handle to the file while it's still in the zip file.  we will extract from this object
-              extractedFileObj.write(compressedFileHandle.read() )  #this is where we extract the file into
-              compressedFileHandle.close()
-
-              contentObj.setStringIOContent(extractedFileObj)
-              self.processExtractedFile(contentObj) #now let's process the extracted file
-              extractedFileObj.close()
-      
-        except RuntimeError as e:
-          if 'is encrypted, password required for extraction' in e.message:
-            pass # do nothing and let our own code take the lead
-          else:
-            log.exception('ContentProcessor: extractFilesFromMultiPart(): Unhandled RuntimeError')
-        except Exception as e:
-          log.exception("ContentProcessor: extractFilesFromMultiPart(): Unhandled exception during zip file extraction")
-
-        if saveZipFile:
-          fp = open(os.path.join(self.cfg['outputDir'], filename), 'wb')
-          fp.write(part.get_payload(decode=True))
-          fp.close()
-        continue          
-
-
-
-      #################Process RAR ARCHIVES#################
-      elif contentType == 'rar':
-        log.debug("ContentProcessor: extractFilesFromMultiPart():  Attempting to extract rar archive " + filename)
-        contentObj.fromArchive = True
-        contentObj.archiveType = 'rar'
-        saveRarFile = False
-        origContentObj = copy(contentObj)
-        
-        try:
-          rarFileHandle = rarfile.RarFile(self.convertPartToStringIO(part), errors='strict')
-        except rarfile.PasswordRequired as e:
-          log.debug("ContentProcessor: extractFilesFromMultiPart(): RAR requires password: %s" % e)
-          pass
-        except rarfile.BadRarFile as e:
-          log.debug("ContentProcessor: extractFilesFromMultiPart(): Bad RAR file")
-        except rarfile.NotRarFile as e:
-          log.debug("ContentProcessor: extractFilesFromMultiPart(): Not a RAR file")
-        except rarfile.BadRarName as e:
-          log.debug("ContentProcessor: extractFilesFromMultiPart(): Cannot guess multipart RAR name components")
-        except rarfile.NoRarEntry as e:
-          log.debug("ContentProcessor: extractFilesFromMultiPart(): File not found in RAR")
-        except rarfile.NeedFirstVolume as e:
-          log.debug("ContentProcessor: extractFilesFromMultiPart(): Need to start from first volume in RAR archive")
-        except rarfile.NoCrypto as e:
-          log.debug("ContentProcessor: extractFilesFromMultiPart(): No crypto services available to parse encrypted headers")
-        except rarfile.RarExecError as e:
-          log.debug("ContentProcessor: extractFilesFromMultiPart(): There was a problem reported by unrar")
-        except rarfile.RarCRCError as e:
-          log.debug("ContentProcessor: extractFilesFromMultiPart(): CRC error during unpacking of RAR")
-        except rarfile.RarOpenError as e:
-          log.debug("ContentProcessor: extractFilesFromMultiPart(): Error opening RAR file")
-        except rarfile.RarUserError as e:
-          log.debug("ContentProcessor: extractFilesFromMultiPart(): RAR user error")
-        except rarfile.RarMemoryError as e:
-          log.debug("ContentProcessor: extractFilesFromMultiPart(): RAR memory error")
-        except rarfile.RarNoFilesError as e:
-          log.debug("ContentProcessor: extractFilesFromMultiPart(): RAR no files that match pattern were found")
-        except rarfile.RarUserBreak as e:
-          log.debug("ContentProcessor: extractFilesFromMultiPart(): RAR user break")
-        except rarfile.RarWrongPassword as e:
-          log.debug("ContentProcessor: extractFilesFromMultiPart(): RAR wrong password")
-        except rarfile.RarUnknownError as e:
-          log.debug("ContentProcessor: extractFilesFromMultiPart(): RAR unknown error")
-        except rarfile.RarCannotExec as e:
-          log.debug("ContentProcessor: extractFilesFromMultiPart(): RAR executable not found")
-        except Exception as e:
-          log.exception("ContentProcessor: extractFilesFromMultiPart(): Unhandled exception during rar extraction")
-          if self.cfg['devmode']:
-            log.debug("ContentProcessor: extractFilesFromMultiPart(): extractFilesFromMultipart(): Exiting with code 1") #we only exit if in dev mode, so we can deal with the problem afterwards
-            sys.exit(1)
-
-          #print rarFileHandle.needs_password()
-          #print rarFileHandle.namelist()
-          #rarFileHandle.printdir()
-          #print rarFileHandle.testrar()
-
-          #we need something here for if the entire rar file table is encrypted
-          table_len = len(rarFileHandle.namelist())
-          #log.debug('ContentProcessor: extractFilesFromMultiPart(): table_len: %s' % table_len)
-          table_content = rarFileHandle.namelist()
-          #log.debug('ContentProcessor: extractFilesFromMultiPart(): table_content: %s' % table_content)
-          table_needs_password = rarFileHandle.needs_password()
-          #log.debug('ContentProcessor: extractFilesFromMultiPart(): table_needs_password: %s' % table_needs_password)
-
-          #if table_len == 0 and table_needs_password and len(self.cfg['distillationTerms']) == 0 and len(self.cfg['regexDistillationTerms']) == 0 and self.dodgyArchivesAllowed:
-          if table_len == 0 and table_needs_password and not self.cfg['distillationEnabled'] and not self.cfg['regexDistillationEnabled'] and self.dodgyArchivesAllowed:
-            #this means that the archive's table is encrypted and we cannot see anything inside it
-            saveRarFile = True
-            log.debug('ContentProcessor: extractFilesFromMultiPart(): RAR archive %s has an encrypted table!' % filename)
-            contentObj.contentType = 'encryptedRarTable'
-            contentObj.contentFile = filename #this is the rar file itself
-            contentObj.fromArchive = False # if the file is encrypted, it becomes the content itself, not what's inside it,so it's not FROM an archive, it IS the archive
-            contentObj.isArchive = True
-            self.thisSession['images'].append( contentObj.get() )
-
-          for rinfo in rarFileHandle.infolist():
-            contentObj = copy(origContentObj)
-
-            archivedFilename = rinfo.filename
-            contentObj.contentFile = archivedFilename
-            contentObj.archiveFilename = filename
-            archivedFile_is_encrypted = rinfo.needs_password()
-            #log.debug('archivedFile_is_encrypted:' + str(archivedFile_is_encrypted))
-
-            #if archivedFile_is_encrypted and not self.cfg['distillationEnabled'] and not self.cfg['regexDistillationEnabled'] and self.dodgyArchivesAllowed:
-            if archivedFile_is_encrypted and self.dodgyArchivesAllowed:
-              # this means that the RAR file's table is not encrypted, but the file we're trying to extract is, and we don't want to distill it
-              saveRarFile = True
-              log.debug('ContentProcessor: extractFilesFromMultiPart(): RAR contentFile %s from archive %s is encrypted.  Marking archive for save.' % (archivedFilename,filename))
-              contentObj.contentType = 'encryptedRarEntry'
-              contentObj.fromArchive = True
-              self.thisSession['images'].append( contentObj.get() )
-              continue
-
-            elif archivedFile_is_encrypted and not self.dodgyArchivesAllowed:
-              # this means that the RAR file's table is not encrypted, but the file we're trying to extract is, and we do want to distill it, so do nothing
-              log.debug('ContentProcessor: extractFilesFromMultiPart(): RAR contentFile %s from archive %s is encrypted, but not marking for save.' % (archivedFilename,filename))
-              continue
-
-            else: # file isn't encrypted.  identify archived file and process it if a supported file type
-              extractedFileObj = StringIO.StringIO() #we will write the extracted file to this buffer
-
-              #extract the file to buffer
-              compressedFileHandle = rarFileHandle.open(archivedFilename) #compressedFileHandle is a handle to the file while it's still in the rar file.  we will extract from this object
-              extractedFileObj.write(compressedFileHandle.read() ) #this is where we extract the file into
-              compressedFileHandle.close()
-
-              contentObj.setStringIOContent(extractedFileObj)
-              extractedFileObj.close()
-              self.processExtractedFile(contentObj) #now let's process the extracted file
-              extractedFileObj.close()
-
-          if saveRarFile:
-            fp = open(os.path.join(self.cfg['outputDir'], filename), 'wb')
-            fp.write(part.get_payload(decode=True))
-            fp.close()
-          continue
-
-    return self.thisSession
-
-
-
-  def processExtractedFile(self, contentObj):
-    log.debug("ContentProcessor: processExtractedFile(): Attempting to process extracted file " + contentObj.contentFile )
-    
-    #generate a new uuid for the content object
-    contentObj.newId()
-    
-    #get the file
-    fileObj = contentObj.getFileContent()
-
-    #identify the extracted file
-    fileType = magic.from_buffer( fileObj.getvalue(), mime=True) #this is where we identify the content file type
-
-    #if fileType.startswith('image/') and len(self.cfg['distillationTerms']) == 0 and len(self.cfg['regexDistillationTerms']) == 0 and self.imagesAllowed:
-    #if fileType.startswith('image/') and not self.cfg['distillationEnabled'] and not self.cfg['regexDistillationEnabled'] and self.imagesAllowed:
-    if fileType.startswith('image/') and self.imagesAllowed:
-      #log.debug("ContentProcessor: processExtractedFile(): Processing '" + archivedFilename + "' as image")
-      self.processImage(contentObj)
-
-    elif fileType == 'application/pdf' and self.pdfsAllowed:
-      #log.debug("ContentProcessor: processExtractedFile(): processing '" + contentObj.contentType + "' as pdf")
-      self.processPdf(contentObj)
-
-    elif fileType in [ 'Microsoft Word 2007+', 'Microsoft Excel 2007+', 'Microsoft PowerPoint 2007+' ] and self.officeAllowed:
-      #log.debug("ContentProcessor: processExtractedFile(): processing '" + contentObj.contentType + "' as office document")
-      self.processOfficeDoc(contentObj)
-
-    #else:
-      #log.debug() "ContentProcessor: processExtractedFile(): discarding " + archivedFilename + ' with MIME type ' + fileType)
-    #  pass
-
-    if self.hashesAllowed:
-      #log.debug("ContentProcessor: processExtractedFile(): Processing '" + archivedFilename + "' as executable")
-      #if len(md5Hashes) != 0:
-      if not self.cfg['useHashFeed'] and self.cfg['md5Enabled'] and 'md5Hashes' in self.cfg and len(self.cfg['md5Hashes']) != 0:
-        contentObj.hashType = 'md5'
-        self.genHash(contentObj)
-      #if len(sha1Hashes) != 0:
-      if not self.cfg['useHashFeed'] and self.cfg['sha1Enabled'] and 'sha1Hashes' in self.cfg and len(self.cfg['sha1Hashes']) != 0:
-        contentObj.hashType = 'sha1'
-        self.genHash(contentObj)
-      #if len(sha256Hashes) != 0:
-      if not self.cfg['useHashFeed'] and self.cfg['sha256Enabled'] and 'sha256Hashes' in self.cfg and len(self.cfg['sha256Hashes']) != 0:
-        contentObj.hashType = 'sha256'
-        self.genHash(contentObj)
-      if self.cfg['useHashFeed']:
-          self.genHash(contentObj)
-
-  def convertPartToStringIO(self, part):
-    output = StringIO.StringIO()
-    output.write(part.get_payload(decode=True))
-    return output        
