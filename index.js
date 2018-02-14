@@ -294,7 +294,7 @@ var defaultPreferences = {
   sa: { // solera
     url: '',
     presetQuery: "filetype = 'jpg','gif','png','pdf','zip','rar','windows executable','x86 pe','windows dll','x64pe','apple executable (pef)','apple executable (mach-o)'",
-    defaultQuerySelection : "PDF's", // "All Supported File Types",
+    defaultQuerySelection : "All Supported File Types",
     queryTimeout: 5,
     contentTimeout: 5,
     queryDelayMinutes: 1,
@@ -2156,7 +2156,7 @@ app.get('/api/collection/fixed/:id', passport.authenticate('jwt', { session: fal
   // Returns a fixed collection, either complete, or in the process of building
   let collectionId = req.params.id;
   winston.info('GET /api/collection/fixed/:id', collectionId);
-  if (collectionId in collections && collections[collectionId]['state'] == 'initial' || collections[collectionId]['state'] == 'building') {
+  if (collectionId in collections && collections[collectionId]['state'] == 'initial' || collections[collectionId]['state'] == 'building' || collections[collectionId]['state'] == 'error') {
     // collection is either new or is building
     fixedHandler.handleFixedConnection(req, res);
   }
@@ -3078,7 +3078,7 @@ app.get('/api/collection/rolling/:collectionId', passport.authenticate('jwt', { 
 function updateCollectionsDbCallback(collectionId) {
   winston.debug('updateCollectionsDbCallback()');
   let collection = collections[collectionId];
-  winston.debug('updateCollectionsDbCallback(): collection:', collection);
+  // winston.debug('updateCollectionsDbCallback(): collection:', collection);
   try {
     db.collection('collections').update( { id: collectionId }, collection, (err, res) => {
       if (err) throw err;

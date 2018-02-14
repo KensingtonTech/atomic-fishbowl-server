@@ -5,46 +5,36 @@ const spawn = require('child_process').spawn;
 const moment = require('moment');
 const fs = require('fs');
 
-var winston = null;
-var collections = null;
-var feederSocketFile = null;
-var collectionsDir = null;
-var gsPath = null;
-var pdftotextPath = null;
-var sofficePath = null;
-var sofficeProfilesDir = null;
-var unrarPath = null;
-var internalPrivateKeyFile = null;
-var useCasesObj = null;
-var preferences = null;
-var nwservers = null;
-var saservers = null;
-var collectionsUrl = null;
-var collectionsData = null;
 
-module.exports = class {
+
+class FixedCollectionHandler {
 
   // The purpose of this class is to manage connections to API requests for fixed collections
 
-  constructor(dbUpdateCallback, winstoN, collectionS, collectionsDatA, collectionsDiR, feederSocketFilE, gsPatH, pdftotextPatH, sofficePatH, sofficeProfilesDiR, unrarPatH, internalPrivateKeyFilE, useCasesObJ, preferenceS, nwserverS, saserverS, collectionsUrL) {
+  constructor(dbUpdateCallback, winston, collections, collectionsData, collectionsDir, feederSocketFile, gsPath, pdftotextPath, sofficePath, sofficeProfilesDir, unrarPath, internalPrivateKeyFile, useCasesObj, preferences, nwservers, saservers, collectionsUrl) {
+
+    this.cfg = {
+      winston: winston,
+      collections: collections,
+      feederSocketFile: feederSocketFile,
+      collectionsData: collectionsData,
+      collectionsDir: collectionsDir,
+      gsPath: gsPath,
+      pdftotextPath: pdftotextPath,
+      sofficePath: sofficePath,
+      sofficeProfilesDir: sofficeProfilesDir,
+      unrarPath: unrarPath,
+      internalPrivateKeyFile: internalPrivateKeyFile,
+      useCasesObj: useCasesObj,
+      preferences: preferences,
+      nwservers: nwservers,
+      saservers: saservers,
+      collectionsUrl: collectionsUrl
+    };
+    this.winston = winston;
+
     this.collectionManagers = {};
     this.dbUpdateCallback = dbUpdateCallback;
-    winston = winstoN;
-    collections = collectionS;
-    feederSocketFile = feederSocketFilE;
-    collectionsDir = collectionsDiR;
-    gsPath = gsPatH;
-    pdftotextPath = pdftotextPatH;
-    sofficePath = sofficePatH;
-    sofficeProfilesDir = sofficeProfilesDiR;
-    unrarPath = unrarPatH;
-    internalPrivateKeyFile = internalPrivateKeyFilE;
-    useCasesObj = useCasesObJ;
-    preferences = preferenceS;
-    nwservers = nwserverS;
-    saservers = saserverS;
-    collectionsUrl = collectionsUrL;
-    collectionsData = collectionsDatA;
   }
   
   
@@ -52,16 +42,16 @@ module.exports = class {
     // Builds and streams a fixec collection back to the client.  Handles the client connection and kicks off the process
     
     let collectionId = req.params.id;
-    let collection = collections[collectionId];
+    let collection = this.cfg.collections[collectionId];
     
-    winston.info('handleFixedConnection(): collectionId:', collectionId);
+    this.winston.info('FixedCollectionHandler: handleFixedConnection(): collectionId:', collectionId);
     
     // create a client connection handler for this connection
     // does a manager for the requested rolling collection exist?
     // if not, create a new rolling collection manager
     // add new or existing rolling collection manager to the client connection handler
     
-    let clientConnection = new ClientConnection(req, res, collectionId);
+    let clientConnection = new ClientConnection(req, res, collectionId, this.cfg);
     if ( !clientConnection.onConnect(collection) ) {
       return;
     }
@@ -69,7 +59,7 @@ module.exports = class {
     let fixedCollectionManager = null;
     if ( !(collectionId in this.collectionManagers)) {
       // there is no fixedCollectionManager yet for the chosen collection.  So create one
-      fixedCollectionManager = new FixedCollectionManager(collection, collectionId, () => this.fixedCollectionManagerRemovalCallback, this.dbUpdateCallback);
+      fixedCollectionManager = new FixedCollectionManager(collection, collectionId, () => this.fixedCollectionManagerRemovalCallback, this.dbUpdateCallback, this.cfg);
       this.collectionManagers[collectionId] = fixedCollectionManager;
     }
     else {
@@ -85,7 +75,7 @@ module.exports = class {
 
   
   fixedCollectionManagerRemovalCallback(id) {
-    winston.info('fixedCollectionManagerRemovalCallback()');
+    this.winston.info('FixedCollectionHandler: fixedCollectionManagerRemovalCallback()');
     delete this.collectionManagers[id];
   }
 
@@ -101,7 +91,7 @@ module.exports = class {
   collectionDeleted(collectionId, user) {
     // we should only get here if someone deletes a fixed collection...
     // which is in the process of building
-    winston.info('collectionDeleted()');
+    this.winston.info('FixedCollectionHandler: collectionDeleted()');
     if (collectionId in this.collectionManagers) {
       let manager = this.collectionManagers[collectionId];
       manager.onCollectionDeleted(user);
@@ -138,8 +128,10 @@ module.exports = class {
 
 class ClientConnection {
 
-  constructor(req, res, collectionId) {
-    winston.info('ClientConnection: constructor()');
+  constructor(req, res, collectionId, cfg) {
+    this.cfg = cfg;
+    this.winston = this.cfg.winston;
+    this.winston.info('ClientConnection: constructor()');
     this.id = uuidV4();
     this.req = req;
     this.res = res;
@@ -151,8 +143,71 @@ class ClientConnection {
 
 
 
+  onConnect(collection) {
+
+    this.winston.info('ClientConnection: onConnect():');
+    this.winston.debug('got to 0');
+
+    ////////////////////////////////////////////////////
+    //////////////////RESPONSE HEADERS//////////////////
+    ////////////////////////////////////////////////////
+  
+    try {
+      if (collection.bound && !('usecase' in collection )) {
+        throw(`Bound collection ${this.collectionId} does not have a use case defined`);
+      }
+      if (collection.bound && !(collection.usecase in this.cfg.useCasesObj) ) {
+        throw(`Use case ${collection.usecase} in bound collection ${id} is not a valid use case`);
+      }
+      if (collection.state !== 'complete') {
+        this.res.writeHead(200, { 'Content-Type': 'application/json', 'Content-Disposition': 'inline' } );
+        this.res.write('['); // Open the array so that oboe can see it
+      }
+      else {
+        throw(`Collection ${this.collectionId} is in a complete state.  We really shouldn't have got here`);
+      }
+    }
+    catch (e) {
+      this.winston.error(`ClientConnection: onConnect():`, e);
+      this.res.status(500).send( JSON.stringify( { success: false, error: e.message || e } ) );
+      return false;
+    }
+  
+
+    ///////////////////////////////////////////////////////////////////////
+    ///////////////////////CLIENT DISCONNECT HANDLER///////////////////////
+    ///////////////////////////////////////////////////////////////////////
+    
+    this.req.on('close', () => this.onClientClosedConnection() );
+
+    this.heartbeatInterval = setInterval( () => {
+      this.send( { heartbeat : true } );
+    }, 15000 );
+    
+    return true;
+
+  }
+
+  onClientClosedConnection() {
+    this.winston.info('ClientConnection: onClientClosedConnection()');
+    this.disconnected = true;
+    // This block runs when the client disconnects from the session
+    // It doesn't run when we end the session ourselves
+    
+    if (this.heartbeatInterval) {
+      // stop sending heartbeats to client
+      clearInterval(this.heartbeatInterval);
+    }
+    
+    this.manager.removeClient(this.id);
+
+    // we will allow a collection to continue building even after clients have disconnected from it
+  }
+
+
+
   addManager(manager) {
-    winston.info('ClientConnection: addManager()');
+    this.winston.info('ClientConnection: addManager()');
     this.manager = manager;
     this.manager.addClient(this.id, this);
   }
@@ -160,29 +215,27 @@ class ClientConnection {
 
 
   send(data) {
-    // winston.info('ClientConnection: send()');
+    // this.winston.info('ClientConnection: send()');
     // sends data to the client
     if (!this.disconnected) {
       this.res.write( JSON.stringify(data) + ',');
-      this.res.flush();
     }
   }
 
 
   
   sendRaw(data) {
-    winston.info('ClientConnection: sendRaw()');
+    this.winston.info('ClientConnection: sendRaw()');
     // sends data to the client
     if (!this.disconnected) {
       this.res.write( data );
-      this.res.flush();
     }
   }
 
 
 
   end() {
-    winston.info('ClientConnection: end()');
+    this.winston.info('ClientConnection: end()');
     if (this.heartbeatInterval) {
       // stop sending heartbeats to client
       clearInterval(this.heartbeatInterval);
@@ -193,65 +246,6 @@ class ClientConnection {
     this.res.end() // not sure if this will work if already disconnected
     if (!this.disconnected) {
     }
-  }
-
-  onConnect(collection) {
-
-    winston.info('ClientConnection: onConnect():');
-
-    ////////////////////////////////////////////////////
-    //////////////////RESPONSE HEADERS//////////////////
-    ////////////////////////////////////////////////////
-  
-    try {
-      if (collection.bound && !('usecase' in collection )) {
-        throw(`Bound collection ${this.collectionId} does not have a use case defined`);
-      }
-      if (collection.bound && !(collection.usecase in useCasesObj) ) {
-        throw(`Use case ${collection.usecase} in bound collection ${id} is not a valid use case`);
-      }
-      if (collection.state !== 'complete') {
-        this.res.writeHead(200, {'Content-Type': 'application/json','Content-Disposition': 'inline' });
-        this.res.write('['); // Open the array so that oboe can see it
-        this.res.flush();
-      }
-      else {
-        throw(`Collection ${this.collectionId} is in a complete state.  We really shouldn't have got here`);
-      }
-    }
-    catch (e) {
-      winston.error(`ClientConnection: onConnect():`, e);
-      this.res.status(500).send( JSON.stringify( { success: false, error: e.message || e } ) );
-      return false;
-    }
-  
-
-    ///////////////////////////////////////////////////////////////////////
-    ///////////////////////CLIENT DISCONNECT HANDLER///////////////////////
-    ///////////////////////////////////////////////////////////////////////
-    
-    this.req.on('close', () => {
-      winston.info('ClientConnection: close()');
-      this.disconnected = true;
-      // This block runs when the client disconnects from the session
-      // It doesn't run when we end the session ourselves
-      
-      if (this.heartbeatInterval) {
-        // stop sending heartbeats to client
-        clearInterval(this.heartbeatInterval);
-      }
-      
-      this.manager.removeClient(this.id);
-
-      // we will allow a collection to continue building even after clients have disconnected from it
-    });
-
-    this.heartbeatInterval = setInterval( () => {
-      this.send( { heartbeat : true } );
-    }, 15000 );
-    
-    return true;
-
   }
 
 }
@@ -268,10 +262,14 @@ class ClientConnection {
 
 
 
+
 class FixedCollectionManager {
 
-  constructor(collection, collectionId, removalCallback, dbUpdateCallback) {
-    winston.info('FixedCollectionManager: constructor()');
+  constructor(collection, collectionId, removalCallback, dbUpdateCallback, cfg) {
+    this.cfg = cfg;
+    this.winston = this.cfg.winston;
+
+    this.winston.info('FixedCollectionManager: constructor()');
     this.clients = {};
     this.socket = null;
     this.removalCallback = removalCallback;
@@ -289,14 +287,14 @@ class FixedCollectionManager {
 
 
   run() {
-    winston.info('FixedCollectionManager: run()');
+    this.winston.info('FixedCollectionManager: run()');
     this.buildFixedCollection();
   }
 
 
 
   addClient(id, client) {
-    winston.info('FixedCollectionManager: addClient()');
+    this.winston.info('FixedCollectionManager: addClient()');
     this.clients[id] = client;
     this.observers += 1;
     
@@ -305,7 +303,7 @@ class FixedCollectionManager {
     }
     
     if (this.hasRun) {
-      winston.info(`This is not the first client connected to fixed collection ${this.collectionId}.  Playing back existing collection`);
+      this.winston.info(`This is not the first client connected to fixed collection ${this.collectionId}.  Playing back existing collection`);
       let resp = null;
 
       client.send( { collection: { id: this.collectionId, state: 'building' } } );
@@ -343,7 +341,7 @@ class FixedCollectionManager {
 
 
   onCollectionDeleted(user) {
-    winston.debug('FixedCollectionManager: onCollectionDeleted()');
+    this.winston.debug('FixedCollectionManager: onCollectionDeleted()');
     this.destroyed = true;
     
     // stop any running workers
@@ -358,14 +356,14 @@ class FixedCollectionManager {
 
 
   abort() {
-    winston.info('FixedCollectionManager: abort()');
+    this.winston.info('FixedCollectionManager: abort()');
 
     try {
-      winston.debug("Deleting output directory for collection", this.collectionId);
-      rimraf( collectionsDir + '/' + this.collectionId, () => {} ); // Delete output directory
+      this.winston.debug("Deleting output directory for collection", this.collectionId);
+      rimraf( this.cfg.collectionsDir + '/' + this.collectionId, () => {} ); // Delete output directory
     }
     catch(exception) {
-      winston.error('ERROR deleting output directory ' + collectionsDir + '/' + this.collectionId, exception);
+      this.winston.error('ERROR deleting output directory ' + this.cfg.collectionsDir + '/' + this.collectionId, exception);
     }
 
     this.killWorker();
@@ -395,10 +393,10 @@ class FixedCollectionManager {
 
 
   removeClient(id) {
-    winston.info('FixedCollectionManager: removeClient()');
+    this.winston.info('FixedCollectionManager: removeClient()');
     this.observers -= 1;
     if (this.observers != 0) {
-      winston.debug("Client disconnected from fixed collection with collectionId", this.collectionId);
+      this.winston.debug("Client disconnected from fixed collection with collectionId", this.collectionId);
     }
     delete this.clients[id];
   }
@@ -406,14 +404,14 @@ class FixedCollectionManager {
 
 
   sendToWorker(data) {
-    winston.info('FixedCollectionManager: sendToWorker()');
+    this.winston.info('FixedCollectionManager: sendToWorker()');
     this.socket.write( JSON.stringify(data) + '\n' );
   }
 
 
 
   sendToClients(data) {
-    // winston.info('FixedCollectionManager: sendToClients()');
+    // this.winston.info('FixedCollectionManager: sendToClients()');
     for (let id in this.clients) {
       if (this.clients.hasOwnProperty(id)) {
         let client = this.clients[id];
@@ -423,7 +421,7 @@ class FixedCollectionManager {
   }
 
   sendToClientsRaw(data) {
-    winston.info('FixedCollectionManager: sendToClientsRaw()');
+    this.winston.info('FixedCollectionManager: sendToClientsRaw()');
     for (let id in this.clients) {
       if (this.clients.hasOwnProperty(id)) {
         let client = this.clients[id];
@@ -433,7 +431,7 @@ class FixedCollectionManager {
   }
 
   endClients() {
-    winston.info('FixedCollectionManager: endClients()');
+    this.winston.info('FixedCollectionManager: endClients()');
     for (let id in this.clients) {
       if (this.clients.hasOwnProperty(id)) {
         let client = this.clients[id];
@@ -445,7 +443,7 @@ class FixedCollectionManager {
 
   buildFixedCollection() {
     // Main body of worker execution
-    winston.info('FixedCollectionManager: buildFixedCollection()');
+    this.winston.info('FixedCollectionManager: buildFixedCollection()');
 
     try {
       this.collection['state'] = 'building';
@@ -460,8 +458,8 @@ class FixedCollectionManager {
         socketServer.close();
 
       socketServer.listen(tempName, () => {
-        winston.debug('Listening for worker communication');
-        winston.debug("Spawning worker with socket file " + tempName);
+        this.winston.debug('Listening for worker communication');
+        this.winston.debug("Spawning worker with socket file " + tempName);
         
         // Start the worker process.  It won't do anything until we send it a config
         this.workerProcess = spawn('./worker_stub.py', [tempName], { shell: false, stdio: 'inherit' });
@@ -471,7 +469,7 @@ class FixedCollectionManager {
       });
     }
     catch(e) {
-      winston.error("buildFixedCollection(): Caught error:", e);
+      this.winston.error("buildFixedCollection(): Caught error:", e);
     }
      
   }
@@ -480,17 +478,17 @@ class FixedCollectionManager {
 
   onWorkerExit(code) {
     if (typeof code === 'undefined') {
-      winston.debug('Worker process exited abnormally without an exit code');
+      this.winston.debug('Worker process exited abnormally without an exit code');
       this.collection['state'] = 'error';
       this.sendToClients( { collection: { id: this.collectionId, state: 'error' } } );
     }
     else if (code != 0) {
-      winston.debug('Worker process exited abnormally with exit code',code.toString());
+      this.winston.debug('Worker process exited abnormally with exit code',code.toString());
       this.collection['state'] = 'error';
       this.sendToClients( { collection: { id: this.collectionId, state: 'error' } } );
     }
     else {
-      winston.debug('Worker process exited normally with exit code', code.toString());
+      this.winston.debug('Worker process exited normally with exit code', code.toString());
       this.collection['state'] = 'complete';
       this.sendToClients( { collection: { id: this.collectionId, state: 'complete' } } );
     }
@@ -508,7 +506,7 @@ class FixedCollectionManager {
 
     this.hasRun = true;
   
-    winston.info("onConnectionFromWorker(): Connection received from worker to build collection", this.collectionId);
+    this.winston.info("onConnectionFromWorker(): Connection received from worker to build collection", this.collectionId);
     
     //////////////////////////////////
     //Build the worker configuration//
@@ -523,34 +521,34 @@ class FixedCollectionManager {
       contentLimit: this.collection.contentLimit,
       minX: this.collection.minX,
       minY: this.collection.minY,
-      gsPath: gsPath,
-      pdftotextPath: pdftotextPath,
-      sofficePath: sofficePath,
-      sofficeProfilesDir: sofficeProfilesDir,
-      unrarPath: unrarPath,
-      collectionsDir: collectionsDir,
-      privateKeyFile: internalPrivateKeyFile,
+      gsPath: this.cfg.gsPath,
+      pdftotextPath: this.cfg.pdftotextPath,
+      sofficePath: this.cfg.sofficePath,
+      sofficeProfilesDir: this.cfg.sofficeProfilesDir,
+      unrarPath: this.cfg.unrarPath,
+      collectionsDir: this.cfg.collectionsDir,
+      privateKeyFile: this.cfg.internalPrivateKeyFile,
       useHashFeed: this.collection.useHashFeed,
       serviceType: this.collection.serviceType
     };
   
     if (this.collection.serviceType == 'nw') {
-      cfg['summaryTimeout'] = preferences.nw.summaryTimeout;
-      cfg['queryTimeout'] = preferences.nw.queryTimeout;
-      cfg['contentTimeout'] = preferences.nw.contentTimeout;
-      cfg['maxContentErrors'] = preferences.nw.maxContentErrors;
+      cfg['summaryTimeout'] = this.cfg.preferences.nw.summaryTimeout;
+      cfg['queryTimeout'] = this.cfg.preferences.nw.queryTimeout;
+      cfg['contentTimeout'] = this.cfg.preferences.nw.contentTimeout;
+      cfg['maxContentErrors'] = this.cfg.preferences.nw.maxContentErrors;
     }
   
     if (this.collection.serviceType == 'sa') {
-      cfg['queryTimeout'] = preferences.sa.queryTimeout;
-      cfg['contentTimeout'] = preferences.sa.contentTimeout;
-      cfg['maxContentErrors'] = preferences.sa.maxContentErrors;
+      cfg['queryTimeout'] = this.cfg.preferences.sa.queryTimeout;
+      cfg['contentTimeout'] = this.cfg.preferences.sa.contentTimeout;
+      cfg['maxContentErrors'] = this.cfg.preferences.sa.maxContentErrors;
     }
   
     if (this.collection.bound) {
       // This is an OOTB use case
       let useCaseName = this.collection.usecase;
-      let useCase = useCasesObj[useCaseName];
+      let useCase = this.cfg.useCasesObj[useCaseName];
       cfg['query'] = useCase.query;
       cfg['contentTypes'] = useCase.contentTypes;
       cfg['distillationEnabled'] = false;
@@ -589,7 +587,7 @@ class FixedCollectionManager {
       else {
         // we're using a hash feed
         cfg['hashFeed'] = feeds[this.collection.hashFeed] // pass the hash feed definition
-        cfg['hashFeederSocket'] = feederSocketFile
+        cfg['hashFeederSocket'] = this.cfg.feederSocketFile
       }
   
       cfg['query'] = this.collection.query;
@@ -604,7 +602,7 @@ class FixedCollectionManager {
     }
   
     if (this.collection.serviceType == 'nw') {
-      let nwserver = nwservers[this.collection.nwserver];
+      let nwserver = this.cfg.nwservers[this.collection.nwserver];
       for (var k in nwserver) {
   
         if (nwserver.hasOwnProperty(k) && k != 'id' && k != '_id') {
@@ -613,7 +611,7 @@ class FixedCollectionManager {
       }
     }
     if (this.collection.serviceType == 'sa') {
-      let saserver = saservers[this.collection.saserver];
+      let saserver = this.cfg.saservers[this.collection.saserver];
       for (var k in saserver) {
         if (saserver.hasOwnProperty(k) && k != 'id' && k != '_id') {
           cfg[k] = saserver[k];  // assign properties of saserver to the collection cfg
@@ -641,7 +639,7 @@ class FixedCollectionManager {
     // Handle data sent from the worker via the UNIX socket (collection results)
     this.socket.on('data', chunk => data = this.onDataFromWorker(data, chunk) );
     
-    // Now that we've finished building the new collection, emit a finished signal, and merge the new collection into the collectionsData object, and delete the object from buildingFixedCollections
+    // Now that we've finished building the new collection, emit a finished signal, and merge the new collection into the this.cfg.collectionsData object, and delete the object from buildingFixedCollections
     this.socket.on('end', () => this.onWorkerDisconnected(tempName) );
                             
     // Send configuration to worker.  This officially kicks off the work.  After this, we should start receiving data on the socket
@@ -651,21 +649,21 @@ class FixedCollectionManager {
 
 
   onWorkerDisconnected(tempName) {
-    winston.debug('Worker has disconnected from the server.  Merging temporary collection into permanent collection');
-    if (this.collectionId in collectionsData) { // needed in case the collection has been deleted whilst still building
-      collectionsData[this.collectionId].images = this.images;
-      collectionsData[this.collectionId].search = this.search;
+    this.winston.debug('Worker has disconnected from the server.  Merging temporary collection into permanent collection');
+    if (this.collectionId in this.cfg.collectionsData) { // needed in case the collection has been deleted whilst still building
+      this.cfg.collectionsData[this.collectionId].images = this.images;
+      this.cfg.collectionsData[this.collectionId].search = this.search;
       for (var e in this.sessions) {
         let s = this.sessions[e];
         let sid = s.id;
-        collectionsData[this.collectionId].sessions[sid] = s;
+        this.cfg.collectionsData[this.collectionId].sessions[sid] = s;
       }
     }
     /*else {
       // just for debugging
-      winston.debug('!!!Couldn\' find collection in collectionsData!!!');
+      this.winston.debug('!!!Couldn\' find collection in this.cfg.collectionsData!!!');
     }*/
-    winston.debug('Temporary collection merged into main branch');
+    this.winston.debug('Temporary collection merged into main branch');
     fs.unlink(tempName, () => {} );
     this.removalCallback(this.collectionId); // time to die
   }
@@ -675,7 +673,7 @@ class FixedCollectionManager {
   onDataFromWorker(data, chunk) {
     // Handles socket data received from the worker process
     // This actually builds the collection data structures and sends updates to the client
-    // winston.debug('FixedCollectionManager: onDataFromWorker(): Processing update from worker');
+    // this.winston.debug('FixedCollectionManager: onDataFromWorker(): Processing update from worker');
     data += chunk
 
     var splt = data.split("\n").filter( (el) => {return el.length != 0}) ;
@@ -729,20 +727,20 @@ class FixedCollectionManager {
         // modify image paths to point to /collections/:collectionId
         for (let i = 0; i < update.collectionUpdate.images.length; i++) {
           
-          update.collectionUpdate.images[i].contentFile = collectionsUrl + '/' + this.collectionId + '/' + update.collectionUpdate.images[i].contentFile;
+          update.collectionUpdate.images[i].contentFile = this.cfg.collectionsUrl + '/' + this.collectionId + '/' + update.collectionUpdate.images[i].contentFile;
           
           if ('proxyContentFile' in update.collectionUpdate.images[i]) {
-            update.collectionUpdate.images[i].proxyContentFile = collectionsUrl + '/' + this.collectionId + '/' + update.collectionUpdate.images[i].proxyContentFile;
+            update.collectionUpdate.images[i].proxyContentFile = this.cfg.collectionsUrl + '/' + this.collectionId + '/' + update.collectionUpdate.images[i].proxyContentFile;
           }
 
           if ('thumbnail' in update.collectionUpdate.images[i]) {
-            update.collectionUpdate.images[i].thumbnail = collectionsUrl + '/' + this.collectionId + '/' + update.collectionUpdate.images[i].thumbnail;
+            update.collectionUpdate.images[i].thumbnail = this.cfg.collectionsUrl + '/' + this.collectionId + '/' + update.collectionUpdate.images[i].thumbnail;
           }
           if ('pdfImage' in update.collectionUpdate.images[i]) {
-            update.collectionUpdate.images[i].pdfImage = collectionsUrl + '/' + this.collectionId + '/' + update.collectionUpdate.images[i].pdfImage;
+            update.collectionUpdate.images[i].pdfImage = this.cfg.collectionsUrl + '/' + this.collectionId + '/' + update.collectionUpdate.images[i].pdfImage;
           }
           if ('archiveFilename' in update.collectionUpdate.images[i]) {
-            update.collectionUpdate.images[i].archiveFilename = collectionsUrl + '/' + this.collectionId + '/' + update.collectionUpdate.images[i].archiveFilename;
+            update.collectionUpdate.images[i].archiveFilename = this.cfg.collectionsUrl + '/' + this.collectionId + '/' + update.collectionUpdate.images[i].archiveFilename;
           }
           this.images.push(update.collectionUpdate.images[i]);
         }
@@ -756,3 +754,6 @@ class FixedCollectionManager {
 
 
 }
+
+
+module.exports = FixedCollectionHandler;
