@@ -18,4 +18,7 @@ var User = new Schema({
 
 User.plugin(passportLocalMongoose);
 
-module.exports = mong.model('User', User);
+// model contains authenticate(), serializeUser(), and deserializeUser() methods
+let model = mong.model('User', User);
+
+module.exports = model;

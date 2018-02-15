@@ -4,8 +4,10 @@
 require('source-map-support').install();
 const Observable = require('rxjs/Observable').Observable;
 const Subject = require('rxjs/Subject').Subject;
-const express = require('express');
-const app = express();
+const app = require('express')();
+const server = require('http').createServer(app);  
+const io = require('socket.io')(server);
+const ioCookieParser = require('socket.io-cookie');
 const multer  = require('multer');
 const session = require('express-session');
 const bodyParser = require('body-parser');
@@ -210,8 +212,7 @@ const decryptor = new NodeRSA( internalPrivateKey );
 decryptor.setOptions({encryptionScheme: 'pkcs1'});
 
 // Set up feed scheduler
-// var scheduler = new feedScheduler(feedsDir, winston, decryptor, () => schedulerUpdatedCallback);
-var scheduler = new feedScheduler(feedsDir, winston, decryptor, (id) => schedulerUpdatedCallback(id));
+var scheduler = new feedScheduler(feedsDir, winston, decryptor, (id) => schedulerUpdatedCallback(id), io);
 
 
 // Create LibreOffice profiles dir
@@ -436,19 +437,8 @@ for (let i = 0; i < useCases.length; i++) {
 
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-////////////////////////////////////////////////////////////////PASSPORT AND MONGOOSE//////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////////KEYS///////////////////////////////////////////////////////////////////////////
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-
-var cookieExtractor = function(req) {
-  // Extract JWT from cookie 'access_token' and return to JwtStrategy
-  // winston.debug("cookieExtractor()", req.cookies);
-  var token = null;
-  if (req && req.cookies)
-  {
-      token = req.cookies['access_token'];
-  }
-  return token;
-};
 
 try {
   var jwtPrivateKey = fs.readFileSync(jwtPrivateKeyFile, 'utf8');
@@ -466,20 +456,6 @@ catch(e) {
   process.exit(1);
 }
 
-var jwtOpts = {
-  jwtFromRequest: ExtractJwt.fromExtractors([cookieExtractor]),
-  secretOrKey: jwtPublicKey,
-  algorithms: ['RS256']
-};
-
-
-// We use mongoose for auth, and MongoClient for everything else.  This is because Passport-Local Mongoose required it, and it is ill-suited to the free-formish objects which we want to use.
-var tokenBlacklist = {};
-
-var mongoUrl = `mongodb://${config['dbConfig']['host']}:${config['dbConfig']['port']}/afb`;
-if (config.dbConfig.authentication.enabled) {
-  mongoUrl = `mongodb://${config.dbConfig.authentication.user}:${config.dbConfig.authentication.password}@${config['dbConfig']['host']}:${config['dbConfig']['port']}/afb?authSource=admin`;
-}
 connectToDB(); // this must come before mongoose user connection so that we know whether to create the default admin account
 
 
@@ -515,6 +491,8 @@ app.post('/api/login', passport.authenticate('local'), (req,res) => {
   });
 });
 
+
+
 app.get('/api/logout', passport.authenticate('jwt', { session: false } ), (req,res) => {
   winston.info('GET /api/logout');
   let decoded = jwt.decode(req.cookies.access_token); //we can use jwt.decode here without signature verification as it's already been verified during authentication
@@ -526,6 +504,8 @@ app.get('/api/logout', passport.authenticate('jwt', { session: false } ), (req,r
   res.clearCookie('access_token');
   res.status(200).send(JSON.stringify( { success: true } ));
 });
+
+
 
 app.get('/api/isloggedin', passport.authenticate('jwt', { session: false } ), (req, res) => {
   winston.debug("GET /api/isloggedin");
@@ -553,10 +533,11 @@ app.get('/api/isloggedin', passport.authenticate('jwt', { session: false } ), (r
 
 //////////////////////SERVER PUBLIC KEY//////////////////////
 
-app.get('/api/publickey', passport.authenticate('jwt', { session: false } ), (req, res)=>{
+/*app.get('/api/publickey', passport.authenticate('jwt', { session: false } ), (req, res)=>{
   winston.debug("GET /api/publickey");
   res.json( { pubKey: internalPublicKey });
 });
+*/
 
 
 
@@ -570,10 +551,10 @@ app.get('/api/publickey', passport.authenticate('jwt', { session: false } ), (re
 
 //////////////////////USE CASES//////////////////////
 
-app.get('/api/usecases', passport.authenticate('jwt', { session: false } ), (req, res) => {
+/*app.get('/api/usecases', passport.authenticate('jwt', { session: false } ), (req, res) => {
   winston.debug("GET /api/usecases");
   res.json( { useCases: useCases } );
-});
+});*/
 
 
 
@@ -584,7 +565,7 @@ app.get('/api/usecases', passport.authenticate('jwt', { session: false } ), (req
 
 //////////////////////USERS//////////////////////
 
-app.get('/api/user', passport.authenticate('jwt', { session: false } ), (req,res) => {
+/*app.get('/api/user', passport.authenticate('jwt', { session: false } ), (req,res) => {
   winston.info('GET /api/user');
   try {
     User.find( (err, users) => {
@@ -601,7 +582,26 @@ app.get('/api/user', passport.authenticate('jwt', { session: false } ), (req,res
   catch(e) {
     winston.error('ERROR GET /api/user:',e);
   }
-});
+});*/
+
+
+
+function emitUsers(sock) {
+  try {
+    User.find( (err, users) => {
+      if (err) {
+        winston.error("obtaining users:", err);
+      }
+      else {
+        sock.emit('users', users);
+      }
+    
+    } );
+  }
+  catch(e) {
+    winston.error('ERROR GET /api/user:',e);
+  }
+}
 
 
 
@@ -640,6 +640,7 @@ app.post('/api/user', passport.authenticate('jwt', { session: false } ), (req, r
     }
     else {
       winston.info("User " + req.body.username + " added user " + u.username);
+      emitUsers(io);
       res.status(201).send( JSON.stringify( { success: true } ) );
     }
   });
@@ -657,6 +658,7 @@ function updateUser(req, res) {
     }
     else {
       winston.info("Updated user with id:", u.id);
+      emitUsers(io);
       res.status(201).send( JSON.stringify( { success: true } ) );
     }
   });
@@ -721,6 +723,7 @@ app.delete('/api/user/:id', passport.authenticate('jwt', { session: false } ), (
         throw err;
       }
       else {
+        emitUsers(io);
         res.status(204).send( JSON.stringify( { success: true } ) );
       }
     } );
@@ -731,8 +734,6 @@ app.delete('/api/user/:id', passport.authenticate('jwt', { session: false } ), (
   }
 });
 
-//login and return JWT
-
 
 
 
@@ -741,7 +742,7 @@ app.delete('/api/user/:id', passport.authenticate('jwt', { session: false } ), (
 
 //////////////////////SERVER VERSION//////////////////////
 
-app.get('/api/version', passport.authenticate('jwt', { session: false } ), (req,res) => {
+/*app.get('/api/version', passport.authenticate('jwt', { session: false } ), (req,res) => {
   // Gets the server version
   winston.info('GET /api/version');
   try {
@@ -751,7 +752,7 @@ app.get('/api/version', passport.authenticate('jwt', { session: false } ), (req,
     winston.error('ERROR GET /api/version:', e);
     res.status(500).send( JSON.stringify( { success: false, error: e.message || e } ) );
   }
-});
+});*/
 
 
 
@@ -808,6 +809,7 @@ app.delete('/api/collection/:id', passport.authenticate('jwt', { session: false 
           if (err) throw err;
           delete collections[id];
           delete collectionsData[id];
+          io.emit('collections', collections);
           res.status(200).send( JSON.stringify( { success: true } ) );
         });
       });
@@ -928,6 +930,7 @@ app.post('/api/collection', passport.authenticate('jwt', { session: false } ), (
 
       db.collection('collectionsData').insertOne( { id: collection.id, data: JSON.stringify(cDef)}, (err) => {
         if (err) throw err;
+        io.emit('collections', collections);
         res.status(201).send( JSON.stringify( { success: true } ) );
       });
     });
@@ -986,6 +989,7 @@ app.post('/api/collection/edit', passport.authenticate('jwt', { session: false }
       db.collection('collectionsData').updateOne( { id: collection.id }, { $set: { data: JSON.stringify(cDef) } }, (err, result) => {
         // Update collection data in mongo
         if (err) throw err;
+        io.emit('collections', collections);
         res.status(205).send( JSON.stringify( { success: true } ) );
       });
     });
@@ -1004,7 +1008,7 @@ app.post('/api/collection/edit', passport.authenticate('jwt', { session: false }
 
 //////////////////////FEEDS//////////////////////
 
-app.get('/api/feed', passport.authenticate('jwt', { session: false } ), (req,res) => {
+/*app.get('/api/feed', passport.authenticate('jwt', { session: false } ), (req,res) => {
   winston.info('GET /api/feeds');
   try {
     res.json(feeds);
@@ -1013,11 +1017,12 @@ app.get('/api/feed', passport.authenticate('jwt', { session: false } ), (req,res
     winston.error('ERROR GET /api/feeds:', e);
     res.status(500).send( JSON.stringify( { success: false, error: e.message || e } ) );
   }
-});
+});*/
 
 
 
 app.post('/api/feed/manual', passport.authenticate('jwt', { session: false } ), upload.single('file'), (req, res) => {
+  // Add a manual feed
   winston.info("POST /api/feed/manual");
   // winston.debug('req:', req);
   let timestamp = new Date().getTime();
@@ -1097,8 +1102,8 @@ app.post('/api/feed/manual', passport.authenticate('jwt', { session: false } ), 
           else 
           {
             feeds[id] = feed;
+            io.emit('feeds', feeds);
             res.status(201).send( JSON.stringify( { success: true } ) );
-            // writeToSocket( feederSocket, JSON.stringify( { feeds: feeds } ) );
             writeToSocket( feederSocket, JSON.stringify( { new: true, feed: feed } ) );
           }
         });
@@ -1113,7 +1118,9 @@ app.post('/api/feed/manual', passport.authenticate('jwt', { session: false } ), 
 });
 
 
+
 app.post('/api/feed/scheduled', passport.authenticate('jwt', { session: false } ), (req, res) => {
+  // Add a scheduled feed
   winston.info("POST /api/feed/scheduled");
   // winston.debug('req:', req);
   let timestamp = new Date().getTime();
@@ -1206,9 +1213,10 @@ app.post('/api/feed/scheduled', passport.authenticate('jwt', { session: false } 
           winston.debug('/api/feed/scheduled: insertOne(): feed added to db');
           feeds[id] = feed;
           scheduler.addFeed(feed);
+          io.emit('feeds', feeds);
+          writeToSocket( feederSocket, JSON.stringify( { new: true, feed: feed } ) ); // let feeder server know of our update
           res.status(201).send( JSON.stringify( { success: true } ) );
           // writeToSocket(feederSocket, JSON.stringify( { feeds: feeds } ) ); // let feeder server know of our update
-          writeToSocket( feederSocket, JSON.stringify( { new: true, feed: feed } ) ); // let feeder server know of our update
         }
       });
     })
@@ -1279,9 +1287,9 @@ app.post('/api/feed/edit/withfile', passport.authenticate('jwt', { session: fals
           }
           else {
             feeds[id] = feed;
-            res.status(201).send( JSON.stringify( { success: true } ) );
-            // writeToSocket( feederSocket, JSON.stringify( { feeds: feeds } ) );
+            io.emit('feeds', feeds);
             writeToSocket( feederSocket, JSON.stringify( { update: true, feed: feed } ) ); // let feeder server know of our update
+            res.status(201).send( JSON.stringify( { success: true } ) );
           }
         });
       }
@@ -1339,16 +1347,17 @@ app.post('/api/feed/edit/withoutfile', passport.authenticate('jwt', { session: f
         }
         else {
           feeds[id] = feed;
+          io.emit('feeds', feeds);
+          writeToSocket( feederSocket, JSON.stringify( { update: true, feed: feed } ) ); // let feeder server know of our update
           res.status(201).send( JSON.stringify( { success: true } ) );
           if (oldFeed.type == 'scheduled') {
             // tell scheduler to remove old feed
             scheduler.delFeed(feed.id);
           }
-          // writeToSocket( feederSocket, JSON.stringify( { feeds: feeds } ) );
-          writeToSocket( feederSocket, JSON.stringify( { update: true, feed: feed } ) ); // let feeder server know of our update
         }
       });
     }
+
     else {
       // scheduled feed
       // always pull feed anew.  this will save on funky logic
@@ -1376,13 +1385,13 @@ app.post('/api/feed/edit/withoutfile', passport.authenticate('jwt', { session: f
             winston.debug('/api/feed/edit/withoutfile: updateOne(): feed modified in db');
             // calculate file hash for feed file
             feeds[id] = feed;
-            
+            io.emit('feeds', feeds);
             scheduler.updateFeed(feed);
-            
+            writeToSocket( feederSocket, JSON.stringify( { update: true, feed: feed } ) ); // let feeder server know of our update
             res.status(201).send( JSON.stringify( { success: true } ) );
+            
             //notify scheduler of update here
             // writeToSocket(feederSocket, JSON.stringify( { feeds: feeds } ) ); // let feeder server know of our update
-            writeToSocket( feederSocket, JSON.stringify( { update: true, feed: feed } ) ); // let feeder server know of our update
           }
         });
       })
@@ -1510,6 +1519,8 @@ app.post('/api/feed/testurl', passport.authenticate('jwt', { session: false } ),
   });
 });
 
+
+
 app.get('/api/feed/filehead/:id', passport.authenticate('jwt', { session: false } ), (req, res) => {
   try {
     let id = req.params.id;
@@ -1596,7 +1607,6 @@ app.get('/api/feed/filehead/:id', passport.authenticate('jwt', { session: false 
 
 
 
-
 app.delete('/api/feed/:id', passport.authenticate('jwt', { session: false } ), (req, res) => {
   // delete a feed
   let id = req.params.id;
@@ -1612,11 +1622,10 @@ app.delete('/api/feed/:id', passport.authenticate('jwt', { session: false } ), (
           if (err) throw err;
           
           delete feeds[id];
-          res.status(200).send( JSON.stringify( { success: true } ) );
-          // console.log(feederSocket);
-          // writeToSocket(feederSocket, JSON.stringify( { feeds: feeds } ) ); // let feeder server know of our update
-          scheduler.delFeed(id);
+          io.emit('feeds', feeds);
           writeToSocket( feederSocket, JSON.stringify( { delete: true, id: id } ) ); // let feeder server know of our update
+          res.status(200).send( JSON.stringify( { success: true } ) );
+          scheduler.delFeed(id);
         });
       });
     }
@@ -1639,7 +1648,7 @@ app.delete('/api/feed/:id', passport.authenticate('jwt', { session: false } ), (
 });
 
 
-app.get('/api/feed/status', passport.authenticate('jwt', { session: false } ), (req, res) => {
+/*app.get('/api/feed/status', passport.authenticate('jwt', { session: false } ), (req, res) => {
   try {
     res.status(200).send( JSON.stringify( scheduler.status() ) );
   }
@@ -1647,7 +1656,7 @@ app.get('/api/feed/status', passport.authenticate('jwt', { session: false } ), (
     winston.error(`ERROR GET /api/feed/status :`, e);
     res.status(500).send( JSON.stringify( { success: false, error: e.message || e } ) );
   }
-});
+});*/
 
 
 
@@ -1658,7 +1667,7 @@ app.get('/api/feed/status', passport.authenticate('jwt', { session: false } ), (
 
 //////////////////////NWSERVERS//////////////////////
 
-app.get('/api/nwserver', passport.authenticate('jwt', { session: false } ), (req, res) => {
+/*app.get('/api/nwserver', passport.authenticate('jwt', { session: false } ), (req, res) => {
   winston.info('GET /api/nwserver');
   try {
     let servers = JSON.parse(JSON.stringify(nwservers));  // make deep copy of nwservers
@@ -1675,15 +1684,19 @@ app.get('/api/nwserver', passport.authenticate('jwt', { session: false } ), (req
     res.status(500).send( JSON.stringify( { success: false, error: e.message || e } ) );
   }
 });
+*/
+
+
 
 app.delete('/api/nwserver/:id', passport.authenticate('jwt', { session: false } ), (req, res) => {
   let servId = req.params.id;
   winston.info(`DELETE /api/nwserver/${servId}`);
   try {
     delete nwservers[servId];
-    res.status(200).send( JSON.stringify( { success: true } ) );
-    db.collection('nwservers').remove( { 'id': servId }, (err, res) => {
+    db.collection('nwservers').remove( { 'id': servId }, (err, result) => {
       if (err) throw err;
+      io.emit('nwservers', redactApiServerPasswords(nwservers));
+      res.status(200).send( JSON.stringify( { success: true } ) );
     });
   }
   catch(e) {
@@ -1691,6 +1704,8 @@ app.delete('/api/nwserver/:id', passport.authenticate('jwt', { session: false } 
     res.status(500).send( JSON.stringify( { success: false, error: e.message || e } ) );
   }
 });
+
+
 
 app.post('/api/nwserver', passport.authenticate('jwt', { session: false } ), (req, res) => {
   // for adding a netwitness server
@@ -1721,17 +1736,19 @@ app.post('/api/nwserver', passport.authenticate('jwt', { session: false } ), (re
       throw("'ssl' is not defined");
     }
     nwservers[id] = nwserver;
-    db.collection('nwservers').insertOne( nwserver, (err, res) => {
+    db.collection('nwservers').insertOne( nwserver, (err, result) => {
       if (err) throw err;
+      io.emit('nwservers', redactApiServerPasswords(nwservers));
+      res.status(201).send( JSON.stringify( { success: true } ) );
     });
     
-    res.status(201).send( JSON.stringify( { success: true } ) );
   }
   catch(e) {
     winston.error("POST /api/nwserver: " + e);
     res.status(500).send( JSON.stringify( { success: false, error: e.message || e } ) );
   }
 });
+
 
 
 app.post('/api/nwserver/edit', passport.authenticate('jwt', { session: false } ), (req, res) => {
@@ -1763,17 +1780,20 @@ app.post('/api/nwserver/edit', passport.authenticate('jwt', { session: false } )
       throw("'ssl' is not defined");
     }
     nwservers[id] = nwserver;
-    db.collection('nwservers').updateOne( { id: id }, { $set: nwserver }, (err, res) => {
+    db.collection('nwservers').updateOne( { id: id }, { $set: nwserver }, (err, result) => {
       if (err) throw err;
+      io.emit('nwservers', redactApiServerPasswords(nwservers));
+      res.status(200).send( JSON.stringify( { success: true } ) );
     });
     
-    res.status(200).send( JSON.stringify( { success: true } ) );
   }
   catch(e) {
     winston.error("POST /api/nwserver/edit: " + e);
     res.status(500).send( JSON.stringify( { success: false, error: e.message || e } ) );
   }
 });
+
+
 
 app.post('/api/nwserver/test', passport.authenticate('jwt', { session: false } ), (req, res) => {
   winston.info("POST /api/nwserver/test");
@@ -1843,7 +1863,7 @@ app.post('/api/nwserver/test', passport.authenticate('jwt', { session: false } )
 
 //////////////////////SASERVERS//////////////////////
 
-app.get('/api/saserver', passport.authenticate('jwt', { session: false } ), (req, res) => {
+/*app.get('/api/saserver', passport.authenticate('jwt', { session: false } ), (req, res) => {
   winston.info('GET /api/saserver');
   try {
     let servers = JSON.parse(JSON.stringify(saservers));  // make deep copy of saservers
@@ -1860,15 +1880,19 @@ app.get('/api/saserver', passport.authenticate('jwt', { session: false } ), (req
     res.status(500).send( JSON.stringify( { success: false, error: e.message || e } ) );
   }
 });
+*/
+
+
 
 app.delete('/api/saserver/:id', passport.authenticate('jwt', { session: false } ), (req, res) => {
   let servId = req.params.id;
   winston.info(`DELETE /api/saserver/${servId}`);
   try {
     delete saservers[servId];
-    res.status(200).send( JSON.stringify( { success: true } ) );
-    db.collection('saservers').remove( { 'id': servId }, (err, res) => {
+    db.collection('saservers').remove( { 'id': servId }, (err, result) => {
       if (err) throw err;
+      io.emit('saservers', redactApiServerPasswords(saservers));
+      res.status(200).send( JSON.stringify( { success: true } ) );
     });
   }
   catch(e) {
@@ -1876,6 +1900,8 @@ app.delete('/api/saserver/:id', passport.authenticate('jwt', { session: false } 
     res.status(500).send( JSON.stringify( { success: false, error: e.message || e } ) );
   }
 });
+
+
 
 app.post('/api/saserver', passport.authenticate('jwt', { session: false } ), (req, res) => {
   // for adding a netwitness server
@@ -1906,17 +1932,19 @@ app.post('/api/saserver', passport.authenticate('jwt', { session: false } ), (re
       throw("'ssl' is not defined");
     }
     saservers[id] = saserver;
-    db.collection('saservers').insertOne( saserver, (err, res) => {
+    db.collection('saservers').insertOne( saserver, (err, result) => {
       if (err) throw err;
+      io.emit('saservers', redactApiServerPasswords(saservers));
+      res.status(201).send( JSON.stringify( { success: true } ) );
     });
     
-    res.status(201).send( JSON.stringify( { success: true } ) );
   }
   catch(e) {
     winston.error("POST /api/saserver: " + e);
     res.status(500).send( JSON.stringify( { success: false, error: e.message || e } ) );
   }
 });
+
 
 
 app.post('/api/saserver/edit', passport.authenticate('jwt', { session: false } ), (req, res) => {
@@ -1948,17 +1976,20 @@ app.post('/api/saserver/edit', passport.authenticate('jwt', { session: false } )
       throw("'ssl' is not defined");
     }
     saservers[id] = saserver;
-    db.collection('saservers').updateOne( { id: id }, { $set: saserver }, (err, res) => {
+    db.collection('saservers').updateOne( { id: id }, { $set: saserver }, (err, result) => {
       if (err) throw err;
+      io.emit('saservers', redactApiServerPasswords(saservers));
+      res.status(200).send( JSON.stringify( { success: true } ) );
     });
     
-    res.status(200).send( JSON.stringify( { success: true } ) );
   }
   catch(e) {
     winston.error("POST /api/saserver/edit: " + e);
     res.status(500).send( JSON.stringify( { success: false, error: e.message || e } ) );
   }
 });
+
+
 
 app.post('/api/saserver/test', passport.authenticate('jwt', { session: false } ), (req, res) => {
   winston.info("POST /api/saserver/test");
@@ -2043,7 +2074,7 @@ app.post('/api/saserver/test', passport.authenticate('jwt', { session: false } )
 
 //////////////////////PING//////////////////////
 
-app.get('/api/ping', (req, res)=>{
+app.get('/api/ping', (req, res) => {
   //winston.debug("GET /api/ping");
   res.status(200).send( JSON.stringify( { success: true } ) );
 });
@@ -2055,6 +2086,7 @@ app.get('/api/ping', (req, res)=>{
 
 //////////////////////PREFERENCES//////////////////////
 
+/*
 app.get('/api/preferences', passport.authenticate('jwt', { session: false } ), (req, res) => {
   winston.info("GET /api/preferences");
   try {
@@ -2065,6 +2097,9 @@ app.get('/api/preferences', passport.authenticate('jwt', { session: false } ), (
     res.status(500).send( JSON.stringify( { success: false, error: e.message || e } ) );
   }
 });
+*/
+
+
 
 app.post('/api/preferences', passport.authenticate('jwt', { session: false } ), (req, res) => {
   winston.info("POST /api/preferences");
@@ -2095,13 +2130,12 @@ app.post('/api/preferences', passport.authenticate('jwt', { session: false } ), 
       }
     }
   
-
     db.collection('preferences').updateOne( {}, prefs, (err, result) => {
       if (err) throw err;
       preferences = prefs;
+      io.emit('preferences', preferences);
       res.status(201).send( JSON.stringify( { success: true } ) );
     });
-
 
   }
   catch(e) {
@@ -2127,13 +2161,6 @@ app.post('/api/preferences', passport.authenticate('jwt', { session: false } ), 
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
 
-/*
-app.get('/api/collection/fixed/build/:id', passport.authenticate('jwt', { session: false } ), (req, res) => {
-  // kicks off the building of a fixed collection
-  // WE NEED TO MERGE THIS FUNCTIONALITY INTO GET /api/collection/fixed/:id
-  fixedHandler.handleFixedConnection(req, res);
-});
-*/
 
 
 function updateFixedCollectionsDbCallback(collectionId, collection) {
@@ -2150,6 +2177,7 @@ function updateFixedCollectionsDbCallback(collectionId, collection) {
     log.error('updateFixedCollectionsDbCallback(): caught exception when updating database:', e);
   }
 }
+
 
 
 app.get('/api/collection/fixed/:id', passport.authenticate('jwt', { session: false } ), (req, res) => {
@@ -2179,900 +2207,22 @@ app.get('/api/collection/fixed/:id', passport.authenticate('jwt', { session: fal
 
 
 
-/*app.get('/aapi/collection/fixed/:id', passport.authenticate('jwt', { session: false } ), (req, res)=>{ 
-  // Returns a streaming fixed collection which is in the process of building
-  var id = req.params.id;
-  winston.info('GET /api/collection/fixed/:id', id);
-  //winston.debug('buildingFixedCollections',buildingFixedCollections);
-  try {
-    if (buildingFixedCollections[id]) {
-      //winston.debug('playing back collection which is in the process of building');
-      res.writeHead(200, {'Content-Type': 'application/json','Content-Disposition': 'inline' });
-      res.write('['); // Open the array so that oboe can see it
-      res.flush();
-      var subject = buildingFixedCollections[id].observable; //get our observable
-
-      //play back the data already in buildingFixedCollections. we must play back sessions and images separately as there are generally more images than sessions
-      for (var i=0; i < buildingFixedCollections[id].sessions.length; i++) {
-        let resp = {
-          collectionUpdate: {
-            session: buildingFixedCollections[id].sessions[i]
-          }
-        };
-        res.write(JSON.stringify(resp) + ',');
-        res.flush();
-      }
-      
-      //now play back images
-      for (var i=0; i < buildingFixedCollections[id].images.length; i++) {
-        let resp = {
-          collectionUpdate: {
-            images: [ buildingFixedCollections[id].images[i] ]
-          }
-        };
-        res.write(JSON.stringify(resp) + ',');
-        res.flush();
-      }
-      
-      //now play back search text
-      winston.debug("Playing back search");
-      if (buildingFixedCollections[id].search) {
-        for (var i=0; i < buildingFixedCollections[id].search.length; i++) {
-          let resp = {
-            collectionUpdate: {
-              search: buildingFixedCollections[id].search[i]
-            }
-          };
-          res.write(JSON.stringify(resp) + ',');
-          res.flush();
-        }
-      }
-    
-      subject.subscribe( (output) => { 
-        // data from observable
-        res.write(JSON.stringify(output) + ',');
-        res.flush();
-      }
-      ,(e) => { throw(e); } // errors from observable
-      ,( ) => { 
-        winston.debug('ending observable'); // end of observable
-        res.write('{"close":true}]'); // Close the array so that oboe knows we're done
-        res.flush();
-        res.end();
-      });
-    }
-
-
-    else if (collections[id].state === 'complete') { //if collection is already complete, play it back (probably won't happen in real life, but we will accommodate it anyway, just in case)
-      winston.info('playing back collection', id);
-      res.set('Content-Type', 'application/json');
-      res.set('Content-Disposition', 'inline');
-      res.set(200);
-      for (var i=0; i < collectionsData[id].images.length; i++) { //play back the content and session data already in buildingFixedCollections
-        var sessionId = collectionsData[id].images[i].session;
-        let resp = {
-          collectionUpdate: {
-            images: [ collectionsData[id].images[i] ],
-            session: collectionsData[id].sessions[sessionId],
-          }
-        };
-        res.write(JSON.stringify(resp) + ',');
-        res.flush();
-      }
-
-      if (buildingFixedCollections[id].search) {
-        for (var i=0; i < collectionsData[id].search.length; i++) { //now play back the search info
-          let resp = {
-            collectionUpdate: {
-              search: [ collectionsData[id].search[i] ],
-            }
-          };
-          res.write(JSON.stringify(resp) + ',');
-          res.flush();
-        }
-      }
-
-      res.write('{"close":true}]'); // Close the array so that oboe knows we're done
-      res.flush();
-      res.end();
-    }
-    else {
-      throw('Collection ' + id + ' not found');
-    }
-  }
-  catch(e) {
-    winston.error('ERROR GET /api/collection/fixed/:id', e);
-    res.status(500).send( JSON.stringify( { success: false, error: e.message || e } ) );
-  }
-});
-*/
-
-
-/*
-var buildingFixedCollections = {}; // We shall house fixed collections which are under construction here
-
-function fixedSocketConnectionHandler(id, socket, tempName, subject) {
-  // For building fixed collections
-
-  winston.info("fixedSocketConnectionHandler(): Connection received from worker to build collection", id);
-  let thisCollection = collections[id];
-  
-  //////////////////////////////////
-  //Build the worker configuration//
-  //////////////////////////////////
-
-  let cfg = { 
-    id: id,
-    collectionId: id, // we include this to disambiguate a difference in monitoring collections between id and collectionId
-    state: 'building',
-    timeBegin: thisCollection.timeBegin,
-    timeEnd: thisCollection.timeEnd,
-    contentLimit: thisCollection.contentLimit,
-    minX: thisCollection.minX,
-    minY: thisCollection.minY,
-    gsPath: gsPath,
-    pdftotextPath: pdftotextPath,
-    sofficePath: sofficePath,
-    sofficeProfilesDir: sofficeProfilesDir,
-    unrarPath: unrarPath,
-    collectionsDir: collectionsDir,
-    privateKeyFile: internalPrivateKeyFile,
-    useHashFeed: thisCollection.useHashFeed,
-    serviceType: thisCollection.serviceType
-  };
-
-  if (thisCollection.serviceType == 'nw') {
-    cfg['summaryTimeout'] = preferences.nw.summaryTimeout;
-    cfg['queryTimeout'] = preferences.nw.queryTimeout;
-    cfg['contentTimeout'] = preferences.nw.contentTimeout;
-    cfg['maxContentErrors'] = preferences.nw.maxContentErrors;
-  }
-
-  if (thisCollection.serviceType == 'sa') {
-    cfg['queryTimeout'] = preferences.sa.queryTimeout;
-    cfg['contentTimeout'] = preferences.sa.contentTimeout;
-    cfg['maxContentErrors'] = preferences.sa.maxContentErrors;
-  }
-
-  if (thisCollection.bound) {
-    // This is an OOTB use case
-    let useCaseName = thisCollection.usecase;
-    let useCase = useCasesObj[useCaseName];
-    cfg['query'] = useCase.query;
-    cfg['contentTypes'] = useCase.contentTypes;
-    cfg['distillationEnabled'] = false;
-    if ('distillationTerms' in useCase) {
-      cfg['distillationEnabled'] = true;
-      cfg['distillationTerms'] = useCase.distillationTerms;
-    }
-    cfg['regexDistillationEnabled'] = false;
-    if ('regexTerms' in useCase) {
-      cfg['regexDistillationEnabled'] = true;
-      cfg['regexDistillationTerms'] = useCase.regexTerms;
-    }
-    // we don't yet support any hashing in OOTB use cases
-  }
-  else {
-    // This is custom use case, not an OOTB use case
-
-    cfg['distillationEnabled'] = thisCollection.distillationEnabled;
-    cfg['regexDistillationEnabled'] = thisCollection.regexDistillationEnabled;
-
-    if (!thisCollection.useHashFeed) {
-      // we're not using a hash feed
-      cfg['md5Enabled'] = thisCollection.md5Enabled;
-      cfg['sha1Enabled'] = thisCollection.sha1Enabled;
-      cfg['sha256Enabled'] = thisCollection.sha256Enabled;
-      if ('md5Hashes' in thisCollection) {
-        cfg['md5Hashes'] = thisCollection.md5Hashes;
-      }
-      if ('sha1Hashes' in thisCollection) {
-        cfg['sha1Hashes'] = thisCollection.sha1Hashes;
-      }
-      if ('sha256Hashes' in thisCollection) {
-        cfg['sha256Hashes'] = thisCollection.sha256Hashes;
-      }
-    }
-    else {
-      // we're using a hash feed
-      cfg['hashFeed'] = feeds[thisCollection.hashFeed] // pass the hash feed definition
-      cfg['hashFeederSocket'] = feederSocketFile
-    }
-
-    cfg['query'] = thisCollection.query;
-    cfg['contentTypes'] = thisCollection.contentTypes;
-  
-    if ('distillationTerms' in thisCollection) {
-      cfg['distillationTerms'] = thisCollection.distillationTerms;
-    }
-    if ('regexDistillationTerms' in thisCollection) {
-      cfg['regexDistillationTerms'] = thisCollection.regexDistillationTerms;
-    }
-  }
-
-  if (thisCollection.serviceType == 'nw') {
-    let nwserver = nwservers[thisCollection.nwserver];
-    for (var k in nwserver) {
-
-      if (nwserver.hasOwnProperty(k) && k != 'id' && k != '_id') {
-        cfg[k] = nwserver[k];  // assign properties of nwserver to the collection cfg
-      }
-    }
-  }
-  if (thisCollection.serviceType == 'sa') {
-    let saserver = saservers[thisCollection.saserver];
-    for (var k in saserver) {
-      if (saserver.hasOwnProperty(k) && k != 'id' && k != '_id') {
-        cfg[k] = saserver[k];  // assign properties of saserver to the collection cfg
-      }
-    }
-  }
-
-  let outerCfg = { workerConfig: cfg };
-
-  
-
-  ////////////////////////
-  //DEAL WITH THE SOCKET//
-  ////////////////////////
-
-  // Tell our subscribers that we're building, so they can start their spinny icon
-  subject.next({collection: { id: id, state: 'building'}});
-
-  // Buffer for worker data
-  var data = '';
-  
-  // Set socket options
-  socket.setEncoding('utf8');
-
-  //Handle data from the socket (this really builds the collection)
-  socket.on('data', chunk => data = chunkHandler(buildingFixedCollections, id, subject, data, chunk) );
-  
-  //Now that we've finished building the new collection, emit a finished signal, and merge the new collection into the collectionsData object, and delete the object from buildingFixedCollections
-  socket.on('end', () => {
-    winston.debug('Worker disconnected.  Merging temporary collection into permanent collection');
-    if (id in collectionsData) { // needed in case the collection has been deleted whilst still building
-      collectionsData[id].images = buildingFixedCollections[id].images;
-      collectionsData[id].search = buildingFixedCollections[id].search;
-      for (var e in buildingFixedCollections[id].sessions) {
-        let s = buildingFixedCollections[id].sessions[e];
-        let sid = s.id;
-        collectionsData[id].sessions[sid] = s;
-      }
-    }
-    //moved into process exit
-    winston.debug('Temporary collection merged into main branch.  Deleting temporary collection.');
-    delete buildingFixedCollections[id];
-    fs.unlink(tempName, () => {});
-  });
-                          
-  // Send configuration to worker.  This officially kicks off the work.  After this, we should start receiving data on the socket
-  writeToSocket(socket, JSON.stringify(outerCfg));
-  
-}
-*/
-
-/*
-function buildFixedCollection(id) {
-  // Builds fixed collections
-
-  winston.debug('buildFixedCollection(): Building collection', id);
-  
-  try {
-    let thisCollection = collections[id];
-    thisCollection['state'] = 'building';
-    //Build observable which we can use to notify others of new additions to the collection
-    var subject = new Subject();
-    buildingFixedCollections[id] = {
-      observable: subject, //we add the observable subject object to the object so we can get it later
-      images: [],
-      sessions: []
-    };
-    var tempName = temp.path({suffix: '.socket'});
-    //open UNIX domain socket to talk to worker script
-    var socketServer = net.createServer( (socket) => { fixedSocketConnectionHandler(id, socket, tempName, subject); });
-    socketServer.listen(tempName, () => {
-      winston.debug('Listening for worker communication');
-      winston.debug("Spawning worker with socket file " + tempName);
-      var worker = spawn('./worker_stub.py', [tempName], { shell: false, stdio: 'inherit'});
-      worker.on('exit', (code) => {
-        if (typeof code === 'undefined') {
-          winston.debug('Worker process exited abnormally without an exit code');
-          thisCollection['state'] = 'error';
-          subject.next({collection: { id: id, state: 'error'}});
-        }
-        else if (code != 0) {
-          winston.debug('Worker process exited abnormally with exit code',code.toString());
-          thisCollection['state'] = 'error';
-          subject.next({collection: { id: id, state: 'error'}});
-        }
-        else {
-          winston.debug('Worker process exited normally with exit code', code.toString());
-          thisCollection['state'] = 'complete';
-          subject.next({collection: { id: id, state: 'complete'}});
-          db.collection('collections').update( {'id': id }, thisCollection, (err, res) => {
-            if (err) throw err;
-          });
-          db.collection('collectionsData').update( {'id': id }, {'id': id, 'data': JSON.stringify(collectionsData[id])}, (err, res) => {
-            if (err) throw err;
-          });
-        }
-        subject.complete();
-        
-      });
-    });
-  }
-  catch(e) {
-    winston.error("buildFixedCollection(): Caught error:",e);
-  }
-
-}*/
-
-
-
-/*app.get('/api/collection/fixed/build/:id', passport.authenticate('jwt', { session: false } ), (req, res)=>{
-  // builds a fixed collection
-  let id = req.params.id;
-  winston.info('GET /api/collection/fixed/build/' + id);
-  let thisCollection = collections[id];
-  try {
-    if (thisCollection.bound && !('usecase' in thisCollection )) {
-      throw(`Bound collection ${id} does not have a use case defined`);
-    }
-    if (thisCollection.bound && !(thisCollection.usecase in useCasesObj) ) {
-      throw(`Use case ${thisCollection.usecase} in bound collection ${id} is not a valid use case`);
-    }
-    if (thisCollection.state === 'initial') {
-      res.status(202).send( JSON.stringify( { success: true } ) );
-    }
-    else {
-      throw(`Collection ${id} is not in its initial state`);
-    }
-  }
-  catch (e) {
-    winston.error(`GET /api/collection/fixed/build/${id}:`, e);
-    res.status(500).send( JSON.stringify( { success: false, error: e.message || e } ) );
-    return;
-  }
-  buildFixedCollection(id);
-});*/
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-////////////////////////////////////////////////////////////////ROLLING COLLECTIONS////////////////////////////////////////////////////////////////
-///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-
-
-
-/*function rollingSubjectWatcher(req, res, output) {
-  //The only job of this function is to take the output of our collection observable, and write it to the HTTP response stream so our client can see it
-  
-  //winston.debug("rollingSubjectWatcher()", output);
-  //res.write(JSON.stringify(output));
-  res.write(JSON.stringify(output) + ',');
-  res.flush();
-}
-*/
-
-// var rollingCollectionSubjects = {};
-// This contains observables for rolling collections, which can be subscribed to by new connections into a rolling collection
-// One observable per-collection
-/*
-rollingCollectionSubjects = { 
-  'collectionId' : { 
-    worker: 'spawned worker object',
-    interval: 'intervalObject for 60 second loop of worker',
-    observers: 'the number of clients watching this rolling collection',
-    subject: 'rxjs observable for the collection which can be used to pipe output back to the client',
-    lastRun: 'the time it was last run',
-    paused: boolean (paused state of a monitoring collection),
-    runs: 'number of times rollingCollectionSocketConnectionHandler() has run',
-    socket: the unix socket
-  },
-  'collectionId2': ...
-}
-*/
-
-
-// var rollingCollections = {}; // This houses collection data for rolling and monitoring collections.  It is never committed to the DB as these collections are intended to be temporary only
-
-/*
-function rollingCollectionSocketConnectionHandler(id, socket, tempName, subject, clientSessionId) {
-  // For rolling and monitoring collections
-  // Handles all dealings with the worker process after it has been spawned, including sending it its configuration, and sending data received from it to the chunkHandler() function
-  // It also purges old data from the collection as defined by the type of collection and number of hours back to retain
-
-  let rollingId = id;
-  if (clientSessionId != '') {
-    rollingId = clientSessionId;
-  }
-
-  let thisRollingCollection =  rollingCollections[rollingId];
-  let thisRollingCollectionSubject = rollingCollectionSubjects[rollingId];
-  let thisCollection = collections[id];
-
-  thisRollingCollectionSubject.runs++;
-  
-  winston.debug("rollingCollectionSocketConnectionHandler(): Connection received from worker to build rolling or monitoring collection", rollingId);
-  
-  let ourState = '';
-  // Tell our subscribed clients that we're rolling, so they can start their spinny icon and whatnot
-  if (thisCollection.type === 'monitoring') {
-    ourState = 'monitoring';
-  }
-  else if (thisCollection.type === 'rolling') {
-    ourState = 'rolling';
-  }
-  subject.next({collection: { id: id, state: ourState}});
-
-
-  ///////////////////////////
-  //PURGE AGED-OUT SESSIONS//
-  ///////////////////////////
-
-  if (thisCollection.type === 'monitoring') {
-    thisRollingCollection.sessions = [];
-    thisRollingCollection.images = [];
-    thisRollingCollection.search = [];
-  }
-  else if (thisRollingCollectionSubject.runs > 1 && thisCollection.type === 'rolling') {
-    // Purge events older than thisCollection.lastHours
-
-    winston.debug('Running purge routine');
-    let sessionsToPurge = [];
-
-    // Calculate the maximum age a given session is allowed to be
-    // let maxTime = thisCollection.lastRun - thisCollection.lastHours * 60 * 60;
-    // if (purgeHack) { maxTime = thisCollection.lastRun - 60 * 5; } // 5 minute setting used for testing
-    let maxTime = thisRollingCollectionSubject.lastRun - thisCollection.lastHours * 60 * 60;
-    if (purgeHack) { maxTime = thisRollingCollectionSubject.lastRun - 60 * 5; } // 5 minute setting used for testing
-
-
-    for (let i=0; i < thisRollingCollection.sessions.length; i++) {
-      // Look at each session and determine whether it is older than maxtime
-      // If so, add it to purgedSessionPositions and sessionsToPurge
-      let session = thisRollingCollection.sessions[i];
-      let sid = session.id;
-      if ( session.meta.time < maxTime ) {
-        sessionsToPurge.push(sid);
-      }
-    }
-
-    purgeSessions(thisRollingCollection, sessionsToPurge.slice());
-   
-    // Notify the client of our purged sessions
-    if (sessionsToPurge.length > 0) {
-      let update = { collectionPurge: sessionsToPurge };
-      subject.next(update);
-    }
-    
-  }
-
-  //////////////////////////////////
-  //Build the worker configuration//
-  //////////////////////////////////
-
-  let cfg = {
-    // id: id,
-    id: rollingId,
-    collectionId: id, // original collection ID
-    state: ourState,
-    contentLimit: thisCollection.contentLimit,
-    minX: thisCollection.minX,
-    minY: thisCollection.minY,
-    gsPath: gsPath,
-    pdftotextPath: pdftotextPath,
-    sofficePath: sofficePath,
-    sofficeProfilesDir: sofficeProfilesDir,
-    unrarPath: unrarPath,
-    collectionsDir: collectionsDir,
-    privateKeyFile: internalPrivateKeyFile,
-    useHashFeed: thisCollection.useHashFeed,
-    serviceType: thisCollection.serviceType
-
-    // query: thisCollection.query,
-    // regexDistillationEnabled: thisCollection.regexDistillationEnabled,
-    // md5Enabled: thisCollection.md5Enabled,
-    // sha1Enabled: thisCollection.sha1Enabled,
-    // sha256Enabled: thisCollection.sha256Enabled,
-    // contentTypes: collections[id].contentTypes,
-    // distillationEnabled: thisCollection.distillationEnabled
-  };
-
-  if (thisCollection.serviceType == 'nw') {
-    cfg['summaryTimeout'] = preferences.nw.summaryTimeout;
-    cfg['queryTimeout'] = preferences.nw.queryTimeout;
-    cfg['contentTimeout'] = preferences.nw.contentTimeout;
-    cfg['maxContentErrors'] = preferences.nw.maxContentErrors;
-  }
-
-  if (thisCollection.serviceType == 'sa') {
-    cfg['queryTimeout'] = preferences.sa.queryTimeout;
-    cfg['contentTimeout'] = preferences.sa.contentTimeout;
-    cfg['maxContentErrors'] = preferences.sa.maxContentErrors;
-  }
-
-  if (thisCollection.bound) {
-    // This is an OOTB use case
-    let useCaseName = thisCollection.usecase;
-    let useCase = useCasesObj[useCaseName];
-    cfg['query'] = useCase.query;
-    cfg['contentTypes'] = useCase.contentTypes;
-    cfg['distillationEnabled'] = false;
-    if ('distillationTerms' in useCase) {
-      cfg['distillationEnabled'] = true;
-      cfg['distillationTerms'] = useCase.distillationTerms;
-    }
-    cfg['regexDistillationEnabled'] = false;
-    if ('regexTerms' in useCase) {
-      cfg['regexDistillationEnabled'] = true;
-      cfg['regexDistillationTerms'] = useCase.regexTerms;
-    }
-    // we don't yet support any hashing in OOTB use cases
-  }
-  else {
-    // This is not an OOTB use case
-    cfg['distillationEnabled'] = thisCollection.distillationEnabled;
-    cfg['regexDistillationEnabled'] = thisCollection.regexDistillationEnabled;
-    
-    if (!thisCollection.useHashFeed) {
-      // we're not using a hash feed
-      cfg['md5Enabled'] = thisCollection.md5Enabled;
-      cfg['sha1Enabled'] = thisCollection.sha1Enabled;
-      cfg['sha256Enabled'] = thisCollection.sha256Enabled;
-      if ('md5Hashes' in thisCollection) {
-        cfg['md5Hashes'] = thisCollection.md5Hashes;
-      }
-      if ('sha1Hashes' in thisCollection) {
-        cfg['sha1Hashes'] = thisCollection.sha1Hashes;
-      }
-      if ('sha256Hashes' in thisCollection) {
-        cfg['sha256Hashes'] = thisCollection.sha256Hashes;
-      }
-    }
-    else {
-      // we're using a hash feed
-      cfg['hashFeed'] = feeds[thisCollection.hashFeed] // pass the hash feed definition
-      cfg['hashFeederSocket'] = feederSocketFile
-    }
-
-    cfg['query'] = thisCollection.query;
-    cfg['contentTypes'] = thisCollection.contentTypes;
-  
-    if ('distillationTerms' in thisCollection) {
-      cfg['distillationTerms'] = thisCollection.distillationTerms;
-    }
-    if ('regexDistillationTerms' in thisCollection) {
-      cfg['regexDistillationTerms'] = thisCollection.regexDistillationTerms;
-    } 
-  }
-
-  let queryDelaySeconds = preferences.nw.queryDelayMinutes * 60;
-
-  if (thisCollection.type === 'monitoring') {
-    // If this is a monitoring collection, then set timeEnd and timeBegin to be a one minute window
-    cfg['timeEnd'] = moment().startOf('minute').unix() - 61 - queryDelaySeconds;
-    cfg['timeBegin'] = ( cfg['timeEnd'] - 60) + 1;
-  }
-  
-  else if (thisRollingCollectionSubject.runs == 1) {
-    // This is the first run of a rolling collection
-    winston.debug('rollingCollectionSocketConnectionHandler(): Got first run');
-    cfg['timeEnd'] = moment().startOf('minute').unix() - 61 - queryDelaySeconds; // the beginning of the last minute minus one second, to give time for sessions to leave the assembler
-    cfg['timeBegin'] = ( cfg['timeEnd'] - (thisCollection.lastHours * 60 * 60) ) + 1;
-  }
-  
-  else if (thisRollingCollectionSubject.runs == 2 && (moment().unix() - thisRollingCollectionSubject['lastRun'] >= 61) ) {
-    // This is the second run of a rolling collection - this allows the first run to exceed one minute of execution and will take up whatever excess time has elapsed
-    // It will only enter this block if more than 61 seconds have elapsed since the last run
-    winston.debug('rollingCollectionSocketConnectionHandler(): Got second run');
-    cfg['timeBegin'] = thisRollingCollectionSubject['lastRun'] + 1; // one second after the last run
-    cfg['timeEnd'] = moment().startOf('minute').unix() - 61 - queryDelaySeconds; // the beginning of the last minute minus one second, to give time for sessions to leave the assembler
-  }  
-
-  else {
-    // This is the third or greater run of a rolling collection
-    winston.debug('rollingCollectionSocketConnectionHandler(): Got subsequent run');
-    cfg['timeBegin'] = thisRollingCollectionSubject['lastRun'] + 1; // one second after the last run
-    cfg['timeEnd'] = cfg['timeBegin'] + 60; //add one minute to cfg[timeBegin]
-  }
-
-  thisRollingCollectionSubject['lastRun'] = cfg['timeEnd']; //store the time of last run so that we can reference it the next time we loop
-
-  if ('distillationTerms' in thisCollection) {
-    cfg['distillationTerms'] = thisCollection.distillationTerms;
-  }
-  if ('regexDistillationTerms' in thisCollection) {
-    cfg['regexDistillationTerms'] = thisCollection.regexDistillationTerms;
-  }
-  if ('md5Hashes' in thisCollection) {
-    cfg['md5Hashes'] = thisCollection.md5Hashes;
-  }
-  if ('sha1Hashes' in thisCollection) {
-   cfg['sha1Hashes'] = thisCollection.sha1Hashes;
-  }
-  if ('sha256Hashes' in thisCollection) {
-   cfg['sha256Hashes'] = thisCollection.sha256Hashes;
-  }
-
-  if (thisCollection.serviceType == 'nw') {
-    let nwserver = nwservers[thisCollection.nwserver];
-    for (var k in nwserver) {
-
-      if (nwserver.hasOwnProperty(k) && k != 'id' && k != '_id') {
-        cfg[k] = nwserver[k];  // assign properties of nwserver to the collection cfg
-      }
-    }
-  }
-  if (thisCollection.serviceType == 'sa') {
-    let saserver = saservers[thisCollection.saserver];
-    for (var k in saserver) {
-      if (saserver.hasOwnProperty(k) && k != 'id' && k != '_id') {
-        cfg[k] = saserver[k];  // assign properties of saserver to the collection cfg
-      }
-    }
-  }
-  let outerCfg = { workerConfig: cfg };
-
-
-
-  ////////////////////////
-  //DEAL WITH THE SOCKET//
-  ////////////////////////
-
-  // Buffer for worker data
-  var data = '';
-
-  //Set socket options
-  socket.setEncoding('utf8');
-  
-  // Handle data received from the worker over the socket (this really builds the collection)
-  socket.on('data', chunk => data = chunkHandler(rollingCollections, id, subject, data, chunk, clientSessionId) );
-                              
-                              
-  // Once the worker has exited, delete the socket temporary file
-  socket.on('end', () => {
-    winston.debug('Worker disconnected.  Rolling collection update cycle complete.');
-    fs.unlink(tempName, () => {}); // Delete the temporary UNIX socket file
-  });
-
-  
-  
-  // Send configuration to worker.  This officially kicks off the work.  After this, we should start receiving data on the socket
-  writeToSocket(socket, JSON.stringify(outerCfg));
-  // writeToSocket(socket, JSON.stringify({ 'heartbeat' : true }));
-  
-  
-  // socket.end();
-  
-}
-*/
-
-
-
-
-/*
-function runRollingCollection(collectionId, res, clientSessionId='') {
-  // Executes the building of a rolling or monitoring collection
-
-  winston.debug("runRollingCollection(collectionId)");
-
-  let rollingId = collectionId;
-  if (collections[collectionId].type === 'monitoring') {
-    rollingId = clientSessionId;
-  }
-
-  var subject = rollingCollectionSubjects[rollingId].subject;
-  rollingCollections[rollingId] = {
-    images: [],
-    sessions: [],
-    search: []
-  };
-
-  let thisRollingCollection =  rollingCollections[rollingId];
-  let thisRollingCollectionSubject = rollingCollectionSubjects[rollingId];
-  let thisCollection = collections[collectionId];
-
-  let myHeartbeat = setInterval( () => {
-    winston.debug('running heartbeat')
-    // writeToSocket(socket, JSON.stringify({ 'heartbeat' : true }));
-    res.write(JSON.stringify({ 'heartbeat' : true }) + ',');
-    res.flush();
-  }, 15000 );
-  thisRollingCollectionSubject['heartbeatInterval'] = myHeartbeat;
-
-  var work = ( () => {
-    // Main body of worker execution
-    // This is wrapped in an arrow function so that it will retain the local scope of 'collectionId'
-    // We also want to be able to call this body from a timer, so that's another reason we wrap it
-
-    try {
-
-      winston.debug("runRollingCollection(): work(): Starting run for rollingId", rollingId);
-
-      if ( collections[collectionId].type === 'rolling' && rollingId in rollingCollectionSubjects && 'worker' in thisRollingCollectionSubject && thisRollingCollectionSubject.runs == 1) {
-        // If we're a rolling collection still on our first run, let it continue running until it completes
-        winston.info('runRollingCollection(): work(): First run of rolling collection is still running.  Delaying next run 60 seconds');
-        return;
-      }
-      
-      if ( rollingId in rollingCollectionSubjects && 'worker' in thisRollingCollectionSubject && thisRollingCollectionSubject.runs > 1) {
-        // Check if there's already a python worker process already running which has overrun the 60 second mark, and if so, kill it
-        winston.info('runRollingCollection(): work(): Timer expired for running worker.  Terminating worker');
-        let oldWorker = thisRollingCollectionSubject['worker'];
-        // oldWorker.kill('SIGINT');
-        // process.kill(oldWorker, 'SIGINT');
-        // delete thisRollingCollectionSubject['worker']; // we don't want to do this here as it will be handled when the worker exits
-      }
-
-      if (thisCollection.type === 'monitoring' && thisRollingCollectionSubject.paused === true) {
-        winston.debug(`runRollingCollection(): work(): Collection ${rollingId} is puased.  Returning`);
-        return;
-      }
-
-      // Create temp file to be used as our UNIX domain socket
-      let tempName = temp.path({suffix: '.socket'});
-
-      // Now open the UNIX domain socket that will talk to worker script by creating a handler (or server) to handle communications
-      let socketServer = net.createServer( (socket) => { 
-        // Add our socket to rollingCollectionSubjects[] so we can handle it later
-        thisRollingCollectionSubject['socket'] = socket;
-        //socket.setNoDelay(true);
-        socket.setKeepAlive(true, 15000)
-        rollingCollectionSocketConnectionHandler(collectionId, socket, tempName, subject, clientSessionId);
-        // We won't write any more data to the socket, so we will call close() on socketServer.  This prevents the server from accepting any new connections
-        socketServer.close();
-      });
-
-      
-      socketServer.listen(tempName, () => {
-        // Tell the server to listen for communication from the not-yet-started worker
-
-        winston.debug('runRollingCollection(): work(): listen(): Rolling Collection: Listening for worker communication');
-        winston.debug("runRollingCollection(): work(): listen(): Rolling Collection: Spawning worker with socket file " + tempName);
-        
-        // Start the worker process and assign a reference to it to 'worker'
-        let worker = spawn('./worker_stub.py', [tempName, '2>&1'], { shell: false, stdio: 'inherit'});
-        // Notice that we don't pass any configuration to the worker on the command line.  It's all done through the UNIX socket for security.
-        
-        // Add the worker reference to rollingCollectionSubjects so we can work with it later
-        thisRollingCollectionSubject['worker'] = worker;
-
-        
-        worker.on('exit', (code, signal) => {
-          // This is where we handle the exiting of the worker process
-
-          if (typeof code === 'undefined') {
-            // Handle really abnormal worker exit with no error code - maybe because we couldn't spawn it at all?  We likely won't ever enter this block
-            winston.debug('runRollingCollection(): work(): listen(): onExit(): Worker process exited abnormally without an exit code');
-            thisCollection['state'] = 'error';
-            subject.next({collection: { id: collectionId, state: 'error'}});
-            if (rollingId in rollingCollectionSubjects && 'worker' in thisRollingCollectionSubject) {
-              delete thisRollingCollectionSubject.worker;
-            }
-          }
-
-
-
-
-          else if (code !== null || signal !== null) {
-            // Handle normal worker exit code 0
-            if (code !== null && code === 0) {
-              winston.debug('runRollingCollection(): work(): listen(): onExit(): Worker process exited normally with exit code 0');
-              // Tell client that we're resting
-              subject.next({collection: { id: collectionId, state: 'resting'}});
-            
-            }
-            else if (code !== null && code !== 0) {
-              // Handle worker exit with non-zero (error) exit code
-              winston.debug('runRollingCollection(): work(): listen(): onExit(): Worker process exited in bad state with non-zero exit code', code.toString() );
-              thisCollection['state'] = 'error';
-              subject.next({collection: { id: collectionId, state: 'error'}});
-              if (rollingId in rollingCollectionSubjects && 'worker' in thisRollingCollectionSubject) {
-                delete thisRollingCollectionSubject.worker;
-              }
-            }
-            else {
-              winston.debug('runRollingCollection(): work(): listen(): onExit(): Worker process was terminated by signal', signal);
-              // Tell client that we're resting
-              subject.next({collection: { id: collectionId, state: 'resting'}});
-            }
-
-            // Save the collection to the DB
-            db.collection('collections').update( {'id': collectionId }, thisCollection, (err, res) => {
-              if (err) throw err;
-            });
-            
-            if (thisCollection.type === 'monitoring' && thisRollingCollectionSubject.paused === true) {
-              // Monitoring collection is paused
-              // Now we end and delete this monitoring collection, except for its files (which still may be in use on the client)
-              winston.debug('runRollingCollection(): work(): listen(): onExit(): Completing work for paused monitoring collection', rollingId);
-              clearInterval(thisRollingCollectionSubject.interval); // stop work() from being called again
-              thisRollingCollectionSubject.subject.complete(); // end observable
-              res.write('{"close":true}]'); // Close the array so that oboe knows we're done
-              res.flush();
-              res.end();
-              delete rollingCollectionSubjects[rollingId];
-              delete rollingCollections[rollingId];
-              return;
-            }
-            
-            if (rollingId in rollingCollectionSubjects && 'worker' in thisRollingCollectionSubject) {
-              delete thisRollingCollectionSubject.worker;
-            }
-          }
-
-        });
-      });
-    }
-
-    catch(e) {
-      winston.error("runRollingCollection(): work(): Caught unhandled error:", e);
-    }
-    
-  });
-
-  // Start the work() function (the main body of worker execution)
-  work();
-
-  // Now schedule work() to run every 60 seconds and store a reference to it in thisRollingCollectionSubject['interval'],
-  // which we can later use to terminate the timer and prevent future execution.
-  // This will not initially execute work() until the first 60 seconds have elapsed, which is why we run work() once before this
-  thisRollingCollectionSubject['interval'] = setInterval( () => work(), 60000);
-}
-*/
-
 app.get('/api/collection/monitoring/pause/:id', passport.authenticate('jwt', { session: false } ), (req, res) => {
   rollingHandler.pauseMonitoringCollection(req, res);
 });
 
-/*app.get('/api/collection/monitoring/pause/:id', passport.authenticate('jwt', { session: false } ), (req, res) => {
-  let clientSessionId = req.headers['afbsessionid'];
-  winston.info(`GET /api/collection/monitoring/pause/:id: Pausing monitoring collection ${clientSessionId}`);
-  // rollingCollectionSubjects[id]['paused'] = true;
-  rollingCollectionSubjects[clientSessionId]['paused'] = true;
-  res.status(202).send( JSON.stringify( { success: true } ) );
-});*/
+
 
 app.get('/api/collection/monitoring/unpause/:id', passport.authenticate('jwt', { session: false } ), (req, res) => {
   rollingHandler.unpauseMonitoringCollection(req, res);
 });
-
-/*
-app.get('/api/collection/monitoring/unpause/:id', passport.authenticate('jwt', { session: false } ), (req, res) => {
-  // This only gets used by the client if a monitoring collection is paused and then resumed within the minute the run is permitted to continue executing
-  // Otherwise, the client will simply call /api/collection/rolling/:id again
-  let clientSessionId = req.headers['afbsessionid'];
-  winston.info(`GET /api/collection/monitoring/unpause/:id: Resuming monitoring collection ${clientSessionId}`);
-  // rollingCollectionSubjects[id]['paused'] = false;
-  rollingCollectionSubjects[clientSessionId]['paused'] = false;
-  res.status(202).send( JSON.stringify( { success: true } ) );
-});
-*/
 
 
 
 app.get('/api/collection/rolling/:collectionId', passport.authenticate('jwt', { session: false } ), (req, res) => {
   rollingHandler.handleRollingConnection(req, res);
 });
+
 
 
 function updateCollectionsDbCallback(collectionId) {
@@ -3088,226 +2238,6 @@ function updateCollectionsDbCallback(collectionId) {
     log.error('updateCollectionsDbCallback(): caught exception when updating database:', e);
   }
 }
-
-
-/*
-app.get('/api/collection/rolling/:collectionId', passport.authenticate('jwt', { session: false } ), (req, res) => {
-  // Builds and streams a rolling or monitoring collection back to the client.  Handles the client connection and kicks off the process
-
-  let collectionId = req.params.collectionId;
-  let clientSessionId = req.headers['afbsessionid'];
-
-
-  winston.info('GET /api/collection/rolling/:id', collectionId);
-  // winston.debug('GET /api/collection/rolling/:id clientSessionId:', clientSessionId);
-
-  let rollingId = collectionId;
-  if ( collections[collectionId].type === 'monitoring' ) {
-    rollingId = clientSessionId;
-  }
-  let thisCollection = collections[collectionId];
-  
-  
-  ////////////////////////////////////////////////////
-  //////////////////RESPONSE HEADERS//////////////////
-  ////////////////////////////////////////////////////
-
-  try {
-    // Write the response headers
-    if (thisCollection.bound && !('usecase' in thisCollection )) {
-      throw(`Bound collection ${collectionId} does not have a use case defined`);
-    }
-    if (thisCollection.bound && !(thisCollection.usecase in useCasesObj) ) {
-      throw(`Use case ${thisCollection.usecase} in bound collection ${collectionId} is not a valid use case`);
-    }
-    if (thisCollection.type === 'rolling' || thisCollection.type === 'monitoring') {
-      res.writeHead(200, {'Content-Type': 'application/json','Content-Disposition': 'inline' });
-      res.write('['); // Open the array so that oboe can see it
-      res.flush();
-    }
-    else {
-      throw("Collection " + collectionId + " is not of type 'rolling' or 'monitoring'");
-    }
-  }
-  catch (e) {
-    winston.error('GET /api/collection/rolling/:id', e);
-    res.status(500).send( JSON.stringify( { success: false, error: e.message || e } ) );
-    return;
-  }
-
-  
-  
-  
-
-  ///////////////////////////////////////////////////////////////////////
-  ///////////////////////CLIENT DISCONNECT HANDLER///////////////////////
-  ///////////////////////////////////////////////////////////////////////
-  
-  req.on('close', () => {
-    // Run this block when the client disconnects from the session
-
-    
-    if ( rollingId in rollingCollectionSubjects) {
-      winston.debug("Client disconnected from rolling collection with rollingId", rollingId);
-      rollingCollectionSubjects[rollingId].observers -= 1;
-
-      if ('heartbeatInterval' in rollingCollectionSubjects[rollingId]) {
-        // terminate heartbeat
-        clearInterval(rollingCollectionSubjects[rollingId]['heartbeatInterval']);
-      }
-      
-      if (rollingCollectionSubjects[rollingId].observers === 0) {
-        winston.debug("Last client disconnected from rolling collection with rollingId " + rollingId + '.  Destroying observable');
-        
-        // end execution of work() for this collection
-        clearInterval(rollingCollectionSubjects[rollingId].interval);
-        
-        // destroy subject
-        rollingCollectionSubjects[rollingId].subject.complete();
-        
-        try {
-          winston.debug("Deleting output directory for collection", rollingId);
-          rimraf( collectionsDir + '/' + rollingId, () => {} ); // Delete output directory
-        }
-        catch(exception) {
-          winston.error('ERROR deleting output directory collectionsDir + '/' + rollingId', exception);
-        }
-        
-        if ('worker' in rollingCollectionSubjects[rollingId]) {
-          winston.debug("Killing worker for collection", rollingId);
-          let oldWorker = rollingCollectionSubjects[rollingId]['worker'];
-          oldWorker.kill('SIGINT');
-        }
-        delete rollingCollectionSubjects[rollingId];
-        res.end();
-        return;
-      }
-    }
-  });
-  
-  
-  /////////////////////////////////////////
-  /////////////NEW ROLLING RUN/////////////
-  /////////////////////////////////////////
-  
-  
-  
-  if ( thisCollection.type === 'rolling' && !(collectionId in rollingCollectionSubjects) ) {
-    // This is a new rolling collection as there are no existing subscribers to it
-    // Let's start building it
-    let subject = new Subject(); // Create a new observable which will be used to pipe communication between the worker and the client
-    
-
-    // Populate rollingCollectionSubjects[collectionId] with some initial values
-    rollingCollectionSubjects[collectionId] = {
-      subject: subject,
-      observers: 1,
-      runs: 0
-    }
-
-    // We now subscribe to the existing observable for the collection and pipe its output to rollingSubjectWatcher so it can be output to the http response stream
-    rollingCollectionSubjects[collectionId].subject.subscribe( (output) => rollingSubjectWatcher(req, res, output) );
-    
-    
-    // We don't run a while loop here because runRollingCollection will loop on its own
-    // Execute our collection building here
-    runRollingCollection(collectionId, res);
-  }
-
-
-
-  ////////////////////////////////////////////
-  /////////////NEW MONITORING RUN/////////////
-  ////////////////////////////////////////////
-  
-
-  else if ( thisCollection.type === 'monitoring' ) {
-    // This is a new monitoring collection as there are no existing subscribers to it
-    // Let's start building it
-    let subject = new Subject(); // Create a new observable which will be used to pipe communication between the worker and the client
-
-    
-    // Populate rollingCollectionSubjects[rollingId] with some initial values
-    rollingCollectionSubjects[rollingId] = {
-      subject: subject,
-      observers: 1,
-      paused: false,
-      runs: 0
-    }
-
-    // We now subscribe to our new observable for the collection and pipe its output to rollingSubjectWatcher so it can be output to the http response stream
-    rollingCollectionSubjects[rollingId].subject.subscribe( (output) => rollingSubjectWatcher(req, res, output) );
-    
-    
-    // We don't run a while loop here because runRollingCollection will loop on its own
-    // Execute our collection building here
-    runRollingCollection(collectionId, res, rollingId);
-  }
-
-
-
-
-
-  //////////////////////////////////////////////////////////
-  ////////////ALREADY RUNNING ROLLING COLLECTION////////////
-  //////////////////////////////////////////////////////////
-  
-  else {
-    // We're not the first client connected to this collection, as the rolling collection is already running
-    // Let's play back its contents and subscribe to its observable
-
-    winston.info(`This is not the first client connected to rolling collection ${collectionId}.  Playing back existing collection`);
-
-    rollingCollectionSubjects[collectionId]['observers'] += 1;
-    // Increase the observers count so we know how many people are viewing the collection
-    
-    rollingCollectionSubjects[collectionId].subject.subscribe( (output) => rollingSubjectWatcher(req, res, output) );
-    // We now subscribe to the existing observable for the collection and pipe its output to rollingSubjectWatcher so it can be output to the http response stream
-      
-    // Play back the data already in rollingCollections[collectionId]
-
-    for (var i=0; i < rollingCollections[collectionId].sessions.length; i++) {
-      // Play back sessions
-      let resp = {
-        collectionUpdate: {
-          session: rollingCollections[collectionId].sessions[i]
-        }
-      };
-      res.write(JSON.stringify(resp) + ',');
-      res.flush();
-    }
-    
-    for (var i=0; i < rollingCollections[collectionId].images.length; i++) {
-      // Play back images
-      let resp = {
-        collectionUpdate: {
-          images: [ rollingCollections[collectionId].images[i] ]
-        }
-      };
-      res.write(JSON.stringify(resp) + ',');
-      res.flush();
-    }
-    
-    if (rollingCollections[collectionId].search) {
-      // Play back search text
-      for (var i=0; i < rollingCollections[collectionId].search.length; i++) {
-        let resp = {
-          collectionUpdate: {
-            search: [ rollingCollections[collectionId].search[i] ] 
-            // We enclose this in an array to be consistent with the worker, which also does this when it sends search terms, in case there are more than one search term per update.
-           // The client should only have to deal with one format
-          }
-        };
-        res.write(JSON.stringify(resp) + ',');
-        res.flush();
-      }
-    }
-
-    // We don't need to wait as the connection will hold open until we call res.end()
-  }
-
-});
-*/
 
 
 
@@ -3336,260 +2266,348 @@ app.get('/api/collection/rolling/:collectionId', passport.authenticate('jwt', { 
 /////////////////////////////////////////////////////////UTILITY FUNCTIONS/////////////////////////////////////////////////////////
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
+
+function redactApiServerPasswords(apiservers) {
+  let servers = JSON.parse(JSON.stringify(apiservers));  // make deep copy of servers
+  for (let server in servers) {
+    // delete passwords - they don't need to be transferred back to the client
+    if (servers.hasOwnProperty(server)) {
+      servers[server].password = undefined;
+    }
+  }
+  return servers;
+}
+
+
+
 function writePreferences() {
   db.collection('preferences').updateOne( {}, preferences, (err, res) => {
     if (err) throw err;
   });
 }
 
-var User = null;
-function mongooseInitFunc() {
-  winston.debug('Initializing mongoose');
-  // Initialise Mongoose.  This gets called from within connectToDB()
-  
-  User = require('./models/user');
-  passport.use(new LocalStrategy(User.authenticate()));
-  passport.serializeUser(User.serializeUser());
-  passport.deserializeUser(User.deserializeUser());
 
-  // Connect to Mongoose
-  var mongooseUrl = `mongodb://${config['dbConfig']['host']}:${config['dbConfig']['port']}/afb_users`
-  var mongooseOptions = { useMongoClient: true, promiseLibrary: global.Promise };
+
+function extractJwtFromCookie(req) {
+  // Extract JWT from cookie 'access_token' and return to JwtStrategy
+  // winston.debug("extractJwtFromCookie()", req.cookies);
+  let token = null;
+  if (req && req.cookies)
+  {
+    token = req.cookies['access_token'];
+  }
+  return token;
+};
+
+
+
+var tokenBlacklist = {};
+
+
+
+function extraJwtTokenValidation(jwt_payload, done) {
+  // After automatically verifying that JWT was signed by us, perform extra validation with this function
+  // winston.debug("jwt validator jwt_payload:", jwt_payload);
+  // winston.debug("verifying token id:", jwt_payload.jti);
+  
+  // check blacklist
+  if (jwt_payload.jti in tokenBlacklist) {
+    winston.info("User " + jwt_payload.username + " has already logged out!");
+    return done(null, false);
+  }
+
+  // check whether user is enabled
+  User.findOne({id: jwt_payload.sub}, function(err, user) {
+    if (err) {
+      return done(err, false);
+    }
+    if (user && user.enabled) {
+      return done(null, user);
+    }
+    if (user && !user.enabled) {
+      winston.info('Login denied for user', user.username);
+      winston.info('Attempt to authenticate by disabled user', user.username);
+      return done(null, false);
+    }
+    else {
+      return done(null, false);
+      // or you could create a new account
+    }
+  });
+}
+
+
+
+function onMongooseConnected() {
+  // Create the default user account, if we think the app was just installed and if the count of users is 0
+  User.count({}, (err, count) => {
+    if (err) {
+      winston.error("Error getting user count:", err);
+    }
+    else if (justInstalled == true && count == 0) {
+        winston.info("Adding default user 'admin'");
+        createDefaultUser();
+        justInstalled = false;
+    }
+  });
+}
+
+
+
+var User = null;
+
+function mongooseInit() {
+  // Initialise Mongoose.  This gets called from within connectToDB(), after mongoClient has connected to Mongo
+  winston.debug('Initializing mongoose');
+
+  // Mongoose config
+  let mongooseUrl = `mongodb://${config['dbConfig']['host']}:${config['dbConfig']['port']}/afb_users`
+  let mongooseOptions = { useMongoClient: true, promiseLibrary: global.Promise };
   if (config.dbConfig.authentication.enabled) {
     mongooseUrl = `mongodb://${config.dbConfig.authentication.user}:${config.dbConfig.authentication.password}@${config['dbConfig']['host']}:${config['dbConfig']['port']}/afb_users?authSource=admin`;
   }
-  
-  let mongooseOnConnectFunc = () => {
-    var db = mongoose.connection;
-  
-    // Create the default user account, if we think the app was just installed and if the count of users is 0
-    User.count({}, (err, count) => {
-      if (err) {
-        winston.error("Error getting user count:", err);
-      }
-      else if (justInstalled == true && count == 0) {
-          winston.info("Adding default user 'admin'");
-          createDefaultUser();
-          justInstalled = false;
-      }
-    });
-  
-  
-    passport.use(new JwtStrategy(jwtOpts, (jwt_payload, done) => {
-      //After automatically verifying that JWT was signed by us, perform extra validation with this function
-      //winston.debug("jwt validator jwt_payload:", jwt_payload);
-      //winston.debug("verifying token id:", jwt_payload.jti);
-      if (jwt_payload.jti in tokenBlacklist) { //check blacklist
-        winston.info("User " + jwt_payload.username + " has already logged out!");
-        return done(null, false);
-      }
-  
-      User.findOne({id: jwt_payload.sub}, function(err, user) {
-        if (err) {
-          return done(err, false);
-        }
-        if (user && user.enabled) {
-          return done(null, user);
-        }
-        if (user && !user.enabled) {
-          winston.info('Login denied for user', user.username);
-          winston.info('Attempt to authenticate by disabled user', user.username);
-          return done(null, false);
-        }
-        else {
-          return done(null, false);
-          // or you could create a new account
-        }
-      });
-    }));
-  };
 
-  let mongooseConnectFunc = () => {
-    mongoose.connect(mongooseUrl, mongooseOptions )
-            .then( () => mongooseOnConnectFunc() )
-            .then( () => startFeeder() )
-            // .then( () => listener() ) // now starting after feeder is running
-            .catch( (err) => {
-              winston.error('Mongoose error whilst connecting to mongo.  Exiting with code 1.');
-              winston.error(err);
-              process.exit(1);
-            } );
-  };
 
-  mongooseConnectFunc();
+  // This creates local authentication passport strategy
+  // This authenticates a user against the account stored in MongoDB
+  // This is only used by /api/login
+  User = require('./models/user');
+  let mongooseStrategy = new LocalStrategy( User.authenticate() );
+  passport.use(mongooseStrategy);
+  passport.serializeUser( User.serializeUser() );
+  passport.deserializeUser( User.deserializeUser() );
+
+
+  // This creates the JWT authentication passport strategy
+  // This is used to authenticate all API calls except login and ping
+  let jwtOpts = {
+    jwtFromRequest: ExtractJwt.fromExtractors([extractJwtFromCookie]),
+    secretOrKey: jwtPublicKey,
+    algorithms: ['RS256']
+  };
+  let jwtStrategy = new JwtStrategy(jwtOpts, (jwt_payload, done) => extraJwtTokenValidation(jwt_payload, done) );
+  passport.use(jwtStrategy);
+  
+
+  // Connect to Mongoose
+  mongoose.connect(mongooseUrl, mongooseOptions )
+          .then( () => onMongooseConnected() )
+          .then( () => startFeeder() )
+          // .then( () => listener() ) // now starting after feeder is running
+          .catch( (err) => {
+            winston.error('Mongoose error whilst connecting to mongo.  Exiting with code 1.');
+            winston.error(err);
+            process.exit(1);
+          } );
+
 }
+
+
+
+function processMongoCollections() {
+  winston.debug('processMongoCollections()');
+
+  return db.collection('preferences').findOne().then( (res) => {
+    justInstalled = false;
+    winston.debug("Reading preferences");
+
+    let rewritePrefs = false; 
+    preferences = res;
+    // merge in default preferences which aren't in our loaded preferences (like for upgrades)
+    for (let pref in defaultPreferences) {
+      if (defaultPreferences.hasOwnProperty(pref)) {
+        if (!preferences.hasOwnProperty(pref)) {
+          winston.info(`Adding new default preference for ${pref}`);
+          preferences[pref] = defaultPreferences[pref];
+          rewritePrefs = true;
+        }
+      }
+    }
+    for (let pref in defaultPreferences.nw) {
+      if (defaultPreferences.nw.hasOwnProperty(pref)) {
+        if (!preferences.nw.hasOwnProperty(pref)) {
+          winston.info(`Adding new default NetWitness preference for ${pref}`);
+          preferences.nw[pref] = defaultPreferences.nw[pref];
+          rewritePrefs = true;
+        }
+      }
+    }
+    for (let pref in defaultPreferences.sa) {
+      if (defaultPreferences.sa.hasOwnProperty(pref)) {
+        if (!preferences.sa.hasOwnProperty(pref)) {
+          winston.info(`Adding new default Security Analytics preference for ${pref}`);
+          preferences.sa[pref] = defaultPreferences.sa[pref];
+          rewritePrefs = true;
+        }
+      }
+    }
+    if (rewritePrefs) {
+      writePreferences();
+    }
+    // winston.debug('preferences:', preferences);
+  })
+  .catch( () => {
+    winston.info("Creating default preferences");
+    preferences = defaultPreferences;
+    db.collection('preferences').insertOne( preferences, (err, res) => {
+      if (err) throw err;
+    });
+  } )
+  
+  
+  .then( () => {
+    return db.collection('nwservers').find({}).toArray().then( (res) => {
+      if (Object.keys(res).length === 0) {
+        return Promise.reject();
+      }
+      winston.debug("Reading nwservers");
+      for (let x=0; x < res.length; x++) {
+        let id = res[x].id;
+        nwservers[id] = res[x];
+      }
+      // winston.debug('nwservers:', nwservers);
+    } );
+  } )
+  .catch( () => { winston.info('Collection nwservers was not previously defined')} )
+
+  .then( () => {
+    return db.collection('saservers').find({}).toArray().then( (res) => {
+      if (Object.keys(res).length === 0) {
+        return Promise.reject();
+      }
+      winston.debug("Reading saservers");
+      for (let x = 0; x < res.length; x++) {
+        let id = res[x].id;
+        saservers[id] = res[x];
+      }
+      // winston.debug('saservers:', saservers);
+    } );
+  } )
+  .catch( () => { winston.info('Collection saservers was not previously defined')} )
+
+  .then( () => {
+    return db.collection('feeds').find({}).toArray().then( (res) => {
+      if (Object.keys(res).length === 0) {
+        return Promise.reject();
+      }
+      winston.debug("Reading feeds");
+      for (let x = 0; x < res.length; x++) {
+        let id = res[x].id;
+        feeds[id] = res[x];
+      }
+      scheduler.updateSchedule(feeds);
+      // winston.debug('feeds:', feeds);
+
+    } );
+  } )
+  .catch( () => { winston.info('Collection feeds was not previously defined')} )
+
+
+  .then( () => {
+    return db.collection('blacklist').find({}).toArray().then( (res) => {
+      winston.debug("Reading blacklist");
+      for (let x = 0; x < res.length; x++) {
+        let id = res[x].id;
+        let timestamp = res[x].timestamp;
+        tokenBlacklist[id] = timestamp;
+      }
+      // winston.debug('tokenBlacklist:', tokenBlacklist);
+      setInterval( () => cleanBlackList(), 1000 * 60); // run every minute
+      cleanBlackList();
+    } );
+  } )
+
+
+  .then( () => {
+    return db.collection('collections').find({}).toArray().then( (res) => {
+      if (Object.keys(res).length === 0) {
+        return Promise.reject();
+      }
+      winston.debug("Reading collections");
+      for (let x = 0; x < res.length; x++) {
+        let collection = res[x];
+        if (collection.type == 'monitoring' || collection.type == 'rolling') {
+          collection.state = 'disconnected';
+        }
+        collections[collection.id] = collection;
+       }
+       cleanCollectionDirs();
+       // winston.debug('collections:', collections);
+    } );
+  } )
+  .catch( () => {
+    winston.info('Collection \'collections\' was not previously defined')
+  } )
+
+  .then( () => {
+    return db.collection('collectionsData').find({}).toArray().then( (res) => {
+      if (Object.keys(res).length === 0) {
+        return Promise.reject();
+      }
+      winston.debug("Reading collectionsData");
+      for (let x = 0; x < res.length; x++) {
+        let id = res[x].id;
+        collectionsData[id] = JSON.parse(res[x].data);
+      }
+    } );
+  } )
+  .catch( () => {
+    winston.info('Collection \'collectionsData\' was not previously defined')
+  } )
+
+
+
+}
+
 
 
 var db = null;
 
+
+
+function onMongoConnected(database) {
+  winston.debug('onMongoConnected()');
+  db = database;
+  return Promise.resolve();
+}
+
+
+
 function connectToDB() {
-  // mongo.connect(mongoUrl, (err, database) => {
+  winston.debug('Initializing mongo db and reading settings');
 
-  let connectFunc = (database) => {
-    // winston.debug('connectFunc()');
-    // console.log('db:', db);
-    // if (err) throw err;
-    db = database;
-  
-    db.listCollections().toArray( (err, cols) => {
-      if (err) throw err;
+  // We use mongoose for auth, and MongoClient for everything else.  This is because Passport-Local Mongoose required it, and it is ill-suited to the free-formish objects which we want to use.
+  let mongoUrl = `mongodb://${config['dbConfig']['host']}:${config['dbConfig']['port']}/afb`;
+  if (config.dbConfig.authentication.enabled) {
+    mongoUrl = `mongodb://${config.dbConfig.authentication.user}:${config.dbConfig.authentication.password}@${config['dbConfig']['host']}:${config['dbConfig']['port']}/afb?authSource=admin`;
+  }
 
-      let foundPrefs = false;
-      
-      for (let i=0; i < cols.length; i++) {
-        let collectionName = cols[i].name;
-        
-        if (collectionName == "preferences") {
-           // read prefs
-           foundPrefs = true;
-           justInstalled = false;
-           winston.debug("Reading preferences");
-           db.collection('preferences').findOne( (err, res) => {
-            let rewritePrefs = false; 
-            // preferences = res.preferences;
-            preferences = res;
-            // merge in default preferences which aren't in our loaded preferences (like for upgrades)
-            for (let pref in defaultPreferences) {
-              if (defaultPreferences.hasOwnProperty(pref)) {
-                if (!preferences.hasOwnProperty(pref)) {
-                  winston.info(`Adding new default preference for ${pref}`);
-                  preferences[pref] = defaultPreferences[pref];
-                  rewritePrefs = true;
-                }
-              }
-            }
-            for (let pref in defaultPreferences.nw) {
-              if (defaultPreferences.nw.hasOwnProperty(pref)) {
-                if (!preferences.nw.hasOwnProperty(pref)) {
-                  winston.info(`Adding new default NetWitness preference for ${pref}`);
-                  preferences.nw[pref] = defaultPreferences.nw[pref];
-                  rewritePrefs = true;
-                }
-              }
-            }
-            for (let pref in defaultPreferences.sa) {
-              if (defaultPreferences.sa.hasOwnProperty(pref)) {
-                if (!preferences.sa.hasOwnProperty(pref)) {
-                  winston.info(`Adding new default Security Analytics preference for ${pref}`);
-                  preferences.sa[pref] = defaultPreferences.sa[pref];
-                  rewritePrefs = true;
-                }
-              }
-            }
-            if (rewritePrefs) {
-              writePreferences();
-            }
-           });
-        }
-      
-        if (collectionName == "nwservers") {
-          winston.debug("Reading nwservers");
-          db.collection('nwservers').find({}).toArray( (err, res) => {
-             for (let x=0; x < res.length; x++) {
-                let id = res[x].id;
-                nwservers[id] = res[x];
-             }
-           });
-        }
-
-        if (collectionName == "saservers") {
-          winston.debug("Reading saservers");
-          db.collection('saservers').find({}).toArray( (err, res) => {
-             for (let x=0; x < res.length; x++) {
-                let id = res[x].id;
-                saservers[id] = res[x];
-             }
-           });
-        }
-
-        if (collectionName == "feeds") {
-          winston.debug("Reading feeds");
-          db.collection('feeds').find({}).toArray( (err, res) => {
-             for (let x = 0; x < res.length; x++) {
-                let id = res[x].id;
-                feeds[id] = res[x];
-             }
-             scheduler.updateSchedule(feeds);
-           });
-        }
-
-        if (collectionName == "blacklist") {
-          winston.debug("Reading blacklist");
-          db.collection('blacklist').find({}).toArray( (err, res) => {
-            // winston.debug('blacklist:', res); 
-            for (let x = 0; x < res.length; x++) {
-                let id = res[x].id;
-                let timestamp = res[x].timestamp;
-                tokenBlacklist[id] = timestamp;
-             }
-             winston.debug('tokenBlacklist:', tokenBlacklist);
-             setInterval( () => cleanBlackList(), 1000 * 60); // run every minute
-             cleanBlackList();
-           });
-        }
-      
-        if (collectionName == "collections") {
-          winston.debug("Reading collections");
-          db.collection('collections').find({}).toArray( (err, res) => {
-             for (let x=0; x < res.length; x++) {
-              let collection = res[x];
-              if (collection.type == 'monitoring' || collection.type == 'rolling') {
-                collection.state = 'disconnected';
-              }
-              collections[collection.id] = collection;
-             }
-             cleanCollectionDirs();
-           });
-        }
-      
-        if (collectionName == "collectionsData") {
-          winston.debug("Reading collectionsData");
-          db.collection('collectionsData').find({}).toArray( (err, res) => {
-             for (let x=0; x < res.length; x++) {
-                //winston.debug("res[x]:", res[x]);
-                let id = res[x].id;
-                collectionsData[id] = JSON.parse(res[x].data);
-             }
-           });
-        }
-
-      }
-
-      if (!foundPrefs) {
-        winston.info("Creating default preferences");
-        preferences = defaultPreferences;
-        db.collection('preferences').insertOne( preferences, (err, res) => {
-          if (err) throw err;
-        });
-      }
-    });
-  };
-
-  winston.debug('Initializing mongo db');
   let connectionAttempts = 1;
-  // winston.debug('mongoUrl:', mongoUrl);
   let connectorFunc = () => {
-        mongo.connect(mongoUrl)
-        .then( (database) => connectFunc(database) )
-        .then( () => mongooseInitFunc() )
-        .catch( (err) => {
-          // winston.error(err);
-          if (connectionAttempts == 3) {
-            winston.error('Maximum retries reached whilst connecting to mongo.  Exiting with code 1.');
-            winston.error(err.message);
-            process.exit(1);
-          }
-          winston.warn('Could not connect to Mongo DB');
-          connectionAttempts++;
-          if (connectionAttempts <= 3) {
-            winston.warn('Retrying mongo connection in 3 seconds');
-          }
-          sleep.sleep(3);
-         connectorFunc();
-        });
-      };
+    mongo.connect(mongoUrl)
+      .then( (database) => onMongoConnected(database) )
+      .then( () => processMongoCollections() )
+      .then( () => mongooseInit() )
+      .catch( (err) => {
+        // winston.error(err);
+        if (connectionAttempts == 3) {
+          winston.error('Maximum retries reached whilst connecting to mongo.  Exiting with code 1');
+          winston.error(err.message);
+          process.exit(1);
+        }
+        winston.warn('Could not connect to Mongo DB');
+        connectionAttempts++;
+        if (connectionAttempts <= 3) {
+          winston.warn('Retrying mongo connection in 3 seconds');
+        }
+        sleep.sleep(3);
+        connectorFunc();
+      });
+    };
   connectorFunc();
 }
+
+
 
 function cleanCollectionDirs() {
   try {
@@ -3607,6 +2625,8 @@ function cleanCollectionDirs() {
   }
 }
 
+
+
 function createDefaultUser() {
   User.register(new User({ id: uuidV4(), username : 'admin', fullname: 'System Administrator', email: 'noreply@knowledgekta.com', enabled: true }), 'kentech0', (err, user) => {
     if (err) {
@@ -3618,9 +2638,13 @@ function createDefaultUser() {
   });
 }
 
+
+
 function sortNumber(a, b) {
   return b - a;
 }
+
+
 
 var newChunkHandler = (data, chunk, callback) => {
   // Handles socket data received from the feeder process
@@ -3664,118 +2688,7 @@ var newChunkHandler = (data, chunk, callback) => {
 
 }
 
-function chunkHandler(collectionRoot, id, subject, data, chunk, clientSessionId='') {
-  // Handles socket data received from the worker process
-  // This actually builds the collection data structures and sends updates to the client
 
-  let rollingId = id;
-  if (clientSessionId != '') {
-    rollingId = clientSessionId;
-  }
-  let thisCollection = collectionRoot[rollingId];
-
-  /*
-////DEBUG CODE//
-  if (thisCollection == undefined) {
-    console.error('ERROR: thisCollection is undefined');
-    console.error('id:', id);
-    console.error('clientSessionId:', clientSessionId);
-    console.error('collectionRoot:');
-    for (let i in collectionRoot) {
-      console.error(i);
-    }
-    data += chunk
-    console.error('data:', data);
-    process.exit(1);
-  }
-////
-*/
-
-  winston.debug('Processing update from worker');
-  data += chunk
-
-  var splt = data.split("\n").filter( (el) => {return el.length != 0}) ;
-  //winston.debug("length of split:", splt.length);
-
-  if ( splt.length == 1 && data.indexOf("\n") === -1 ) {
-    //this case means the split resulted in only one element and that doesn't contain the newline delimiter, which means we haven't received an entire update yet...
-    //we'll continue and wait for the next update which will hopefully contain the delimeter
-    return data;
-  }
-  var d = []
-  if ( splt.length == 1 && data.endsWith("\n") ) {
-    //this case means the split resulted in only one element and that it does contain the newline delimiter.  This means we received a single complete update.
-    d.push(splt.shift() );
-    data='';
-  }
-  else if ( splt.length > 1 ) {
-    //this case means the split resulted in multiple elements and that it does contain a newline delimiter...
-    //This means we have at least one complete update, and possibly more.
-    if (data.endsWith("\n")) {  //the last element is a full update as data ends with a newline
-      while (splt.length > 0) {
-        d.push(splt.shift());
-      }
-      //winston.debug("now the length of split is", splt.length);
-      data = '';
-    }
-    else { //the last element is only a partial update, meaning that more data must be coming
-      while (splt.length > 1) {
-        d.push(splt.shift());
-      }
-      data = splt.shift();  //this should be the last partial update, which should be appended to in the next update
-    }
-  }
-
-  while (d.length > 0) {
-    let u = d.shift();
-    let update = JSON.parse(u);
-    
-    if ('heartbeat' in update) {
-      return data;
-    }
-
-    if ('collectionUpdate' in update) {
-
-      thisCollection.sessions.push(update.collectionUpdate.session);
-      
-      if (update.collectionUpdate.search) {
-        if (!thisCollection.search) {
-          thisCollection.search = [];
-        }
-        for (var i = 0; i < update.collectionUpdate.search.length; i++) {
-          
-          thisCollection.search.push(update.collectionUpdate.search[i]);
-        }
-      }
-
-      //modify image paths to point to /collections/:collectionId
-      for (var i=0; i < update.collectionUpdate.images.length; i++) {
-        
-        update.collectionUpdate.images[i].contentFile = collectionsUrl + '/' + rollingId + '/' + update.collectionUpdate.images[i].contentFile;
-        
-        if ('proxyContentFile' in update.collectionUpdate.images[i]) {
-          update.collectionUpdate.images[i].proxyContentFile = collectionsUrl + '/' + rollingId + '/' + update.collectionUpdate.images[i].proxyContentFile;
-        }
-
-        if ('thumbnail' in update.collectionUpdate.images[i]) {
-          update.collectionUpdate.images[i].thumbnail = collectionsUrl + '/' + rollingId + '/' + update.collectionUpdate.images[i].thumbnail;
-        }
-        if ('pdfImage' in update.collectionUpdate.images[i]) {
-          update.collectionUpdate.images[i].pdfImage = collectionsUrl + '/' + rollingId + '/' + update.collectionUpdate.images[i].pdfImage;
-        }
-        if ('archiveFilename' in update.collectionUpdate.images[i]) {
-          update.collectionUpdate.images[i].archiveFilename = collectionsUrl + '/' + rollingId + '/' + update.collectionUpdate.images[i].archiveFilename;
-        }
-        thisCollection.images.push(update.collectionUpdate.images[i]);
-      }
-    }
-    
-    subject.next(update);
-  }
-
-  return data;
-
-}
 
 var transformUser = function(doc, ret, options) {
   delete ret._id;
@@ -3783,6 +2696,8 @@ var transformUser = function(doc, ret, options) {
   delete ret.email;
   return ret;
 };
+
+
 
 function purgeSessions(thisRollingCollection, sessionsToPurge) {
   // winston.debug('purgeSessions(): sessionsToPurge.length: ', sessionsToPurge.length)
@@ -3820,7 +2735,6 @@ function purgeSessions(thisRollingCollection, sessionsToPurge) {
       }
     }
 
-
     let contentsToPurge = [];
     for (let i = 0; i < thisRollingCollection.images.length; i++) {
       // Purge content
@@ -3856,10 +2770,14 @@ function purgeSessions(thisRollingCollection, sessionsToPurge) {
   }
 }
 
+
+
 function writeToSocket(socket, data) {
   socket.write(data + '\n');
   // socket.flush();
 }
+
+
 
 function feederSocketCommunicationHandler(socket, tempName) {
 
@@ -3908,6 +2826,8 @@ var feederDataHandler = (data) => {
   }
 };
 
+
+
 function startFeeder() {
   winston.debug('startFeeder(): starting feeder_srv');
 
@@ -3948,10 +2868,14 @@ function startFeeder() {
   }
 }
 
+
+
 function schedulerUpdatedCallback(id) {
   // winston.debug('schedulerUpdatedCallback(): id:', id);
   writeToSocket( feederSocket, JSON.stringify( { updateFile: true, id: id } ) ); // let feeder server know of our update
 }
+
+
 
 function blacklistToken(id) {
   let timestamp = new Date().getTime();
@@ -3959,12 +2883,23 @@ function blacklistToken(id) {
     db.collection('blacklist').insertOne( { id: id, timestamp: timestamp }, (err) => {
       if (err) throw err;
       tokenBlacklist[id] = timestamp;
+      if (id in tokensToIoSockets) {
+        // disconnect socket.io for token
+        winston.debug('Forcibly logging out socket')
+        let socket = tokensToIoSockets[id];
+        if (socket) {
+          socket.emit('logout');
+          socket.disconnect(true);
+        }
+      }
     });
   }
   catch(e) {
     winston.error('Error updating token blacklist:', e);
   }
 }
+
+
 
 function cleanBlackList() {
   // winston.debug('cleanBlackList()');
@@ -3978,6 +2913,7 @@ function cleanBlackList() {
           db.collection('blacklist').remove( { id: id}, (err, res) => {
             if (err) throw err;
             delete tokenBlacklist[id];
+            
           });
         }
         catch(e) {
@@ -3994,6 +2930,120 @@ var rollingHandler = null;
 var fixedHandler = null;
 
 
+
+
+
+
+
+
+
+
+
+
+//////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////////SOCKET.IO/////////////////////////////////////////////////////////////////
+//////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+
+var ioSocket = null;
+
+function extraIoJwtTokenValidation(jwt_payload, done) {
+  // After automatically verifying that JWT was signed by us, perform extra validation with this function
+  // winston.debug("jwt validator jwt_payload:", jwt_payload);
+  // winston.debug("verifying token id:", jwt_payload.jti);
+  
+  // check blacklist
+  if (jwt_payload.jti in tokenBlacklist) {
+    winston.info("User " + jwt_payload.username + " has already logged out!");
+    return done(new Error());
+  }
+
+  // check whether user is enabled
+  User.findOne({id: jwt_payload.sub}, function(err, user) {
+    if (err) {
+      return done(new Error());
+    }
+    if (user && user.enabled) {
+      // winston.debug('Accepting socket.io connection');
+      return done();
+    }
+    if (user && !user.enabled) {
+      winston.info('Socket login denied for user', user.username);
+      winston.info('Attempt to authenticate by disabled user', user.username);
+      return done(new Error());
+    }
+    else {
+      return done(new Errror());
+      // or you could create a new account
+    }
+  });
+}
+
+
+var tokensToIoSockets = {};
+
+
+
+function ioAuthenticator(socket, done) {
+  let req = socket.request;
+  // winston.debug('cookie:', req.headers.cookie);
+  let cookies = req.headers.cookie;
+  if ( !('access_token' in cookies) ) {
+    winston.info('Failed to authenticate socket.io connection: no access token');
+    return done(new Error());
+  }
+  if ('access_token' in cookies) {
+    let token = cookies['access_token'];
+    // winston.debug('token:', token);
+    jwt.verify(token, jwtPublicKey, { algorithms: ['RS256'] }, (err, decoded) => {
+      
+      if (err) {
+        return done(new Error(err));
+      }
+      tokensToIoSockets[decoded.jti] = socket;
+
+      extraIoJwtTokenValidation(decoded, done);
+      
+    } );
+  }
+  
+}
+
+io.use(ioCookieParser);
+io.use(ioAuthenticator);
+
+function onSocketIoConnect(socket) {
+  ioSocket = socket;
+  winston.debug('A socket client connected');
+  socket.on('disconnect', () => onSocketIoDisconnect() );
+
+  // immediately send configuration to client
+  socket.emit('preferences', preferences);
+  socket.emit('collections', collections);
+  socket.emit('serverVersion', version);
+  socket.emit('publicKey', internalPublicKey);
+  socket.emit('nwservers', redactApiServerPasswords(nwservers));
+  socket.emit('nwservers', redactApiServerPasswords(nwservers));
+  socket.emit('feeds', feeds);
+  socket.emit('feedStatus', scheduler.status() );
+  emitUsers(socket);
+  socket.emit('useCases', useCases);
+}
+
+
+
+function onSocketIoDisconnect(socket) {
+  winston.debug('A socket client disconnected');
+}
+
+
+
+var rollingChannel = null;
+
+
+
+
+
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////////LISTEN/////////////////////////////////////////////////////////////////
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -4001,11 +3051,17 @@ var fixedHandler = null;
 function listener() {
   // Start listening for client traffic and away we go
   
-  rollingHandler = new rollingCollectionHandler( updateCollectionsDbCallback, winston, collections, collectionsDir, feederSocketFile, gsPath, pdftotextPath, sofficePath, sofficeProfilesDir, unrarPath, internalPrivateKeyFile, useCasesObj, preferences, nwservers, saservers, collectionsUrl);
+  
+  server.listen(listenPort);
+  
+  io.on('connection', (socket) => onSocketIoConnect(socket) );
+  rollingChannel = io.of('/rolling');
+  
+  rollingHandler = new rollingCollectionHandler( updateCollectionsDbCallback, winston, collections, collectionsDir, feederSocketFile, gsPath, pdftotextPath, sofficePath, sofficeProfilesDir, unrarPath, internalPrivateKeyFile, useCasesObj, preferences, nwservers, saservers, collectionsUrl, rollingChannel);
 
   fixedHandler = new fixedCollectionHandler( updateFixedCollectionsDbCallback, winston, collections, collectionsData, collectionsDir, feederSocketFile, gsPath, pdftotextPath, sofficePath, sofficeProfilesDir, unrarPath, internalPrivateKeyFile, useCasesObj, preferences, nwservers, saservers, collectionsUrl);
-  
-  app.listen(listenPort);
+
+
   apiInitialized = true;
   winston.info('Serving on localhost:' + listenPort);
 }

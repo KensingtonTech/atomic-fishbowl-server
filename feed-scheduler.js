@@ -7,15 +7,18 @@ module.exports = class {
 
   // the purpose of this class is to update feeds on a schedule
 
-  constructor(feedsDir, winst, decryptor, callback) {
+  constructor(feedsDir, winst, decryptor, callback, io) {
     this.scheduledFeeds = {};
     this.schedule = {};
     this.callback = callback;
     this.feedsDir = feedsDir;
     this.decryptor = decryptor;
     this.state = {};  // stores the state of jobs.  id : { 'message': string, 'time' : number }
+    this.io = io; // socket.io
     winston = winst;
   }
+
+
 
   updateSchedule(feeds) {
     winston.debug('updateSchedule(): received update');
@@ -37,6 +40,8 @@ module.exports = class {
     }
   }
 
+
+
   updateFeed(feed) {
     let id = feed.id;
     winston.debug('updateFeed(): id', id);
@@ -53,6 +58,8 @@ module.exports = class {
 
   }
 
+
+
   delFeed(id) {
     // used when a feed is deleted
     winston.debug('delFeed(): id', id);
@@ -60,7 +67,10 @@ module.exports = class {
     delete this.schedule[id];
     delete this.scheduledFeeds[id];
     delete this.state[id];
+    this.io.emit('feedStatus', this.status() );
   }
+
+
 
   addFeed(feed) {
     let id = feed.id;
@@ -89,6 +99,8 @@ module.exports = class {
 
   }
 
+
+
   updateFeedCallback(id) {
     // this actually updates the feed, and triggers the callback from the caller
 
@@ -110,17 +122,20 @@ module.exports = class {
       if (error) {
         winston.error('updateFeedCallback(): caught error updating feed ' + id + ':', error);
         this.state[id] = { good : false, time: timestamp };
+        this.io.emit('feedStatus', this.status() );
         return;
       }
 
       if (result.statusCode != 200) {
         winston.error('updateFeedCallback(): non-success HTTP status code received whilst updating feed ' + id + ': received', result.statusCode);
         this.state[id] = { good : false, time: timestamp };
+        this.io.emit('feedStatus', this.status() );
         return;
       }
 
       // winston.debug('updateFeedCallback(): myRequest callback()');
       this.state[id] = { good : true, time: timestamp };
+      this.io.emit('feedStatus', this.status() );
       this.callback(id);
 
     })
@@ -128,11 +143,15 @@ module.exports = class {
       let timestamp = new Date().getTime();
       winston.debug('updateFeedCallback(): caught error updating feed file' + id + '.feed :', err);
       this.state[id] = { good : false, time: timestamp };
+      this.io.emit('feedStatus', this.status() );
     })
     .pipe(fs.createWriteStream(this.feedsDir + '/' + id + '.feed'));
   }
 
+
+
   status() {
+    // winston.debug('status(): state:', this.state)
     return this.state;
   }
 
