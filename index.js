@@ -139,6 +139,7 @@ var saservers = {};
 var collections = {}; // holds the high-level definition of a collection but not its content data
 var collectionsData = {}; // holds content data and session data
 var feeds = {}; // holds definitions for hash data CSV's
+var exiting = false;
 
 const cfgDir = '/etc/kentech/afb';
 const certDir = cfgDir + '/certificates';
@@ -249,7 +250,7 @@ var defaultPreferences = {
   serviceTypes: { nw: false, sa: false },
 
   nw: {
-    nwInvestigateUrl: '',
+    url: '',
     summaryTimeout: 5,
     queryTimeout: 5,
     contentTimeout: 5,
@@ -2612,12 +2613,33 @@ function connectToDB() {
 function cleanCollectionDirs() {
   try {
     winston.info("Cleaning up collection directories");
-    for (let collection in collections) {
-      winston.debug("Cleaning collection '" + collections[collection].name + "' with id " + collection);
-      if (collections.hasOwnProperty(collection) && ( collections[collection].type == 'monitoring' || collections[collection].type == 'rolling' || ( collections[collection].type == 'fixed' && collections[collection].state != 'complete' ) ) ) { //hasOwnProperty needed to filter out object prototypes
+
+    for (let collectionId in collections) {
+
+      winston.debug("Cleaning collection '" + collections[collectionId].name + "' with id " + collectionId);
+      
+      if (collections.hasOwnProperty(collectionId) && ( collections[collectionId].type == 'rolling' || ( collections[collectionId].type == 'fixed' && collections[collectionId].state != 'complete' ) ) ) {
+        
         //winston.debug('Deleting dir', collectionsDir + '/' + collections[collection].id);
-        rimraf( collectionsDir + '/' + collections[collection].id, () => {} ); // delete output directory
+        rimraf( collectionsDir + '/' + collectionId, () => {} ); // delete output directory
+
       }
+
+      else if (collections.hasOwnProperty(collectionId) && collections[collectionId].type == 'monitoring') {
+  
+        fs.readdirSync(collectionsDir).forEach( filename => {
+          // winston.debug('filename:', filename);
+          let isDir = fs.statSync(collectionsDir + '/' + filename).isDirectory();
+          // winston.debug('isDir:', isDir);
+          
+          if (isDir && filename.startsWith(collectionId)) {
+            rimraf( collectionsDir + '/' + collectionId, () => {} ); // delete output directory
+          }
+
+        })
+
+      }
+
     }
   }
   catch(exception) {
@@ -2842,24 +2864,33 @@ function startFeeder() {
     socketServer.listen(tempName, () => {
       
       winston.debug('Waiting for Feeder connection');
-      winston.debug("Spawning feeder_srv with socket file " + tempName);
+      winston.debug("Launching feeder_srv with socket file " + tempName);
 
       // spawn the feeder process
-      var feederSrv = spawn('./feeder_stub.py', [tempName], { shell: false, stdio: 'inherit' });
+      var feederSrvProcess = spawn('./feeder_stub.py', [tempName], { shell: false, stdio: 'inherit' });
       
 
       // wait for the feeder to exit (ideally it shouldn't until we shutdown)
-      feederSrv.on('exit', (code) => {
-        if (typeof code === 'undefined') {
+      feederSrvProcess.on('exit', (code) => {
+
+        if (exiting) {
+          return;
+        }
+
+        if (!code) {
           winston.debug('Feeder process exited abnormally without an exit code');
         }
-        else if (code != 0) {
-          winston.debug('Feeder process exited abnormally with exit code',code.toString());
+        else if (code !== 0) {
+          winston.debug('Feeder process exited abnormally with exit code', code);
         }
         else {
-          winston.debug('Feeder process exited normally with exit code', code.toString());
+          winston.debug('Feeder process exited normally with exit code', code);
         }
-        
+
+        winston.log('Relaunching feeder_srv');
+        feederSrvProcess = spawn('./feeder_stub.py', [tempName], { shell: false, stdio: 'inherit' });
+
+
       });
     });
   }
@@ -2961,6 +2992,7 @@ function extraIoJwtTokenValidation(jwt_payload, done) {
   // check whether user is enabled
   User.findOne({id: jwt_payload.sub}, function(err, user) {
     if (err) {
+      socket.disconnect(true);
       return done(new Error());
     }
     if (user && user.enabled) {
@@ -2968,11 +3000,13 @@ function extraIoJwtTokenValidation(jwt_payload, done) {
       return done();
     }
     if (user && !user.enabled) {
+      // user is disabled
       winston.info('Socket login denied for user', user.username);
       winston.info('Attempt to authenticate by disabled user', user.username);
       return done(new Error());
     }
     else {
+      socket.disconnect(true);
       return done(new Errror());
       // or you could create a new account
     }
@@ -2988,20 +3022,35 @@ function ioAuthenticator(socket, done) {
   let req = socket.request;
   // winston.debug('cookie:', req.headers.cookie);
   let cookies = req.headers.cookie;
+  if (!cookies) {
+    socket.error('Failed to authenticate socket.io connection: no cookies in header');
+    socket.disconnect(true);
+    return done(new Error());
+  }
   if ( !('access_token' in cookies) ) {
-    winston.info('Failed to authenticate socket.io connection: no access token');
+    // winston.debug('Failed to authenticate socket.io connection: no access token');
+    socket.error('Failed to authenticate socket.io connection: no access token');
+    socket.disconnect(true);
     return done(new Error());
   }
   if ('access_token' in cookies) {
     let token = cookies['access_token'];
     // winston.debug('token:', token);
     jwt.verify(token, jwtPublicKey, { algorithms: ['RS256'] }, (err, decoded) => {
+
+      // winston.debug('auth error:', err);
+
+      // winston.debug('jwt:', decoded);
+      socket['user'] = decoded; // write our token info to the socket so it can be accessed later
       
       if (err) {
-        return done(new Error(err));
+        // authentication failed
+        socket.error('Failed to authenticate socket.io connection: token authentication failed');
+        socket.disconnect(true);
+        return done(new Error());
       }
-      tokensToIoSockets[decoded.jti] = socket;
 
+      tokensToIoSockets[decoded.jti] = socket;
       extraIoJwtTokenValidation(decoded, done);
       
     } );
@@ -3011,6 +3060,9 @@ function ioAuthenticator(socket, done) {
 
 io.use(ioCookieParser);
 io.use(ioAuthenticator);
+
+var collectionsChannel = null;
+collectionsChannel = io.of('/collections');
 
 function onSocketIoConnect(socket) {
   ioSocket = socket;
@@ -3023,7 +3075,7 @@ function onSocketIoConnect(socket) {
   socket.emit('serverVersion', version);
   socket.emit('publicKey', internalPublicKey);
   socket.emit('nwservers', redactApiServerPasswords(nwservers));
-  socket.emit('nwservers', redactApiServerPasswords(nwservers));
+  socket.emit('saservers', redactApiServerPasswords(saservers));
   socket.emit('feeds', feeds);
   socket.emit('feedStatus', scheduler.status() );
   emitUsers(socket);
@@ -3033,12 +3085,12 @@ function onSocketIoConnect(socket) {
 
 
 function onSocketIoDisconnect(socket) {
-  winston.debug('A socket client disconnected');
+  // winston.debug('A socket client disconnected');
 }
 
 
 
-var rollingChannel = null;
+
 
 
 
@@ -3055,11 +3107,11 @@ function listener() {
   server.listen(listenPort);
   
   io.on('connection', (socket) => onSocketIoConnect(socket) );
-  rollingChannel = io.of('/rolling');
   
-  rollingHandler = new rollingCollectionHandler( updateCollectionsDbCallback, winston, collections, collectionsDir, feederSocketFile, gsPath, pdftotextPath, sofficePath, sofficeProfilesDir, unrarPath, internalPrivateKeyFile, useCasesObj, preferences, nwservers, saservers, collectionsUrl, rollingChannel);
+  
+  rollingHandler = new rollingCollectionHandler( updateCollectionsDbCallback, winston, collections, collectionsDir, feederSocketFile, gsPath, pdftotextPath, sofficePath, sofficeProfilesDir, unrarPath, internalPrivateKeyFile, useCasesObj, preferences, nwservers, saservers, collectionsUrl, collectionsChannel);
 
-  fixedHandler = new fixedCollectionHandler( updateFixedCollectionsDbCallback, winston, collections, collectionsData, collectionsDir, feederSocketFile, gsPath, pdftotextPath, sofficePath, sofficeProfilesDir, unrarPath, internalPrivateKeyFile, useCasesObj, preferences, nwservers, saservers, collectionsUrl);
+  fixedHandler = new fixedCollectionHandler( updateFixedCollectionsDbCallback, winston, collections, collectionsData, collectionsDir, feederSocketFile, gsPath, pdftotextPath, sofficePath, sofficeProfilesDir, unrarPath, internalPrivateKeyFile, useCasesObj, preferences, nwservers, saservers, collectionsUrl, collectionsChannel);
 
 
   apiInitialized = true;
