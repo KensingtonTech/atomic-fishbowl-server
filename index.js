@@ -42,6 +42,7 @@ const version = `${buildProperties.major}.${buildProperties.minor}.${buildProper
 const feedScheduler = require('./feed-scheduler.js');
 const rollingCollectionHandler = require('./rolling-collections');
 const fixedCollectionHandler = require('./fixed-collections');
+const nodeCleanup = require('node-cleanup');
 var development = process.env.NODE_ENV !== 'production';
 // export NODE_ENV='production'
 // export NODE_ENV='development'
@@ -114,21 +115,7 @@ winston.info('Starting Atomic Fishbowl server version', version);
 
 
 
-///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-/////////////////////////////////////////////////////////SIGTERM SIGNAL HANDLER////////////////////////////////////////////////////////////
-///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-
-process.on('SIGTERM', function() {
-  winston.info('Caught SIGTERM.  Exiting gracefully');
-  process.exit(0);
-});
-
-
-
-
-
-
-///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+//////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////////CONFIGURATION//////////////////////////////////////////////////////////////
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
@@ -245,7 +232,6 @@ var defaultPreferences = {
   minY: 255,  
   defaultContentLimit: 1000,
   defaultRollingHours: 1,
-  masonryColumnSize: 350,
   debugLogging: false,
   serviceTypes: { nw: false, sa: false },
 
@@ -1217,7 +1203,6 @@ app.post('/api/feed/scheduled', passport.authenticate('jwt', { session: false } 
           io.emit('feeds', feeds);
           writeToSocket( feederSocket, JSON.stringify( { new: true, feed: feed } ) ); // let feeder server know of our update
           res.status(201).send( JSON.stringify( { success: true } ) );
-          // writeToSocket(feederSocket, JSON.stringify( { feeds: feeds } ) ); // let feeder server know of our update
         }
       });
     })
@@ -1390,9 +1375,6 @@ app.post('/api/feed/edit/withoutfile', passport.authenticate('jwt', { session: f
             scheduler.updateFeed(feed);
             writeToSocket( feederSocket, JSON.stringify( { update: true, feed: feed } ) ); // let feeder server know of our update
             res.status(201).send( JSON.stringify( { success: true } ) );
-            
-            //notify scheduler of update here
-            // writeToSocket(feederSocket, JSON.stringify( { feeds: feeds } ) ); // let feeder server know of our update
           }
         });
       })
@@ -2187,7 +2169,7 @@ app.get('/api/collection/fixed/:id', passport.authenticate('jwt', { session: fal
   winston.info('GET /api/collection/fixed/:id', collectionId);
   if (collectionId in collections && collections[collectionId]['state'] == 'initial' || collections[collectionId]['state'] == 'building' || collections[collectionId]['state'] == 'error') {
     // collection is either new or is building
-    fixedHandler.handleFixedConnection(req, res);
+    fixedHandler.onHttpConnection(req, res);
   }
   else if (collectionId in collections) { // && this.collections[collectionId]['state'] == 'complete' // we should even use this if state is 'error'
     // this is a complete fixed collection
@@ -2221,7 +2203,7 @@ app.get('/api/collection/monitoring/unpause/:id', passport.authenticate('jwt', {
 
 
 app.get('/api/collection/rolling/:collectionId', passport.authenticate('jwt', { session: false } ), (req, res) => {
-  rollingHandler.handleRollingConnection(req, res);
+  rollingHandler.onHttpConnection(req, res);
 });
 
 
@@ -2394,7 +2376,6 @@ function mongooseInit() {
   mongoose.connect(mongooseUrl, mongooseOptions )
           .then( () => onMongooseConnected() )
           .then( () => startFeeder() )
-          // .then( () => listener() ) // now starting after feeder is running
           .catch( (err) => {
             winston.error('Mongoose error whilst connecting to mongo.  Exiting with code 1.');
             winston.error(err);
@@ -2721,79 +2702,6 @@ var transformUser = function(doc, ret, options) {
 
 
 
-function purgeSessions(thisRollingCollection, sessionsToPurge) {
-  // winston.debug('purgeSessions(): sessionsToPurge.length: ', sessionsToPurge.length)
-  while (sessionsToPurge.length > 0) {
-    let sessionToPurge = sessionsToPurge.shift();
-    // winston.debug('purgeSessions(): Trying to purge session', sessionToPurge);
-
-    for (let i = 0; i < thisRollingCollection.sessions.length; i++) {
-      // Purge session
-      let session = thisRollingCollection.sessions[i];
-      if (session.id == sessionToPurge) {
-        // winston.debug('purgeSessions(): purging session', session.id);
-        thisRollingCollection.sessions.splice(i, 1);
-        break;
-      }
-    }
-
-    let searchesToPurge = [];
-    for (let i = 0; i < thisRollingCollection.search.length; i++) {
-      let search = thisRollingCollection.search[i];
-      if (search.session == sessionToPurge) {
-        searchesToPurge.push(search);
-      }
-    }
-    while (searchesToPurge.length != 0) {
-      let searchToPurge = searchesToPurge.shift();
-      for (let i = 0; i < thisRollingCollection.search.length; i++) {
-        let search = thisRollingCollection.search[i];
-        if (searchToPurge.session == search.session && searchToPurge.contentFile == search.contentFile) {
-          // Purge search
-          winston.debug('purgeSessions(): purging search', search.session);
-          thisRollingCollection.search.splice(i, 1);
-          break;
-        }
-      }
-    }
-
-    let contentsToPurge = [];
-    for (let i = 0; i < thisRollingCollection.images.length; i++) {
-      // Purge content
-      let content = thisRollingCollection.images[i];
-      if (content.session == sessionToPurge) {
-        contentsToPurge.push(content);
-      }
-    }
-    while (contentsToPurge.length != 0) {
-      let contentToPurge = contentsToPurge.shift();
-      for (let i = 0; i < thisRollingCollection.images.length; i++) {
-        let content = thisRollingCollection.images[i];
-        if (contentToPurge.session == content.session && contentToPurge.contentFile == content.contentFile && contentToPurge.contentType == content.contentType) {
-          // Purge content
-          winston.debug('purgeSessions(): purging content', content.session);
-          thisRollingCollection.images.splice(i, 1);
-          if ('contentFile' in content) {
-            fs.unlink(content.contentFile, () => {});
-          }
-          if ('proxyContentFile' in content) {
-            fs.unlink(content.proxyContentFile, () => {});
-          }
-          if ('thumbnail' in content) {
-            fs.unlink(content.thumbnail, () => {});
-          }
-          if ('pdfImage' in content) {
-            fs.unlink(content.pdfImage, () => {});
-          }
-          break;
-        }
-      }
-    }
-  }
-}
-
-
-
 function writeToSocket(socket, data) {
   socket.write(data + '\n');
   // socket.flush();
@@ -2801,7 +2709,34 @@ function writeToSocket(socket, data) {
 
 
 
-function feederSocketCommunicationHandler(socket, tempName) {
+var feederDataHandler = (data) => {
+  // Handles data sent by feeder_srv
+  while (data.length > 0) {
+    let line = data.shift();
+    let message = JSON.parse(line);
+    // winston.debug('feederDataHandler(): message:', message);
+
+    if (!feederInitialized && 'initialized' in message && message.initialized && 'feederSocket' in message) {
+      winston.info('feederDataHandler(): Feeder is initialized');
+      feederInitialized = true;
+      feederSocketFile = message.feederSocket;
+      if (rollingHandler) {
+        rollingHandler.updateFeederSocketFile(feederSocketFile);
+      }
+      if (fixedHandler) {
+        fixedHandler.updateFeederSocketFile(feederSocketFile);
+      }
+      winston.debug('feederDataHandler(): Feeder socket file is ' + feederSocketFile);
+      if (!apiInitialized) {
+        finishStartup(); // start the API listener
+      }
+    }
+  }
+}
+
+
+
+function onConnectionFromFeederSrv(socket, tempName) {
 
   feederSocket = socket; // assign our socket globally so we can write to it later
 
@@ -2829,24 +2764,34 @@ function feederSocketCommunicationHandler(socket, tempName) {
   writeToSocket(feederSocket, JSON.stringify( { config: { feedsDir: feedsDir }, feeds: feeds } ));
 }
 
-var feederDataHandler = (data) => {
-  // Handles data sent by feeder_srv
-  while (data.length > 0) {
-    let line = data.shift();
-    let message = JSON.parse(line);
-    // winston.debug('feederDataHandler(): message:', message);
 
-    if (!feederInitialized && 'initialized' in message && message.initialized && 'feederSocket' in message) {
-      winston.info('feederDataHandler(): Feeder is initialized');
-      feederInitialized = true;
-      feederSocketFile = message.feederSocket;
-      winston.debug('feederDataHandler(): Feeder socket file is ' + feederSocketFile);
-      if (!apiInitialized) {
-        listener(); // start the API listener
-      }
-    }
+
+
+var onFeederExit = (code, signal) => {
+  /*if (exiting) {
+    return;
+  }*/
+
+  feederSrvProcess = null;
+
+  if (!code) {
+    winston.debug('Feeder process exited abnormally without an exit code');
   }
-};
+  else if (code !== 0) {
+    winston.debug('Feeder process exited abnormally with exit code', code);
+  }
+  else {
+    winston.debug('Feeder process exited normally with exit code', code);
+    return;
+  }
+  winston.log('Relaunching feeder_srv');
+  startFeeder();
+
+}
+
+
+
+var feederSrvProcess = null;
 
 
 
@@ -2855,10 +2800,10 @@ function startFeeder() {
 
   try {
     // get a temporary file to use as our domain socket
-    var tempName = temp.path({suffix: '.socket'});
+    let tempName = temp.path({suffix: '.socket'});
     
-    // open UNIX domain socket to talk to server script, and set the socket handler to feederSocketCommunicationHandler
-    var socketServer = net.createServer( (socket) => feederSocketCommunicationHandler(socket, tempName) );
+    // open UNIX domain socket to talk to server script, and set the socket handler to onConnectionFromFeederSrv
+    let socketServer = net.createServer( (socket) => onConnectionFromFeederSrv(socket, tempName) );
 
     // start the feeder_srv
     socketServer.listen(tempName, () => {
@@ -2867,31 +2812,10 @@ function startFeeder() {
       winston.debug("Launching feeder_srv with socket file " + tempName);
 
       // spawn the feeder process
-      var feederSrvProcess = spawn('./feeder_stub.py', [tempName], { shell: false, stdio: 'inherit' });
+      feederSrvProcess = spawn('./feeder_stub.py', [tempName], { shell: false, stdio: 'inherit' });
       
-
       // wait for the feeder to exit (ideally it shouldn't until we shutdown)
-      feederSrvProcess.on('exit', (code) => {
-
-        if (exiting) {
-          return;
-        }
-
-        if (!code) {
-          winston.debug('Feeder process exited abnormally without an exit code');
-        }
-        else if (code !== 0) {
-          winston.debug('Feeder process exited abnormally with exit code', code);
-        }
-        else {
-          winston.debug('Feeder process exited normally with exit code', code);
-        }
-
-        winston.log('Relaunching feeder_srv');
-        feederSrvProcess = spawn('./feeder_stub.py', [tempName], { shell: false, stdio: 'inherit' });
-
-
-      });
+      feederSrvProcess.on('exit', onFeederExit );
     });
   }
   catch(e) {
@@ -3096,22 +3020,84 @@ function onSocketIoDisconnect(socket) {
 
 
 
+
+
+
+
+
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////////CLEANUP/////////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+function onCleanup(exitCode, signal) {
+  
+  winston.debug('onCleanup(): exitCode:', exitCode);
+  winston.debug('onCleanup(): signal:', signal);
+  
+  
+  setTimeout( () => {
+    
+    // terminate workers
+    if (rollingHandler) {
+      winston.debug('Terminating rolling collection workers');
+      rollingHandler.killall();
+    }
+    
+    if (fixedHandler) {
+      winston.debug('Terminating fixed collection workers');
+      fixedHandler.killall();
+    }
+    
+    // terminate feeder_srv
+    if (feederSrvProcess) {
+      winston.debug('Stopping feeder_srv')
+      // feederSrvProcess.off('exit', onFeederExit);
+      feederSrvProcess.removeAllListeners();
+      feederSrvProcess.kill('SIGINT');
+    }
+    
+    // save collection state
+    
+    
+    // end program
+    if (signal) {
+      process.kill(process.pid, signal);
+    }
+    else {
+      process.exit(exitCode);
+    }
+    
+  }, 0 );
+  
+  nodeCleanup.uninstall();
+  return false;
+
+}
+
+
+
+
+
+
+
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////////LISTEN/////////////////////////////////////////////////////////////////
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
-function listener() {
+function finishStartup() {
   // Start listening for client traffic and away we go
-  
   
   server.listen(listenPort);
   
   io.on('connection', (socket) => onSocketIoConnect(socket) );
   
   
-  rollingHandler = new rollingCollectionHandler( updateCollectionsDbCallback, winston, collections, collectionsDir, feederSocketFile, gsPath, pdftotextPath, sofficePath, sofficeProfilesDir, unrarPath, internalPrivateKeyFile, useCasesObj, preferences, nwservers, saservers, collectionsUrl, collectionsChannel);
+  rollingHandler = new rollingCollectionHandler( updateCollectionsDbCallback, winston, collections, collectionsDir, feeds, feederSocketFile, gsPath, pdftotextPath, sofficePath, sofficeProfilesDir, unrarPath, internalPrivateKeyFile, useCasesObj, preferences, nwservers, saservers, collectionsUrl, collectionsChannel);
 
-  fixedHandler = new fixedCollectionHandler( updateFixedCollectionsDbCallback, winston, collections, collectionsData, collectionsDir, feederSocketFile, gsPath, pdftotextPath, sofficePath, sofficeProfilesDir, unrarPath, internalPrivateKeyFile, useCasesObj, preferences, nwservers, saservers, collectionsUrl, collectionsChannel);
+  fixedHandler = new fixedCollectionHandler( updateFixedCollectionsDbCallback, winston, collections, collectionsData, collectionsDir, feeds, feederSocketFile, gsPath, pdftotextPath, sofficePath, sofficeProfilesDir, unrarPath, internalPrivateKeyFile, useCasesObj, preferences, nwservers, saservers, collectionsUrl, collectionsChannel);
+
+  winston.debug('Installing cleanup handler');
+  nodeCleanup( (exitCode, signal) => onCleanup(exitCode, signal) );
 
 
   apiInitialized = true;

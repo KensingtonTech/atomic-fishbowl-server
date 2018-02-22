@@ -21,10 +21,13 @@ class Communicator(asynchat.async_chat):
     self.out_buffer = ''
     self.callback = callback
 
-    
+  
+
   def collect_incoming_data(self, data):
     self.in_buffer.append(data)
     
+
+
   def found_terminator(self):
     msg = ''.join(self.in_buffer)
     self.in_buffer = []
@@ -45,6 +48,8 @@ class Communicator(asynchat.async_chat):
       log.error("No identifiable attribute was found in received payload.  Exiting with code 1")  #this should in theory never happen
       sys.exit(1)
   
+
+
   def write_data(self, data):
     #print "communicator: write_data():", data
     '''
@@ -54,6 +59,8 @@ class Communicator(asynchat.async_chat):
     self.out_buffer += data
     self.handle_write()
      
+
+
   def handle_write(self):
     #print "communicator: handle_write()"
     #Data must be placed in a buffer somewhere.
@@ -61,19 +68,25 @@ class Communicator(asynchat.async_chat):
     sent = self.send(self.out_buffer)
     self.out_buffer = self.out_buffer[sent:]
   
+
+
   """
   def readable(self):
     #Test for select() and friends
     return True
   """
 
+
+
   #There is no 'e' in 'writeable' here.
   def writable(self):
     #Test for select(). Must have data to write
     #otherwise select() will trigger
     if self.connected and len(self.out_buffer) > 0:
-        return True
+      return True
     return False
+
+
 
   def handle_close(self):
     #Flush the buffer
@@ -98,20 +111,20 @@ class FeederCommunicator(asynchat.async_chat):
   def __init__(self, file, callback):
     asynchat.async_chat.__init__(self)
     self.create_socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    self.socket.settimeout(None)
     self.connect( file )
     self.set_terminator('\n')
     self.in_buffer = []
     self.out_buffer = ''
     self.callback = callback
-    self.file = file
 
-  def reOpen():
-    pass
 
-    
+
   def collect_incoming_data(self, data):
     self.in_buffer.append(data)
-    
+
+
+
   def found_terminator(self):
     msg = ''.join(self.in_buffer)
     self.in_buffer = []
@@ -123,6 +136,7 @@ class FeederCommunicator(asynchat.async_chat):
 
     self.callback(obj)
 
+
   
   def write_data(self, data):
     #print "communicator: write_data():", data
@@ -132,31 +146,38 @@ class FeederCommunicator(asynchat.async_chat):
     '''
     self.out_buffer += data
     self.handle_write()
-     
+
+
+
   def handle_write(self):
     #print "communicator: handle_write()"
     #Data must be placed in a buffer somewhere.
     #(In this case out_buffer)
     sent = self.send(self.out_buffer)
     self.out_buffer = self.out_buffer[sent:]
-  
+
+
+
   """
   def readable(self):
     #Test for select() and friends
     return True
   """
 
+
+
   #There is no 'e' in 'writeable' here.
   def writable(self):
     #Test for select(). Must have data to write
     #otherwise select() will trigger
     if self.connected and len(self.out_buffer) > 0:
-        return True
+      return True
     return False
 
-  def closeme(self):
+
+
+  def handle_close(self):
     #Flush the buffer
-    #print "communicator: handle_close()"
     try:
       while self.writable():
         self.handle_write()
@@ -167,3 +188,4 @@ class FeederCommunicator(asynchat.async_chat):
       log.exception('Unhandled exception raised whilst handle_close() on communicator.  Not sure what this means.  Exiting with code 1')
       sys.exit(1)
     self.close()
+

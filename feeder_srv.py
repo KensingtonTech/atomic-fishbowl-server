@@ -126,6 +126,7 @@ def main():
     socketFile = sys.argv[1]
     
     global configCommunicator
+    #print "socketFile:", socketFile
     configCommunicator = Communicator(socketFile, configReceived)
     
     #create a temp unix socket to listen for worker connections

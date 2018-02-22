@@ -11,11 +11,12 @@ class FixedCollectionHandler {
 
   // The purpose of this class is to manage connections to API requests for fixed collections
 
-  constructor(dbUpdateCallback, winston, collections, collectionsData, collectionsDir, feederSocketFile, gsPath, pdftotextPath, sofficePath, sofficeProfilesDir, unrarPath, internalPrivateKeyFile, useCasesObj, preferences, nwservers, saservers, collectionsUrl, channel) {
+  constructor(dbUpdateCallback, winston, collections, collectionsData, collectionsDir, feeds, feederSocketFile, gsPath, pdftotextPath, sofficePath, sofficeProfilesDir, unrarPath, internalPrivateKeyFile, useCasesObj, preferences, nwservers, saservers, collectionsUrl, channel) {
 
     this.cfg = {
       winston: winston,
       collections: collections,
+      feeds: feeds,
       feederSocketFile: feederSocketFile,
       collectionsData: collectionsData,
       collectionsDir: collectionsDir,
@@ -53,7 +54,7 @@ class FixedCollectionHandler {
 
 
   onJoinCollection(socket, collectionId) {
-    // this is the equivalent of handleFixedConnection(), but for socket connections
+    // this is the equivalent of onHttpConnection(), but for socket connections
     this.winston.debug('FixedCollectionHandler: onJoinCollection()');
 
     socket['collectionId'] = collectionId; // add the collection id to our socket so we can later identify it
@@ -147,13 +148,13 @@ class FixedCollectionHandler {
   
 
   
-  handleFixedConnection(req, res) {
+  onHttpConnection(req, res) {
     // Builds and streams a fixec collection back to the client.  Handles the client connection and kicks off the process
     
     let collectionId = req.params.id;
     let collection = this.cfg.collections[collectionId];
     
-    this.winston.info('FixedCollectionHandler: handleFixedConnection(): collectionId:', collectionId);
+    this.winston.info('FixedCollectionHandler: onHttpConnection(): collectionId:', collectionId);
     
     // create a client connection handler for this connection
     // does a manager for the requested collection exist?
@@ -184,7 +185,7 @@ class FixedCollectionHandler {
 
   
   fixedCollectionManagerRemovalCallback(id) {
-    this.winston.info('FixedCollectionHandler: fixedCollectionManagerRemovalCallback()');
+    this.winston.debug('FixedCollectionHandler: fixedCollectionManagerRemovalCallback()');
     delete this.collectionManagers[id];
   }
 
@@ -216,6 +217,12 @@ class FixedCollectionHandler {
         manager.abort();
       }
     }
+  }
+
+
+
+  updateFeederSocketFile(filename) {
+    this.cfg.feederSocketFile = filename;
   }
 
 }
@@ -497,7 +504,7 @@ class FixedCollectionManager {
 
     try {
       this.winston.debug("Deleting output directory for collection", this.collectionId);
-      rimraf( this.cfg.collectionsDir + '/' + this.collectionId, () => {} ); // Delete output directory
+      rimraf.sync( this.cfg.collectionsDir + '/' + this.collectionId ); // Delete output directory
     }
     catch(exception) {
       this.winston.error('ERROR deleting output directory ' + this.cfg.collectionsDir + '/' + this.collectionId, exception);
@@ -508,7 +515,7 @@ class FixedCollectionManager {
     // this.sendToChannel('clear', true);
     // this.sendToHttpClients( { collectionDeleted: this.collectionId } );
     this.endClients();
-    this.removalCallback(this.collectionId);
+    // this.removalCallback(this.collectionId);
   }
 
 
@@ -746,7 +753,7 @@ class FixedCollectionManager {
       }
       else {
         // we're using a hash feed
-        cfg['hashFeed'] = feeds[this.collection.hashFeed] // pass the hash feed definition
+        cfg['hashFeed'] = this.cfg.feeds[this.collection.hashFeed] // pass the hash feed definition
         cfg['hashFeederSocket'] = this.cfg.feederSocketFile
       }
   

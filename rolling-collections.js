@@ -11,13 +11,14 @@ class RollingCollectionHandler {
 
   // The purpose of this class is to manage connections to API requests for rolling collections
 
-  constructor(dbUpdateCallback, winston, collections, collectionsDir, feederSocketFile, gsPath, pdftotextPath, sofficePath, sofficeProfilesDir, unrarPath, internalPrivateKeyFile, useCasesObj, preferences, nwservers, saservers, collectionsUrl, channel) {
+  constructor(dbUpdateCallback, winston, collections, collectionsDir, feeds, feederSocketFile, gsPath, pdftotextPath, sofficePath, sofficeProfilesDir, unrarPath, internalPrivateKeyFile, useCasesObj, preferences, nwservers, saservers, collectionsUrl, channel) {
 
     this.cfg = {
       winston: winston,
       collections: collections,
-      feederSocketFile: feederSocketFile,
       collectionsDir: collectionsDir,
+      feeds: feeds,
+      feederSocketFile: feederSocketFile,
       gsPath: gsPath,
       pdftotextPath: pdftotextPath,
       sofficePath: sofficePath,
@@ -53,7 +54,7 @@ class RollingCollectionHandler {
 
 
   onJoinCollection(socket, data) {
-    // this is the equivalent of handleRollingConnection(), but for socket connections
+    // this is the equivalent of onHttpConnection(), but for socket connections
     // data must contain properties collectionID and sessionId
     // sessionId should be null if a standard rolling collection
     this.winston.debug('RollingCollectionHandler: onJoinCollection()');
@@ -159,13 +160,13 @@ class RollingCollectionHandler {
   
 
   
-  handleRollingConnection(req, res) {
+  onHttpConnection(req, res) {
     // Builds and streams a rolling or monitoring collection back to the client.  Handles the client connection and kicks off the process
     
     let collectionId = req.params.collectionId;
     let clientSessionId = req.headers['afbsessionid'];
     
-    this.winston.info('RollingCollectionHandler: handleRollingConnection(): collectionId:', collectionId);
+    this.winston.info('RollingCollectionHandler: onHttpConnection(): collectionId:', collectionId);
     // this.winston.debug('preferences:', this.cfg.preferences);
     
     let rollingId = collectionId;
@@ -176,7 +177,7 @@ class RollingCollectionHandler {
     }
     let collection = this.cfg.collections[collectionId];
 
-    this.winston.info('RollingCollectionHandler: handleRollingConnection(): rollingId:', rollingId);
+    this.winston.info('RollingCollectionHandler: onHttpConnection(): rollingId:', rollingId);
     
     // create a client connection handler for this connection
     // does a manager for the requested rolling collection exist?
@@ -259,7 +260,7 @@ class RollingCollectionHandler {
 
   
   rollingCollectionManagerRemovalCallback(id) {
-    this.winston.info('RollingCollectionHandler: rollingCollectionManagerRemovalCallback()');
+    this.winston.debug('RollingCollectionHandler: rollingCollectionManagerRemovalCallback()');
     delete this.rollingCollectionManagers[id];
   }
 
@@ -288,12 +289,19 @@ class RollingCollectionHandler {
 
 
   killall() {
-    for (let rollingId in this.collectionManagers) {
-      if (this.collectionManagers.hasOwnProperty(rollingId)) {
-        let manager = this.collectionManagers[rollingId];
+    this.winston.debug('RollingCollectionHandler: killall()');
+    for (let rollingId in this.rollingCollectionManagers) {
+      if (this.rollingCollectionManagers.hasOwnProperty(rollingId)) {
+        let manager = this.rollingCollectionManagers[rollingId].manager;
         manager.abort();
       }
     }
+  }
+
+
+
+  updateFeederSocketFile(filename) {
+    this.cfg.feederSocketFile = filename;
   }
 
 }
@@ -728,13 +736,7 @@ class RollingCollectionManager {
   abort() {
     this.winston.info('RollingCollectionManager: abort()');
 
-    try {
-      this.winston.debug("Deleting output directory for collection", this.collectionId);
-      rimraf( this.cfg.collectionsDir + '/' + this.collectionId, () => {} ); // Delete output directory
-    }
-    catch(exception) {
-      this.winston.error('ERROR deleting output directory ' + this.cfg.collectionsDir + '/' + this.collectionId, exception);
-    }
+    // we only get here if the program is exiting, either gracefully or due to an error
 
     // stop the work loop
     if (this.workInterval) {
@@ -743,6 +745,14 @@ class RollingCollectionManager {
     }
 
     this.killWorker();
+
+    try {
+      this.winston.debug("Deleting output directory for collection", this.collectionId);
+      rimraf.sync( this.cfg.collectionsDir + '/' + this.rollingId ); // Delete output directory
+    }
+    catch(exception) {
+      this.winston.error('ERROR deleting output directory ' + this.cfg.collectionsDir + '/' + this.collectionId, exception);
+    }
     
     if (this.destroyTimeout) {
       clearTimeout(this.destroyTimeout);
@@ -752,7 +762,7 @@ class RollingCollectionManager {
     // this.sendToChannel('clear', true);
     // this.sendToHttpClients( { collectionDeleted: this.collectionId } ); // don't think this belongs here
     this.endAllClients();
-    this.removalCallback(this.collectionId);
+    // this.removalCallback(this.collectionId);
   }
 
 
@@ -952,7 +962,7 @@ class RollingCollectionManager {
       this.winston.debug("workLoop(): Starting run for rollingId", this.rollingId);
 
 
-      if (this.monitoringCollection && this.paused === true) {
+      if (this.monitoringCollection && this.paused) {
         this.winston.debug(`workLoop(): Collection ${this.rollingId} is paused.  Skipping worker run for this cycle`);
         return;
       }
@@ -1074,6 +1084,11 @@ class RollingCollectionManager {
     
     this.winston.debug("onConnectionFromWorker(): Connection received from worker to build rolling or monitoring collection", this.rollingId);
     
+    if (this.monitoringCollection && !this.paused) {
+      // clean up monitoring collection files from last run
+      rimraf(this.cfg.collectionsDir + '/' + this.rollingId + '/*', () => {} );
+    }
+
     let ourState = '';
     // Tell our subscribed clients that we're rolling, so they can start their spinny icon and whatnot
     if (this.monitoringCollection) {
@@ -1210,8 +1225,8 @@ class RollingCollectionManager {
       }
       else {
         // we're using a hash feed
-        cfg['hashFeed'] = feeds[this.collection.hashFeed] // pass the hash feed definition
-        cfg['hashFeederSocket'] = this.cfg.feederSocketFile
+        cfg['hashFeed'] = this.cfg.feeds[this.collection.hashFeed]; // pass the hash feed definition
+        cfg['hashFeederSocket'] = this.cfg.feederSocketFile;
       }
   
       cfg['query'] = this.collection.query;
@@ -1251,14 +1266,6 @@ class RollingCollectionManager {
       cfg['timeEnd'] = moment().startOf('minute').unix() - 1 - queryDelaySeconds;
       cfg['timeBegin'] = ( cfg['timeEnd'] - 60) + 1;
     }
-
-    
-
-
-
-
-
-
 
     else if (this.runs == 1) {
       // This is the first run of a rolling collection
@@ -1314,12 +1321,6 @@ class RollingCollectionManager {
     this.lastEnd = cfg['timeEnd']; // store the time of last run so that we can reference it the next time we loop
 
 
-
-
-
-
-
-  
     if ('distillationTerms' in this.collection) {
       cfg['distillationTerms'] = this.collection.distillationTerms;
     }

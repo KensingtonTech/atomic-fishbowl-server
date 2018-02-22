@@ -24,6 +24,7 @@ import shlex
 import socket
 from httplib import BadStatusLine
 from worker_feedmanager import FeedManager
+from threading import Thread
 import asyncore
 import traceback
 
@@ -547,6 +548,14 @@ class ContentProcessor:
         calcHash = hasher.hexdigest().decode('utf-8').lower()
         log.debug("ContentProcessor: genHash(): Session " + str(contentObj.session) + ". " + contentObj.hashType + " hash for " + contentObj.contentFile + " is " + calcHash)
         hashFinder(calcHash, self.cfg['sha256Hashes'])
+
+
+
+  def startThread(self):
+    try:
+      asyncore.loop(.25, use_poll = False)
+    except Exception as e:
+      pass
       
     
     
@@ -562,9 +571,12 @@ class ContentProcessor:
         self.socketFile = self.cfg['hashFeederSocket']
         self.hashFeedId = self.cfg['hashFeed']['id']
         self.feedManager = FeedManager(self.socketFile, self.onFeederResponse, self.hashFeedId)
-        from threading import Thread
-        self.thread =  Thread(target = asyncore.loop, kwargs = { 'use_poll': True, 'timeout': .25 } )
+
+        #self.thread =  Thread(target = asyncore.loop, kwargs = { 'use_poll': False, 'timeout': .25 } )
+        self.thread =  Thread(target = self.startThread)
+        self.thread.daemon = True
         self.thread.start()
+
         if self.cfg['serviceType'] == 'nw':
           res = self.extractFilesFromMultipart(sessionId, payload)
         elif self.cfg['serviceType'] == 'sa':
