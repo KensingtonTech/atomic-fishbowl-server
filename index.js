@@ -31,21 +31,24 @@ mongoose.Promise = Promise;
 const jwt = require('jsonwebtoken');
 const JwtStrategy = require('passport-jwt').Strategy;
 const ExtractJwt = require('passport-jwt').ExtractJwt;
-var mongo = require('mongodb').MongoClient;
+const mongo = require('mongodb').MongoClient;
 const NodeRSA = require('node-rsa');
 const sleep = require('sleep');
 const restClient = require('node-rest-client').Client;
 const request = require('request');
 const path = require('path');
+const nodeCleanup = require('node-cleanup');
+
 const buildProperties = require('./build-properties');
 const version = `${buildProperties.major}.${buildProperties.minor}.${buildProperties.patch}.${buildProperties.build}-${buildProperties.level}`;
 const feedScheduler = require('./feed-scheduler.js');
 const rollingCollectionHandler = require('./rolling-collections');
 const fixedCollectionHandler = require('./fixed-collections');
-const nodeCleanup = require('node-cleanup');
-var development = process.env.NODE_ENV !== 'production';
+
+
 // export NODE_ENV='production'
 // export NODE_ENV='development'
+var development = process.env.NODE_ENV !== 'production';
 const purgeHack = false; // causes sessions older than 5 minutes to be purged, if set to true.  Useful for testing purging without having to wait an hour
 var gsPath = '/usr/bin/gs';
 var sofficePath = '/usr/bin/soffice';
@@ -57,22 +60,11 @@ if (development) {
   pdftotextPath = '/opt/local/bin/pdftotext';
   unrarPath = '/opt/local/bin/unrar';
 }
-// import { Buffer } from 'buffer';
-/*const rollingCollection = require('./rolling-collections');
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////////EXPRESS////////////////////////////////////////////////////////////////
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
-/*app.set('trust proxy', 1);
-app.use(session( {
-  name: 'afbsession',
-  secret: 'abc',
-  cookie: { secure: false, httpOnly: false },
-  //proxy: true,
-  resave: false,
-  saveUninitialized: false
-}));*/
 app.use(cookieParser());
 app.use(bodyParser.json());
 app.use(bodyParser.urlencoded({ extended: true }));
@@ -147,7 +139,9 @@ var feederSocketFile = null;
 var feederInitialized = false;
 var apiInitialized = false;
 
-var tokenExpirationSeconds = 60 * 60 * 24; // 24 hours
+// var tokenExpirationSeconds = 60 * 60 * 24; // 24 hours
+// var tokenExpirationSeconds = 60 * 60 * preferences.tokenExpirationHours; // 24 hours is default
+var tokenExpirationSeconds = 0;
 
 // Multipart upload config
 const upload = multer({ dest: tempDir });
@@ -234,10 +228,12 @@ var defaultPreferences = {
   defaultRollingHours: 1,
   debugLogging: false,
   serviceTypes: { nw: false, sa: false },
+  tokenExpirationHours: 24,
 
   nw: {
     url: '',
     summaryTimeout: 5,
+    sessionLimit: 2000,
     queryTimeout: 5,
     contentTimeout: 5,
     queryDelayMinutes: 1,
@@ -281,8 +277,9 @@ var defaultPreferences = {
 
   sa: { // solera
     url: '',
-    presetQuery: "filetype = 'jpg','gif','png','pdf','zip','rar','windows executable','x86 pe','windows dll','x64pe','apple executable (pef)','apple executable (mach-o)'",
+    presetQuery: '[ { "any" : [ "file_type=PDF", "file_extension=\"pdf\"", "mime_type=\"application/pdf\"", "file_type=ZIP", "file_extension=\"docx\"", "mime_type=\"application/vnd.openxmlformats-officedocument.wordprocessingml.document\"", "file_extension=\"xlsx\"", "mime_type=\"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet\"", "file_extension=\"pptx\"",  "mime_type=\"application/vnd.openxmlformats-officedocument.presentationml.presentation\"" ] } ]',
     defaultQuerySelection : "All Supported File Types",
+    sessionLimit: 2000,
     queryTimeout: 5,
     contentTimeout: 5,
     queryDelayMinutes: 1,
@@ -331,86 +328,86 @@ var useCases = [
     name: 'outboundDocuments',
     friendlyName: 'Outbound Documents',
     nwquery: "direction = 'outbound' && filetype = 'pdf','office 2007 document'",
-//Need to add outbound and office
-    saquery: '["file_type=PDF"]',
+    saquery: '[ { "any" : [ "ipv4_initiator=172.16.0.0/12", "ipv4_initiator=192.168.0.0/16", "ipv4_initiator=192.168.0.0/16" ] }, { "all" : [ "ipv4_responder!=172.16.0.0/12", "ipv4_responder!=192.168.0.0/16", "ipv4_responder!=192.168.0.0/16" ] }, { "any" : [ "file_type=PDF", "file_extension=\\"pdf\\"", "mime_type=\\"application/pdf\\"", "file_type=ZIP", "file_extension=\\"docx\\"", "mime_type=\\"application/vnd.openxmlformats-officedocument.wordprocessingml.document\\"", "file_extension=\\"xlsx\\"", "mime_type=\\"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet\\"", "file_extension=\\"pptx\\"", "mime_type=\\"application/vnd.openxmlformats-officedocument.presentationml.presentation\\"" ] } ]',
     contentTypes: [ 'pdfs', 'officedocs' ],
-    description: 'Displays documents which are being transferred outbound'
+    description: 'Displays documents which are being transferred outbound',
+    onlyContentFromArchives: false
   },
   
   {
     name: 'ssns',
     friendlyName: 'Social Security Numbers',
     nwquery: "filetype = 'pdf','office 2007 document','zip','rar'",
-// !!! need to add Office and confirm RAR
-    saquery: "file_type=PDF file_type=ZIP file_type=RAR",
+    saquery: '[ { "any" : [ "file_type=PDF", "file_extension=\\"pdf\\"", "mime_type=\\"application/pdf\\"", "file_type=ZIP", "file_extension=\\"zip\\"", "mime_type=\\"application/zip\\"", "file_type=RAR", "file_extension=\\"rar\\"", "mime_type=\\"application/x-rar-compressed\\"", "file_extension=\\"docx\\"", "mime_type=\\"application/vnd.openxmlformats-officedocument.wordprocessingml.document\\"", "file_extension=\\"xlsx\\"", "mime_type=\\"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet\\"", "file_extension=\\"pptx\\"", "mime_type=\\"application/vnd.openxmlformats-officedocument.presentationml.presentation\\"" ] } ]',
     contentTypes: [ 'pdfs', 'officedocs' ],
     description: 'Displays documents which contain social security numbers.  It will look inside ZIP and RAR archives, as well',
-    regexTerms: [ '\\d\\d\\d-\\d\\d-\\d\\d\\d\\d' ]
+    regexTerms: [ '\\d\\d\\d-\\d\\d-\\d\\d\\d\\d' ],
+    onlyContentFromArchives: false
   },
 
   {
     name: 'dob',
     friendlyName: 'Date of Birth',
     nwquery: "filetype = 'pdf','office 2007 document','zip','rar'",
-// !!! need to add Office and confirm rar
-    saquery: "file_type=PDF file_type=ZIP file_type=RAR",
+    saquery: '[ { "any" : [ "file_type=PDF", "file_extension=\\"pdf\\"", "mime_type=\\"application/pdf\\"", "file_type=ZIP", "file_extension=\\"zip\\"", "mime_type=\\"application/zip\\"", "file_type=RAR", "file_extension=\\"rar\\"", "mime_type=\\"application/x-rar-compressed\\"", "file_extension=\\"docx\\"", "mime_type=\\"application/vnd.openxmlformats-officedocument.wordprocessingml.document\\"", "file_extension=\\"xlsx\\"", "mime_type=\\"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet\\"", "file_extension=\\"pptx\\"", "mime_type=\\"application/vnd.openxmlformats-officedocument.presentationml.presentation\\"" ] } ]',
     contentTypes: [ 'pdfs', 'officedocs' ],
     description: 'Displays documents which contain dates of birth', 
     regexTerms: [ 
       '(?i)(dob|date of birth|birth date|birthdate|birthday|birth day).*\\d\\d?[-/]\\d\\d?[-/]\\d{2}(?:\\d{2})?\\W',
       '(?i)(dob|date of birth|birth date|birthdate|birthday|birth day).*\\d\\d? \\w+,? \\d{2}(?:\\d{2})?\\W',
       '(?i)(dob|date of birth|birth date|birthdate|birthday|birth day).*\\w+ \\d\\d?,? \\d{2}(?:\\d{2})?\\W'
-    ]
+    ],
+    onlyContentFromArchives: false
   },
 
   {
     name: 'contentinarchives',
     friendlyName: 'All Content Contained in Archives',
-    nwquery: "filetype = 'zip','rar' && filetype != 'office 2007 document'",
-// !!! need to add !Office and confirm RAR
-    saquery: "file_type=ZIP file_type=RAR",
+    nwquery: "filetype = 'zip','rar'",
+    saquery: '[ { "any" : [ "file_type=ZIP", "file_extension=\\"zip\\"", "mime_type=\\"application/zip\\"", "file_type=RAR", "file_extension=\\"rar\\"", "mime_type=\\"application/x-rar-compressed\\"" ] } ]',
     contentTypes: [ 'images', 'pdfs', 'officedocs' ],
-    description: 'Displays any content type contained within a ZIP or RAR archive.  It does not display dodgy archives'
+    description: 'Displays any content type contained within a ZIP or RAR archive.  It does not display dodgy archives',
+    onlyContentFromArchives: true
   },
   
   {
     name: 'contentinarchivesdodgy',
     friendlyName: 'All Content Contained in Archives (with Dodgy Archives)',
-    nwquery: "filetype = 'zip','rar' && filetype != 'office 2007 document'",
-// !!! need to add !Office and confirm RAR
-    saquery: "file_type=ZIP file_type=RAR",
+    nwquery: "filetype = 'zip','rar'",
+    saquery: '[ { "any" : [ "file_type=ZIP", "file_extension=\\"zip\\"", "mime_type=\\"application/zip\\"", "file_type=RAR", "file_extension=\\"rar\\"", "mime_type=\\"application/x-rar-compressed\\"" ] } ]',
     contentTypes: [ 'images', 'pdfs', 'officedocs', 'dodgyarchives' ],
-    description: 'Displays any content type contained within a ZIP or RAR archive.  It also displays dodgy archives'
+    description: 'Displays any content type contained within a ZIP or RAR archive.  It also displays dodgy archives',
+    onlyContentFromArchives: true
   },
 
   {
     name: 'suspiciousdestcountries',
     friendlyName: 'Documents to Suspicious Destination Countries',
     nwquery: `country.dst = 'russian federation','china','romania','belarus','iran, islamic republic of',"korea, democratic people's republic of",'ukraine','syrian arab republic','yemen' && filetype = 'zip','rar','pdf','office 2007 document'`,
-// !!! need to add filetypes
-    saquery: `responder_country="russian federation" responder_country="china" responder_country="romania" responder_country="belarus" responder_country="iran, islamic republic of" responder_country="korea, democratic people's republic of" responder_country="ukraine" responder_country="syrian arab republic" responder_country="yemen"`,
+    saquery: '[ { "any" : [ "responder_country=\\"russian federation\\"", "responder_country=\\"china\\"", "responder_country=\\"romania\\"", "responder_country=\\"belarus\\"", "responder_country=\\"iran, islamic republic of\\"", "responder_country=\\"korea, democratic people\'s republic of\\"", "responder_country=\\"ukraine\\"", "responder_country=\\"syrian arab republic\\"", "responder_country=\\"yemen\\"" ] }, { "any" : [ "file_type=ZIP", "file_extension=\\"zip\\"", "mime_type=\\"application/zip\\"", "file_type=RAR", "file_extension=\\"rar\\"", "mime_type=\\"application/x-rar-compressed\\"", "file_extension=\\"docx\\"", "mime_type=\\"application/vnd.openxmlformats-officedocument.wordprocessingml.document\\"", "file_extension=\\"xlsx\\"", "mime_type=\\"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet\\"", "file_extension=\\"pptx\\"", "mime_type=\\"application/vnd.openxmlformats-officedocument.presentationml.presentation\\"" ] } ]',
     contentTypes: [ 'pdfs', 'officedocs', 'dodgyarchives' ],
-    description: 'Displays documents and dodgy archives transferred to suspicious destination countries: Russia, China, Romania, Belarus, Iran, North Korea, Ukraine, Syra, or Yemen'
+    description: 'Displays documents and dodgy archives transferred to suspicious destination countries: Russia, China, Romania, Belarus, Iran, North Korea, Ukraine, Syra, or Yemen',
+    onlyContentFromArchives: false
   },
 
   {
     name: 'dodgyarchives',
     friendlyName: 'Dodgy Archives',
     nwquery: "filetype = 'zip','rar'",
-//!!! Need to confirm RAR
-    saquery: "file_type=ZIP file_type=RAR",
+    saquery: '[ { "any" : [ "file_type=ZIP", "file_extension=\\"zip\\"", "mime_type=\\"application/zip\\"", "file_type=RAR", "file_extension=\\"rar\\"", "mime_type=\\"application/x-rar-compressed\\"" ] } ]',
     contentTypes: [ 'dodgyarchives' ],
-    description: 'Displays ZIP and RAR Archives which are encrypted or which contain some encrypted files'
+    description: 'Displays ZIP and RAR Archives which are encrypted or which contain some encrypted files',
+    onlyContentFromArchives: false
   },
 
   {
     name: 'outboundwebmonitoring',
     friendlyName: 'Outbound Web Usage Monitoring',
-//!!! Need outbound and combine with web! application_group=Web
     nwquery: "direction = 'outbound' && service = 80 && filetype = 'jpg','gif','png'",
-    saquery: "file_type~GIF file_type=PNG file_type=JPEG",
+    saquery: '[ { "any" : [ "ipv4_initiator=172.16.0.0/12", "ipv4_initiator=192.168.0.0/16", "ipv4_initiator=192.168.0.0/16" ] }, { "all" : [ "ipv4_responder!=172.16.0.0/12", "ipv4_responder!=192.168.0.0/16", "ipv4_responder!=192.168.0.0/16" ] }, { "any" : [ "file_type~GIF", "file_extension=\\"gif\\"", "mime_type=\\"image/gif\\"", "file_type=PNG", "file_extension=\\"png\\"", "mime_type=\\"image/png\\"", "file_type=JPEG", "file_extension=\\"jpg\\"", "file_extension=\\"jpeg\\"", "mime_type=\\"image/jpeg\\"", "mime_type=\\"image/jpg\\"", "mime_type=\\"image/pjpeg\\"", "mime_type=\\"image/jp2\\"" ] } ]',
     contentTypes: [ 'images' ],
-    description: 'Displays images from outbound web usage.  Recommended for use in a Monitoring Collection'
+    description: 'Displays images from outbound web usage.  Recommended for use in a Monitoring Collection',
+    onlyContentFromArchives: false
   }
 
 ];
@@ -466,6 +463,7 @@ app.post('/api/login', passport.authenticate('local'), (req,res) => {
     else {
       winston.info("Login successful for user", req.body.username);
       winston.debug("Found user " + req.body.username + ".  Signing token");
+      winston.debug("tokenExpirationSeconds:", tokenExpirationSeconds);
       let token = jwt.sign(user.toObject({versionKey: false, transform: transformUser}), jwtPrivateKey, { subject: user.id, algorithm: 'RS256', expiresIn: tokenExpirationSeconds, jwtid: uuidV4() }); // expires in 24 hours
       res.cookie('access_token', token, { httpOnly: true, secure: true });
       // res.cookie( req.session );
@@ -2085,6 +2083,7 @@ app.get('/api/preferences', passport.authenticate('jwt', { session: false } ), (
 
 
 app.post('/api/preferences', passport.authenticate('jwt', { session: false } ), (req, res) => {
+  // Set global preferences
   winston.info("POST /api/preferences");
   try {
     let prefs = req.body;
@@ -2112,10 +2111,12 @@ app.post('/api/preferences', passport.authenticate('jwt', { session: false } ), 
         }
       }
     }
-  
+
+    
     db.collection('preferences').updateOne( {}, prefs, (err, result) => {
       if (err) throw err;
       preferences = prefs;
+      tokenExpirationSeconds = 60 * 60 * preferences.tokenExpirationHours
       io.emit('preferences', preferences);
       res.status(201).send( JSON.stringify( { success: true } ) );
     });
@@ -2423,6 +2424,7 @@ function processMongoCollections() {
         }
       }
     }
+    tokenExpirationSeconds = 60 * 60 * preferences.tokenExpirationHours; // 24 hours is default
     if (rewritePrefs) {
       writePreferences();
     }

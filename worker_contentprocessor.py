@@ -713,6 +713,11 @@ class ContentProcessor:
       
       #if not contentType == 'executable' and not filename.endswith(ext):
       #  filename = filename + '.' + ext
+
+    if 'onlyContentFromArchives' in self.cfg and self.cfg['onlyContentFromArchives'] and contentType != 'zip' and contentType != 'rar':
+      log.debug('ContentProcessor: processInboundFile(): Skipping file due to onlyContentFromArchives')
+      return
+
     
 
 

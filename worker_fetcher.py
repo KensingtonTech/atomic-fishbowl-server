@@ -99,17 +99,25 @@ class Fetcher:
     self.cfg['contentTimeout'] = int(self.cfg['contentTimeout'])
     self.cfg['maxContentErrors'] = int(self.cfg['maxContentErrors'])
 
+
+
   def exitWithError(self, message):
     log.error(message)
+    self.communicator.write_data(json.dumps( { 'workerProgress': None } ) + '\n')
     self.communicator.write_data(json.dumps( { 'error': message} ) + '\n')
     self.communicator.handle_close()
     sys.exit(1)
 
+
+
   def exitWithException(self, message):
     log.exception(message)
+    self.communicator.write_data(json.dumps( { 'workerProgress': None } ) + '\n')
     self.communicator.write_data(json.dumps( { 'error': message} ) + '\n')
     self.communicator.handle_close()
     sys.exit(1)
+
+
 
   def sendResult(self, res):
     #log.debug('Fetcher: sendResult()')
@@ -124,9 +132,13 @@ class Fetcher:
     elif not res:
       log.debug("SaFetcher: sendResult(): no results")
 
+
+
   def heartbeat(self):
     #log.debug( "heartbeat()" )
     self.communicator.write_data( json.dumps( { 'heartbeat': True } ) + '\n' )
+
+
 
   def terminate(self):
     self.pool.terminate()
@@ -168,6 +180,13 @@ class SaFetcher(Fetcher): # For Solera
     #  cpucount = cpucount - 2
     #session = FuturesSession(max_workers=cpucount)
     self.session = FutureSessionWithShutdown()
+    self.numMetaTasks = 0
+    self.metaTasksComplete = 0
+    self.numExtractorPageTasks = 0
+    self.extractorPageTasksComplete = 0
+    self.numQueryTasks = 0
+    self.queryTasksComplete = 0
+
 
 
   def runQuery(self):
@@ -207,6 +226,7 @@ class SaFetcher(Fetcher): # For Solera
       state = None
 
       while state != 'complete':
+        self.communicator.write_data(json.dumps( { 'workerProgress': 'In Progress', 'label': 'Querying' } ) + '\n')
         response = requests.post( self.queryDef['url'], auth=self.queryDef['auth'], data=self.queryDef['data'], verify=self.queryDef['verify'], stream=self.queryDef['stream'] )
         #print response.text
         if response.status_code >= 400:
@@ -221,24 +241,30 @@ class SaFetcher(Fetcher): # For Solera
         if state == 'error':
           raise ApiUnsuccessful("API call returned an error")
 
-      count = res['result']['result']['total_count']
-      log.debug('SaFetcher: runQuery(): count: ' + str(count))
+      self.communicator.write_data(json.dumps( { 'workerProgress': 'First Results', 'label': 'Querying' } ) + '\n')
+
+      count = res['result']['result']['total_count'] #this tells us how many sessions the query has returned
 
       for f in res['result']['result']['data']:
         flow = int( f['columns'][0] )
-        self.sessionIds.append(flow)
+        self.sessionIds.append(flow) # this adds the first 100 results to session ID's.  We have to pull the rest of the ID's in a paginated form
 
       if count == 0:
+        self.communicator.write_data(json.dumps( { 'workerProgress': None } ) + '\n')
         return count
-      elif count <= 100:
-        # move on to pulling meta
-        pass
-      else:
+      
+      elif count > 100:
         # break up the remaining queries into async tasks, so as to pull them all at the same time
         remainingCount = count - 100
+        
+        if remainingCount > self.cfg['sessionLimit'] - 100:
+          # impose the session limit
+          remainingCount = self.cfg['sessionLimit'] - 100
+
         numTasks, remainder = divmod(remainingCount, 100)
         if remainder > 0:
           numTasks += 1
+        self.numQueryTasks = numTasks
         log.debug('The remaining number of query pages is ' + str(numTasks))
         futures = []
         for i in xrange(numTasks):
@@ -250,6 +276,10 @@ class SaFetcher(Fetcher): # For Solera
         for future in futures:
           # wait for all results to complete
           future.result()
+
+      elif count <= 100:
+        # move on to pulling meta
+        pass
 
     except requests.ConnectTimeout as e:
       error = "Query timed out"
@@ -280,8 +310,9 @@ class SaFetcher(Fetcher): # For Solera
 
     # We now have our initial query results
     time1 = time.time()
-    log.info("Query completed in " + str(time1 - self.queryTime0) + " seconds")    
-    
+    log.info("Query completed in " + str(time1 - self.queryTime0) + " seconds")
+    self.communicator.write_data(json.dumps( { 'workerProgress': 'Complete', 'label': 'Querying' } ) + '\n')
+
     
     # Initiate file extraction immediately after the query, so that it has time to build
     self.extractionTime0 = time.time()
@@ -327,12 +358,13 @@ class SaFetcher(Fetcher): # For Solera
     
     # Our zip download is complete.  Now extract the results and do the rest
     session.close()
-    log.debug('SaFetcher: fetchMeta(): starting download of zip file')
+    log.debug('SaFetcher: fetchMeta(): starting extraction of artifact zip file')
     self.extractDownloadedZip(self.zipFileHandle)
     #t.cancel()
 
     self.pool.terminate()
     self.pool.join()
+    self.communicator.write_data(json.dumps( { 'workerProgress': None } ) + '\n')
     return count
 
 
@@ -359,6 +391,10 @@ class SaFetcher(Fetcher): # For Solera
       session.post(self.queryDef['url'], auth=self.queryDef['auth'], data=self.convertToPostBody(data, 'GET'), verify=self.queryDef['verify'], stream=self.queryDef['stream'], background_callback=self.checkForQueryResult )
       return
 
+    self.queryTasksComplete += 1
+
+    self.communicator.write_data(json.dumps( { 'workerProgress': 'Page ' + str(self.queryTasksComplete) + ' / ' + str(self.numQueryTasks) , 'label': 'Querying' } ) + '\n')
+
     for f in res['result']['result']['data']:
       # add our results to the total query results
       flow = int( f['columns'][0] )
@@ -377,6 +413,8 @@ class SaFetcher(Fetcher): # For Solera
     numTasks, remainder = divmod( len(sessionIds), 25)
     if remainder > 0:
       numTasks += 1
+
+    self.numMetaTasks = numTasks
 
     fieldStr = """aggregate_database_query_hooks
 aggregate_dns_query_hooks
@@ -506,6 +544,9 @@ vlan_id"""
     if result.status_code >= 400:
       self.exitWithError('Received error on response')
 
+    self.metaTasksComplete += 1
+    self.communicator.write_data(json.dumps( { 'workerProgress': str(self.metaTasksComplete) + ' / ' + str(self.numMetaTasks), 'label': 'Meta Extraction' } ) + '\n')
+
     res = result.text
     #print res
     csvLines = res.split('\n')
@@ -540,8 +581,10 @@ vlan_id"""
           metaKey = keyPositions[i]
           metaValue = values[i]
           if len(metaValue) > 0:
-            decodedValue = urllib2.unquote(metaValue).decode('utf8')
-            valueList = decodedValue.split(',')
+            #decodedValue = urllib2.unquote(metaValue).decode('utf8')
+            #valueList = decodedValue.split(',')
+            utfValue = urllib2.unquote(metaValue).encode('utf8')
+            valueList = utfValue.split(',')
             #print 'valueList: ' + str(valueList)
             if metaKey == 'aggregate_user_agent_hooks':
               newValueList = []
@@ -595,6 +638,7 @@ vlan_id"""
 
     
     elif percent != 100 or (percent == 100 and status != 'extractor.status.finished'):
+      self.communicator.write_data(json.dumps( { 'workerProgress': str(percent) + '%', 'label': 'Content Extraction' } ) + '\n')
       fileExtractionStatus = "percent: " + str(percent) + " status: " + status
       if self.lastFileExtractionStatus != fileExtractionStatus:
         log.debug( fileExtractionStatus )
@@ -608,8 +652,13 @@ vlan_id"""
     
     elif percent == 100 and status == 'extractor.status.finished' and numresults > 0:
       # now get all the results, which we'll need to map our extracted files back to the meta
+      
+      #self.communicator.write_data(json.dumps( { 'workerProgress': None } ) + '\n')
 
-      print "got to 1"
+      self.numExtractorPageTasks += 1
+      self.extractorPageTasksComplete += 1
+
+      self.communicator.write_data(json.dumps( { 'workerProgress': str(self.extractorPageTasksComplete), 'label': 'Extraction Page' } ) + '\n')
       
       for a in res['result']['sorted_artifacts']:
         artifact = a['Artifact']
@@ -618,16 +667,20 @@ vlan_id"""
         self.extractFilesMap[filename] = artifact
         self.extractResults[flow_id] = artifact
 
-      
 
       if numresults > 100:
-        print "got to 2"
         # fire off new API calls to obtain remaining pages
         extractionPageFutures = []
         numresults = numresults - 100
         numTasks, remainder = divmod(numresults, 100)
         if remainder > 0:
           numTasks += 1
+
+        self.numExtractorPageTasks += numTasks
+        
+
+        
+
         for i in xrange(numTasks):
           self.extractPostData['page'] += 1 #increment the page count by 1
           log.debug( "onFileExtractionResults(): obtaining page " + str(self.extractPostData['page']) + " of file extraction results")
@@ -636,7 +689,6 @@ vlan_id"""
           future = session.post(self.cfg['url'] + '/api/v6/artifacts/artifacts', auth=self.queryDef['auth'], data=self.convertToPostBody(extractPostData, 'GET'), verify=False, stream=False, background_callback=self.extractionPageGetter )
           extractionPageFutures.append(future)
         for f in extractionPageFutures:
-          #print "got to 4"
           # we have to wait to get all the page results so we know all the appropriate download id's to pass to the download api call
           f.result()
         log.debug("onFileExtractionResults(): we think we've got all pages of file extraction results")
@@ -655,6 +707,9 @@ vlan_id"""
         'type': 'zip',
         'ids': idsToDownload
       }
+      
+      log.debug('SaFetcher: fetchMeta(): starting download of artifact zip file')
+      self.communicator.write_data(json.dumps( { 'workerProgress': 'Downloading', 'label': 'Extracted Artifacts' } ) + '\n')
       future = session.post(self.cfg['url'] + '/api/v6/artifacts/download', auth=self.queryDef['auth'], data=self.convertToPostBody(data, 'GET'), verify=False, stream=True, background_callback=self.onExtractedFileDownload )
       self.extractFutures.append(future)
       
@@ -667,6 +722,10 @@ vlan_id"""
 
     if result.status_code >= 400:
       self.exitWithError('Received HTTP error code on extraction page response: ' + str(result.status_code))
+
+    self.extractorPageTasksComplete += 1
+
+    self.communicator.write_data(json.dumps( { 'workerProgress': str(self.extractorPageTasksComplete) + ' / ' + str(self.numExtractorPageTasks), 'label': 'Extraction Page' } ) + '\n')
     
     res = result.json()
     resultCode = res['resultCode']
@@ -706,6 +765,7 @@ vlan_id"""
 
   def extractDownloadedZip(self, zipHandle):
     log.debug('SaFetcher: extractDownloadedZip()')
+    self.communicator.write_data(json.dumps( { 'workerProgress': 'Processing', 'label': 'Artifacts' } ) + '\n')
     poolResults = []
     for zinfo in zipHandle.infolist():
       archivedFilename = zinfo.filename
@@ -751,24 +811,33 @@ vlan_id"""
     return post
 
 
+
   def exitWithError(self, message):
     log.error(message)
-    self.session.close()
+    #self.session.close()
+    self.terminate()
     self.communicator.write_data(json.dumps( { 'error': message} ) + '\n')
     self.communicator.handle_close()
     sys.exit(1)
 
+
+
   def exitWithException(self, message):
     log.exception(message)
-    self.session.close()
+    #self.session.close()
+    self.terminate()
     self.communicator.write_data(json.dumps( { 'error': message} ) + '\n')
     self.communicator.handle_close()
     sys.exit(1)
+
+
 
   def terminate(self):
     self.session.terminate()
     self.pool.terminate()
     self.pool.join()
+
+
 
   def pretty_print_POST(self, req):
     """
@@ -858,7 +927,7 @@ class NwFetcher(Fetcher):
 
 
   def runQuery(self):
-    reqStr = self.cfg['url'] + '/sdk?msg=query&query=' + self.cfg['queryEnc']  #&flags=4096
+    reqStr = self.cfg['url'] + '/sdk?msg=query&query=' + self.cfg['queryEnc'] #&flags=4096
     ctx = ssl.create_default_context()
     ctx.check_hostname = False
     ctx.verify_mode = ssl.CERT_NONE
@@ -873,7 +942,6 @@ class NwFetcher(Fetcher):
       #print "length of rawQueryRes", len(rawQueryRes)
       log.debug('Fetcher: runQuery(): Parsing query results')
       for field in rawQueryRes:
-        #print "loop"
         if 'results' in field and isinstance(field, dict):
           if 'fields' in field['results']:
             metaList = field['results']['fields']
@@ -888,19 +956,29 @@ class NwFetcher(Fetcher):
               else:
                 thisSession = { 'images': [], 'session': { 'id': sessionId, 'meta': {} } }
 
-              #if not sessionId in self.sessions:
-              #  self.sessions[sessionId] = { 'images': [], 'session': { 'id': sessionId, 'meta': {} } }
-              
-              #if not key in self.sessions[sessionId]['session']['meta']:
-              #  self.sessions[sessionId]['session']['meta'][key] = []
               if not metaKey in thisSession['session']['meta']:
                 thisSession['session']['meta'][metaKey] = []
               
-              #self.sessions[sessionId]['session']['meta'][key].append(value)
               thisSession['session']['meta'][metaKey].append(metaValue)
               
-              #Update dict
+              # Update dict
               self.sessions[sessionId] = thisSession
+
+      # Now trim the results down to our session limit
+      newSessionsList = []
+      newSessions = {}
+      if len(self.sessions.keys()) > self.cfg['sessionLimit']:
+        count = 0
+        for key in sorted(self.sessions.iterkeys()):
+          count += 1
+          if count > self.cfg['sessionLimit']:
+            break
+          newSessionsList.append(key)
+
+        for key in newSessionsList:
+          newSessions[key] = self.sessions[key]
+        self.sessions = newSessions
+
 
     except BadStatusLine as e:
       error = "Bad status raised whilst executing query.  This might be an SSL setting mismatch.  Run a Connection Test against your NetWitness server to check"
@@ -956,7 +1034,6 @@ class NwFetcher(Fetcher):
         request.add_header("Authorization", "Basic %s" % base64string)
         request.add_header('Content-type', 'application/json')
         request.add_header('Accept', 'application/json')
-        #while self.cfg['contentErrors'].value < self.cfg['maxContentErrors']:
         try:
           res = urllib2.urlopen(request, context=ctx, timeout=self.cfg['contentTimeout'])
           #break

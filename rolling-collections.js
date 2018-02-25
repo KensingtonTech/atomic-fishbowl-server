@@ -1163,7 +1163,8 @@ class RollingCollectionManager {
       collectionsDir: this.cfg.collectionsDir,
       privateKeyFile: this.cfg.internalPrivateKeyFile,
       useHashFeed: this.collection.useHashFeed,
-      serviceType: this.collection.serviceType
+      serviceType: this.collection.serviceType,
+      onlyContentFromArchives: this.collection.onlyContentFromArchives || false
     };
   
     if (this.collection.serviceType == 'nw') {
@@ -1171,12 +1172,14 @@ class RollingCollectionManager {
       cfg['queryTimeout'] = this.cfg.preferences.nw.queryTimeout;
       cfg['contentTimeout'] = this.cfg.preferences.nw.contentTimeout;
       cfg['maxContentErrors'] = this.cfg.preferences.nw.maxContentErrors;
+      cfg['sessionLimit'] = this.cfg.preferences.nw.sessionLimit;
     }
   
     if (this.collection.serviceType == 'sa') {
       cfg['queryTimeout'] = this.cfg.preferences.sa.queryTimeout;
       cfg['contentTimeout'] = this.cfg.preferences.sa.contentTimeout;
       cfg['maxContentErrors'] = this.cfg.preferences.sa.maxContentErrors;
+      cfg['sessionLimit'] = this.cfg.preferences.sa.sessionLimit;
     }
   
     if (this.collection.bound) {
@@ -1201,6 +1204,7 @@ class RollingCollectionManager {
         cfg['regexDistillationEnabled'] = true;
         cfg['regexDistillationTerms'] = useCase.regexTerms;
       }
+      cfg['onlyContentFromArchives'] = useCase.onlyContentFromArchives;
       // we don't yet support any hashing in OOTB use cases
     }
     else {
