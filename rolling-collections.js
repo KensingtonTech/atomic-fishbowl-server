@@ -1,20 +1,10 @@
-const temp = require('temp');
-const uuidV4 = require('uuid/v4');
-const net = require('net'); //for unix sockets
-const spawn = require('child_process').spawn;
-const moment = require('moment');
-const fs = require('fs');
-const rimraf = require('rimraf');
-
-
 class RollingCollectionHandler {
 
   // The purpose of this class is to manage connections to API requests for rolling collections
 
-  constructor(dbUpdateCallback, winston, collections, collectionsDir, feeds, feederSocketFile, gsPath, pdftotextPath, sofficePath, sofficeProfilesDir, unrarPath, internalPrivateKeyFile, useCasesObj, preferences, nwservers, saservers, collectionsUrl, channel) {
+  constructor(dbUpdateCallback, collections, collectionsDir, feeds, feederSocketFile, gsPath, pdftotextPath, sofficePath, sofficeProfilesDir, unrarPath, internalPrivateKeyFile, useCasesObj, preferences, nwservers, saservers, collectionsUrl, channel) {
 
     this.cfg = {
-      winston: winston,
       collections: collections,
       collectionsDir: collectionsDir,
       feeds: feeds,
@@ -31,7 +21,6 @@ class RollingCollectionHandler {
       saservers: saservers,
       collectionsUrl: collectionsUrl
     };
-    this.winston = winston;
     this.rollingCollectionManagers = {};
     this.dbUpdateCallback = dbUpdateCallback;
 
@@ -43,7 +32,7 @@ class RollingCollectionHandler {
 
 
   onChannelConnect(socket) {
-    this.winston.debug('RollingCollectionHandler: onChannelConnect()');
+    winston.debug('RollingCollectionHandler: onChannelConnect()');
     socket.on('disconnect', () => this.onChannelDisconnect(socket) );
     socket.on('join', (data) => this.onJoinCollection(socket, data) );
     socket.on('leave', () => this.onLeaveCollection(socket) );
@@ -57,7 +46,7 @@ class RollingCollectionHandler {
     // this is the equivalent of onHttpConnection(), but for socket connections
     // data must contain properties collectionID and sessionId
     // sessionId should be null if a standard rolling collection
-    this.winston.debug('RollingCollectionHandler: onJoinCollection()');
+    winston.debug('RollingCollectionHandler: onJoinCollection()');
     
     let collectionId = data['collectionId'];
     let collection = this.cfg.collections[collectionId];
@@ -70,8 +59,8 @@ class RollingCollectionHandler {
     }
     socket['rollingId'] = rollingId; // add the rolling id to our socket so we can later identify it
 
-    this.winston.info('RollingCollectionHandler: onJoinCollection(): collectionId:', collectionId);
-    this.winston.info('RollingCollectionHandler: onJoinCollection(): rollingId:', rollingId);
+    winston.info('RollingCollectionHandler: onJoinCollection(): collectionId:', collectionId);
+    winston.info('RollingCollectionHandler: onJoinCollection(): rollingId:', rollingId);
 
     socket.join(rollingId); // this joins a room for rollingId
 
@@ -96,7 +85,7 @@ class RollingCollectionHandler {
 
   onLeaveCollection(socket) {
     // when a socket disconnects gracefully
-    this.winston.debug('RollingCollectionHandler: onLeaveCollection()');
+    winston.debug('RollingCollectionHandler: onLeaveCollection()');
     
     if ('rollingId' in socket) {
       let rollingId = socket['rollingId'];
@@ -116,18 +105,18 @@ class RollingCollectionHandler {
 
   onChannelDisconnect(socket) {
     // when a socket disconnects un-gracefully
-    this.winston.debug('RollingCollectionHandler: onChannelDisconnect()');
+    winston.debug('RollingCollectionHandler: onChannelDisconnect()');
       
     if ('rollingId' in socket) {
       let rollingId = socket['rollingId'];
-      this.winston.debug('RollingCollectionHandler: onChannelDisconnect(): matched rolling collection id:', rollingId);
+      winston.debug('RollingCollectionHandler: onChannelDisconnect(): matched rolling collection id:', rollingId);
       socket.leave(rollingId);
       delete socket['rollingId'];
     }
 
     if ('rollingCollectionManager' in socket) {
       let manager = socket['rollingCollectionManager'];
-      // this.winston.debug(manager);
+      // winston.debug(manager);
       manager.removeSocketClient();
       delete socket['rollingCollectionManager'];
     }
@@ -137,7 +126,7 @@ class RollingCollectionHandler {
 
 
   onPauseCollection(socket) {
-    this.winston.debug('RollingCollectionHandler: onPauseCollection()');
+    winston.debug('RollingCollectionHandler: onPauseCollection()');
     
     if ('rollingCollectionManager' in socket) {
       let manager = socket['rollingCollectionManager'];
@@ -149,7 +138,7 @@ class RollingCollectionHandler {
 
 
   onUnpauseCollection(socket) {
-    this.winston.debug('RollingCollectionHandler: onUnpauseCollection()');
+    winston.debug('RollingCollectionHandler: onUnpauseCollection()');
 
     if ('rollingCollectionManager' in socket) {
       let manager = socket['rollingCollectionManager'];
@@ -166,8 +155,8 @@ class RollingCollectionHandler {
     let collectionId = req.params.collectionId;
     let clientSessionId = req.headers['afbsessionid'];
     
-    this.winston.info('RollingCollectionHandler: onHttpConnection(): collectionId:', collectionId);
-    // this.winston.debug('preferences:', this.cfg.preferences);
+    winston.info('RollingCollectionHandler: onHttpConnection(): collectionId:', collectionId);
+    // winston.debug('preferences:', this.cfg.preferences);
     
     let rollingId = collectionId;
     // rollingId is either the collectionId (for rolling collections), or the clientSessionId (for monitoring collections).
@@ -177,7 +166,7 @@ class RollingCollectionHandler {
     }
     let collection = this.cfg.collections[collectionId];
 
-    this.winston.info('RollingCollectionHandler: onHttpConnection(): rollingId:', rollingId);
+    winston.info('RollingCollectionHandler: onHttpConnection(): rollingId:', rollingId);
     
     // create a client connection handler for this connection
     // does a manager for the requested rolling collection exist?
@@ -208,7 +197,7 @@ class RollingCollectionHandler {
 
 
   collectionEdited(collectionId, collection) {
-    this.winston.info('RollingCollectionHandler: collectionEdited()');
+    winston.info('RollingCollectionHandler: collectionEdited()');
     let managers = []
     if (collectionId in this.rollingCollectionManagers) {
       // manager = { rollingId: { collectionId: collectionId, manager: manager } }
@@ -234,7 +223,7 @@ class RollingCollectionHandler {
 
   
   collectionDeleted(collectionId, user) {
-    this.winston.info('RollingCollectionHandler: collectionDeleted()');
+    winston.info('RollingCollectionHandler: collectionDeleted()');
     let managers = []
     if (collectionId in this.rollingCollectionManagers) {
       // manager = { rollingId: { collectionId: collectionId, manager: manager } }
@@ -260,7 +249,7 @@ class RollingCollectionHandler {
 
   
   rollingCollectionManagerRemovalCallback(id) {
-    this.winston.debug('RollingCollectionHandler: rollingCollectionManagerRemovalCallback()');
+    winston.debug('RollingCollectionHandler: rollingCollectionManagerRemovalCallback()');
     delete this.rollingCollectionManagers[id];
   }
 
@@ -268,7 +257,7 @@ class RollingCollectionHandler {
 
   pauseMonitoringCollection(req, res) {
     let clientSessionId = req.headers['afbsessionid'];
-    this.winston.info(`RollingCollectionHandler handlePauseMonitoringCollection(): Pausing monitoring collection ${clientSessionId}`);
+    winston.info(`RollingCollectionHandler handlePauseMonitoringCollection(): Pausing monitoring collection ${clientSessionId}`);
     let manager = this.rollingCollectionManagers[clientSessionId]['manager'];
     manager.pause();
     res.status(202).send( JSON.stringify( { success: true } ) );
@@ -280,7 +269,7 @@ class RollingCollectionHandler {
     // This only gets used by the client if a monitoring collection is paused and then resumed within the minute the run is permitted to continue executing
     // Otherwise, the client will simply call /api/collection/rolling/:id again
     let clientSessionId = req.headers['afbsessionid'];
-    this.winston.info(`RollingCollectionHandler: handleUnpauseMonitoringCollection(): Resuming monitoring collection ${clientSessionId}`);
+    winston.info(`RollingCollectionHandler: handleUnpauseMonitoringCollection(): Resuming monitoring collection ${clientSessionId}`);
     let manager = this.rollingCollectionManagers[clientSessionId]['manager'];
     manager.unpause();
     res.status(202).send( JSON.stringify( { success: true } ) );
@@ -289,7 +278,7 @@ class RollingCollectionHandler {
 
 
   killall() {
-    this.winston.debug('RollingCollectionHandler: killall()');
+    winston.debug('RollingCollectionHandler: killall()');
     for (let rollingId in this.rollingCollectionManagers) {
       if (this.rollingCollectionManagers.hasOwnProperty(rollingId)) {
         let manager = this.rollingCollectionManagers[rollingId].manager;
@@ -324,9 +313,8 @@ class RollingCollectionHandler {
 class HttpConnection {
 
   constructor(req, res, collectionId, rollingId, cfg) {
+    winston.info('HttpConnection: constructor()');
     this.cfg = cfg;
-    this.winston = cfg.winston;
-    this.winston.info('HttpConnection: constructor()');
     this.id = uuidV4();
     this.req = req;
     this.res = res;
@@ -342,7 +330,7 @@ class HttpConnection {
 
   onConnect(collection) {
 
-    this.winston.info('HttpConnection: onConnect():');
+    winston.info('HttpConnection: onConnect():');
 
     ////////////////////////////////////////////////////
     //////////////////RESPONSE HEADERS//////////////////
@@ -365,7 +353,7 @@ class HttpConnection {
       }
     }
     catch (e) {
-      this.winston.error('HttpConnection: onConnect():', e);
+      winston.error('HttpConnection: onConnect():', e);
       this.res.status(500).send( JSON.stringify( { success: false, error: e.message || e } ) );
       return false;
     }
@@ -388,7 +376,7 @@ class HttpConnection {
 
 
   onClientClosedConnection() {
-    this.winston.info('HttpConnection: onClientClosedConnection()');
+    winston.info('HttpConnection: onClientClosedConnection()');
     this.disconnected = true;
     // This block runs when the client disconnects from the session
     // But NOT when we terminate the session from the server
@@ -407,7 +395,7 @@ class HttpConnection {
 
 
   addManager(manager) {
-    this.winston.info('HttpConnection: addManager()');
+    winston.info('HttpConnection: addManager()');
     this.manager = manager;
     this.manager.addHttpClient(this.id, this);
   }
@@ -415,7 +403,7 @@ class HttpConnection {
 
 
   send(data) {
-    // this.winston.info('HttpConnection: send()');
+    // winston.info('HttpConnection: send()');
     // sends data to the client
     if (!this.disconnected) {
       this.res.write( JSON.stringify(data) + ',');
@@ -426,7 +414,7 @@ class HttpConnection {
 
 
   sendRaw(data) {
-    this.winston.info('HttpConnection: sendRaw()');
+    winston.info('HttpConnection: sendRaw()');
     // sends data to the client
     if (!this.disconnected) {
       this.res.write( data );
@@ -437,7 +425,7 @@ class HttpConnection {
 
 
   end() {
-    this.winston.info('HttpConnection: end()');
+    winston.info('HttpConnection: end()');
     if (this.heartbeatInterval) {
       // stop sending heartbeats to client
       clearInterval(this.heartbeatInterval);
@@ -473,8 +461,7 @@ class HttpConnection {
 class RollingCollectionManager {
 
   constructor(collection, collectionId, rollingId, removalCallback, dbUpdateCallback, cfg, channel = null) {
-    this.winston = cfg.winston;
-    this.winston.info('RollingCollectionManager: constructor()');
+    winston.info('RollingCollectionManager: constructor()');
     this.cfg = cfg;
     this.channel = channel; // a handle to our socket.io /collections namespace
     
@@ -521,7 +508,7 @@ class RollingCollectionManager {
 
 
   run() {
-    this.winston.info('RollingCollectionManager: run()');
+    winston.info('RollingCollectionManager: run()');
     // Now schedule workLoop() to run every 60 seconds and store a reference to it in this.workInterval
     // which we can later use to terminate the timer and prevent future execution.
     // This will not initially execute work() until the first 60 seconds have elapsed, which is why we run workLoop() immediately after
@@ -532,26 +519,26 @@ class RollingCollectionManager {
 
 
   selfDestruct() {
-    this.winston.info('RollingCollectionManager: selfDestruct()');
+    winston.info('RollingCollectionManager: selfDestruct()');
     /*if (isDestroyed) {
-      this.winston.debug('Not self-destructing as we\'re already being deleted');
+      winston.debug('Not self-destructing as we\'re already being deleted');
       return;
     }*/
     this.collection['state'] = 'disconnected';
     if (!this.monitoringCollection) {
-      this.winston.debug("RollingCollectionManager: selfDestruct(): No clients reconnected to rolling collection " + this.rollingId + " within " + this.destroyThreshold + " seconds. Self-destructing");
+      winston.debug("RollingCollectionManager: selfDestruct(): No clients reconnected to rolling collection " + this.rollingId + " within " + this.destroyThreshold + " seconds. Self-destructing");
     }
     else {
-      this.winston.debug("RollingCollectionManager: selfDestruct(): Client disconnected from monitoring collection " + this.rollingId + ".  Immediately self-destructing");
+      winston.debug("RollingCollectionManager: selfDestruct(): Client disconnected from monitoring collection " + this.rollingId + ".  Immediately self-destructing");
     }
     clearInterval(this.workInterval);
     this.killWorker();
     try {
-      this.winston.debug("RollingCollectionManager: selfDestruct(): Deleting output directory for rolling collection", this.rollingId);
+      winston.debug("RollingCollectionManager: selfDestruct(): Deleting output directory for rolling collection", this.rollingId);
       rimraf( this.cfg.collectionsDir + '/' + this.rollingId, () => {} ); // Delete output directory
     }
     catch(exception) {
-      this.winston.error('RollingCollectionManager: selfDestruct(): ERROR deleting output directory ' + this.cfg.collectionsDir + '/' + this.rollingId, exception);
+      winston.error('RollingCollectionManager: selfDestruct(): ERROR deleting output directory ' + this.cfg.collectionsDir + '/' + this.rollingId, exception);
     }
     this.removalCallback(this.rollingId);
   }
@@ -559,7 +546,7 @@ class RollingCollectionManager {
 
 
   addHttpClient(id, client) {
-    this.winston.info('RollingCollectionManager: addHttpClient()');
+    winston.info('RollingCollectionManager: addHttpClient()');
     this.httpClients[id] = client;
     this.observers += 1;
     
@@ -573,7 +560,7 @@ class RollingCollectionManager {
     }
     
     if (this.runs > 0) {
-      this.winston.info(`RollingCollectionManager: addHttpClient(): This is not the first client to have connected to rolling collection ${this.rollingId}.  Playing back existing collection`);
+      winston.info(`RollingCollectionManager: addHttpClient(): This is not the first client to have connected to rolling collection ${this.rollingId}.  Playing back existing collection`);
       let resp = null;
 
       let sessions = {};
@@ -607,7 +594,7 @@ class RollingCollectionManager {
 
 
   addSocketClient(socket) {
-    this.winston.info('RollingCollectionManager: addSocketClient()');
+    winston.info('RollingCollectionManager: addSocketClient()');
     this.observers += 1;
     
     if (this.destroyTimeout) {
@@ -620,7 +607,7 @@ class RollingCollectionManager {
     }
     
     if (this.runs > 0) {
-      this.winston.info(`This is not the first client to have connected to rolling collection ${this.rollingId}.  Playing back existing collection`);
+      winston.info(`This is not the first client to have connected to rolling collection ${this.rollingId}.  Playing back existing collection`);
 
       let sessions = {};
       for (let i = 0; i < this.sessions.length; i++) {
@@ -661,7 +648,7 @@ class RollingCollectionManager {
     // If the collection gets edited, we must assume that some critical element has changed...
     // and that we must blow away the existing data and work jobs, and start over
 
-    this.winston.debug('RollingCollectionManager: onCollectionEdited()');
+    winston.debug('RollingCollectionManager: onCollectionEdited()');
     
     // stop the work loop
     if (this.workInterval) {
@@ -694,7 +681,7 @@ class RollingCollectionManager {
 
 
   onCollectionDeleted(user) {
-    this.winston.debug('RollingCollectionManager: onCollectionDeleted()');
+    winston.debug('RollingCollectionManager: onCollectionDeleted()');
     this.destroyed = true;
 
     // stop the work loop
@@ -716,11 +703,11 @@ class RollingCollectionManager {
       // clean up after all the different client instances of a particular monitoring collection
       // the collection delete handler will otherwise handle deletion
       try {
-        this.winston.debug("Deleting output directory for collection", this.rollingId);
+        winston.debug("Deleting output directory for collection", this.rollingId);
         rimraf( this.cfg.collectionsDir + '/' + this.rollingId, () => {} ); // Delete output directory
       }
       catch(exception) {
-        this.winston.error('ERROR deleting output directory ' + this.cfg.collectionsDir + '/' + this.rollingId, exception);
+        winston.error('ERROR deleting output directory ' + this.cfg.collectionsDir + '/' + this.rollingId, exception);
       }
     }
 
@@ -734,7 +721,7 @@ class RollingCollectionManager {
 
 
   abort() {
-    this.winston.info('RollingCollectionManager: abort()');
+    winston.info('RollingCollectionManager: abort()');
 
     // we only get here if the program is exiting, either gracefully or due to an error
 
@@ -747,11 +734,11 @@ class RollingCollectionManager {
     this.killWorker();
 
     try {
-      this.winston.debug("Deleting output directory for collection", this.collectionId);
+      winston.debug("Deleting output directory for collection", this.collectionId);
       rimraf.sync( this.cfg.collectionsDir + '/' + this.rollingId ); // Delete output directory
     }
     catch(exception) {
-      this.winston.error('ERROR deleting output directory ' + this.cfg.collectionsDir + '/' + this.collectionId, exception);
+      winston.error('ERROR deleting output directory ' + this.cfg.collectionsDir + '/' + this.collectionId, exception);
     }
     
     if (this.destroyTimeout) {
@@ -769,7 +756,7 @@ class RollingCollectionManager {
 
   killWorker() {
 
-    this.winston.info('RollingCollectionManager: killWorker()');
+    winston.info('RollingCollectionManager: killWorker()');
 
     if (this.workerSocket) {
       this.workerSocket.removeAllListeners();
@@ -786,15 +773,15 @@ class RollingCollectionManager {
 
 
   removeHttpClient(id) {
-    this.winston.info('RollingCollectionManager: removeHttpClient()');
+    winston.info('RollingCollectionManager: removeHttpClient()');
     this.observers -= 1;
 
     if (this.observers != 0) {
-      this.winston.debug("RollingCollectionManager: removeHttpClient(): Client disconnected from rolling collection with rollingId", this.rollingId);
+      winston.debug("RollingCollectionManager: removeHttpClient(): Client disconnected from rolling collection with rollingId", this.rollingId);
     }
 
     else {
-      this.winston.debug("RollingCollectionManager: removeHttpClient(): Last client disconnected from rolling collection with rollingId " + this.rollingId + '.  Waiting for ' + this.destroyThreshold + ' seconds before self-destructing');
+      winston.debug("RollingCollectionManager: removeHttpClient(): Last client disconnected from rolling collection with rollingId " + this.rollingId + '.  Waiting for ' + this.destroyThreshold + ' seconds before self-destructing');
       this.destroyTimeout = setTimeout( () => this.selfDestruct(), this.destroyThreshold * 1000); // trigger the countdown to self-destruct
       this.restartWorkLoopOnExit = false;
       clearInterval(this.workInterval);
@@ -809,7 +796,7 @@ class RollingCollectionManager {
 
 
   removeSocketClient() {
-    this.winston.info('RollingCollectionManager: removeSocketClient()');
+    winston.info('RollingCollectionManager: removeSocketClient()');
 
     if (this.monitoringCollection) {
       this.selfDestruct();
@@ -819,11 +806,11 @@ class RollingCollectionManager {
     this.observers -= 1;
 
     if (this.observers != 0) {
-      this.winston.debug("RollingCollectionManager: removeSocketClient(): Socket client disconnected from rolling collection with rollingId", this.rollingId);
+      winston.debug("RollingCollectionManager: removeSocketClient(): Socket client disconnected from rolling collection with rollingId", this.rollingId);
     }
 
     else {
-      this.winston.debug("RollingCollectionManager: removeSocketClient(): Last client disconnected from rolling collection with rollingId " + this.rollingId + '.  Waiting for ' + this.destroyThreshold + ' seconds before self-destructing');
+      winston.debug("RollingCollectionManager: removeSocketClient(): Last client disconnected from rolling collection with rollingId " + this.rollingId + '.  Waiting for ' + this.destroyThreshold + ' seconds before self-destructing');
       this.destroyTimeout = setTimeout( () => this.selfDestruct(), this.destroyThreshold * 1000); // trigger the countdown to self-destruct
       this.restartWorkLoopOnExit = false;
       clearInterval(this.workInterval);
@@ -837,7 +824,7 @@ class RollingCollectionManager {
 
 
   pause() {
-    this.winston.info('RollingCollectionManager: pause()');
+    winston.info('RollingCollectionManager: pause()');
     this.paused = true;
     this.timeOfPause = moment().unix();
     /*if (this.workInterval) {
@@ -855,20 +842,20 @@ class RollingCollectionManager {
 
 
   unpause() {
-    this.winston.info('RollingCollectionManager: unpause()');
+    winston.info('RollingCollectionManager: unpause()');
     this.paused = false;
     
     let timeOfResume = moment().unix();
     let difference = timeOfResume - this.timeOfPause;
-    this.winston.info('RollingCollectionManager: unpause(): difference:', difference);
+    winston.info('RollingCollectionManager: unpause(): difference:', difference);
     
     /*if (difference <= 60) {
       // less than a minute has elapsed or exactly 1 minute has elapsed since the collection was paused
       let resumeInXSeconds = 60 - difference;
-      this.winston.info('RollingCollectionManager: unpause(): resumeInXSeconds:', resumeInXSeconds);
+      winston.info('RollingCollectionManager: unpause(): resumeInXSeconds:', resumeInXSeconds);
 
       this.pauseTimeout = setTimeout( () => {
-        this.winston.info('RollingCollectionManager: unpause(): resuming work');
+        winston.info('RollingCollectionManager: unpause(): resuming work');
         this.pauseTimeout = null;
         this.workInterval = setInterval( () => this.workLoop(), 60000);
         this.workLoop();
@@ -890,14 +877,14 @@ class RollingCollectionManager {
 
 
   sendToWorker(data) {
-    this.winston.info('RollingCollectionManager: sendToWorker()');
+    winston.info('RollingCollectionManager: sendToWorker()');
     this.workerSocket.write( JSON.stringify(data) + '\n' );
   }
 
 
 
   sendToHttpClients(data) {
-    // this.winston.info('RollingCollectionManager: sendToHttpClients()');
+    // winston.info('RollingCollectionManager: sendToHttpClients()');
     for (let id in this.httpClients) {
       if (this.httpClients.hasOwnProperty(id)) {
         let client = this.httpClients[id];
@@ -909,7 +896,7 @@ class RollingCollectionManager {
 
 
   sendToHttpClientsRaw(data) {
-    this.winston.info('RollingCollectionManager: sendToHttpClientsRaw()');
+    winston.info('RollingCollectionManager: sendToHttpClientsRaw()');
     for (let id in this.httpClients) {
       if (this.httpClients.hasOwnProperty(id)) {
         let client = this.httpClients[id];
@@ -929,7 +916,7 @@ class RollingCollectionManager {
 
 
   endAllClients() {
-    this.winston.info('RollingCollectionManager: endAllClients()');
+    winston.info('RollingCollectionManager: endAllClients()');
     for (let id in this.httpClients) {
       if (this.httpClients.hasOwnProperty(id)) {
         let client = this.httpClients[id];
@@ -942,7 +929,7 @@ class RollingCollectionManager {
 
   
   endHttpClients() {
-    this.winston.info('RollingCollectionManager: endHttpClients()');
+    winston.info('RollingCollectionManager: endHttpClients()');
     for (let id in this.httpClients) {
       if (this.httpClients.hasOwnProperty(id)) {
         let client = this.httpClients[id];
@@ -955,27 +942,27 @@ class RollingCollectionManager {
 
   workLoop() {
     // Main body of worker execution
-    this.winston.info('RollingCollectionManager: workLoop()');
+    winston.info('RollingCollectionManager: workLoop()');
 
     try {
 
-      this.winston.debug("workLoop(): Starting run for rollingId", this.rollingId);
+      winston.debug("workLoop(): Starting run for rollingId", this.rollingId);
 
 
       if (this.monitoringCollection && this.paused) {
-        this.winston.debug(`workLoop(): Collection ${this.rollingId} is paused.  Skipping worker run for this cycle`);
+        winston.debug(`workLoop(): Collection ${this.rollingId} is paused.  Skipping worker run for this cycle`);
         return;
       }
 
       if ( !this.monitoringCollection && this.workerProcess && this.runs == 1) {
         // If we're a rolling collection still on our first run, let it continue running until it completes
-        this.winston.info('workLoop(): First run of rolling collection is still running.  Delaying next run by 60 seconds');
+        winston.info('workLoop(): First run of rolling collection is still running.  Delaying next run by 60 seconds');
         return;
       }
       
       if ( this.workerProcess && ( this.runs > 1 || this.monitoringCollection ) ) {
         // Check if there's already a python worker process already running which has overrun the 60 second mark, and if so, kill it
-        this.winston.info('workLoop(): Timer expired for running worker.  Terminating worker');
+        winston.info('workLoop(): Timer expired for running worker.  Terminating worker');
         this.workerProcess.kill('SIGINT');
       }
 
@@ -997,8 +984,8 @@ class RollingCollectionManager {
       socketServer.listen(tempName, () => {
         // Tell the server to listen for communication from the not-yet-started worker
 
-        this.winston.debug('workLoop(): listen(): Rolling Collection: Listening for worker communication');
-        this.winston.debug("workLoop(): listen(): Rolling Collection: Spawning worker with socket file " + tempName);
+        winston.debug('workLoop(): listen(): Rolling Collection: Listening for worker communication');
+        winston.debug("workLoop(): listen(): Rolling Collection: Spawning worker with socket file " + tempName);
         
         // Start the worker process and assign a reference to it to 'worker'
         // Notice that we don't pass any configuration to the worker on the command line.  It's all done through the UNIX socket for security.
@@ -1009,7 +996,7 @@ class RollingCollectionManager {
     }
 
     catch(e) {
-      this.winston.error("workLoop(): work(): Caught unhandled error:", e);
+      winston.error("workLoop(): work(): Caught unhandled error:", e);
     }
     
   }
@@ -1021,7 +1008,7 @@ class RollingCollectionManager {
     this.workerProcess = null;
 
     if (signal) {
-      this.winston.debug('onWorkerExit(): Worker process was terminated by signal', signal);
+      winston.debug('onWorkerExit(): Worker process was terminated by signal', signal);
       // Tell client that we're resting
       this.collection['state'] = 'resting';
       this.sendToChannel('state', 'resting');
@@ -1030,7 +1017,7 @@ class RollingCollectionManager {
 
     /*else if (!code) {
       // Handle really abnormal worker exit with no error code - maybe because we couldn't spawn it at all?  We likely won't ever enter this block
-      this.winston.debug('workLoop(): listen(): onExit(): Worker process exited abnormally without an exit code');
+      winston.debug('workLoop(): listen(): onExit(): Worker process exited abnormally without an exit code');
 
       this.collection['state'] = 'error';
       this.sendToChannel('state', 'error');
@@ -1039,7 +1026,7 @@ class RollingCollectionManager {
 
     // Handle normal worker exit code 0
     else if (!code || code === 0) {
-      this.winston.debug('onWorkerExit(): Worker process exited normally with exit code 0');
+      winston.debug('onWorkerExit(): Worker process exited normally with exit code 0');
       // Tell clients that we're resting
       this.collection['state'] = 'resting';
       this.sendToChannel('state', 'resting');
@@ -1048,7 +1035,7 @@ class RollingCollectionManager {
 
     else if (code && code !== 0) {
       // Handle worker exit with non-zero (error) exit code
-      this.winston.debug('onWorkerExit(): Worker process exited in bad state with non-zero exit code', code );
+      winston.debug('onWorkerExit(): Worker process exited in bad state with non-zero exit code', code );
       this.collection['state'] = 'error';
       this.sendToChannel('state', 'error');
       this.sendToHttpClients( { collection: { id: this.collectionId, state: 'error' } } );
@@ -1058,7 +1045,7 @@ class RollingCollectionManager {
     if (this.monitoringCollection && this.paused) {
       // Monitoring collection is paused
       // Now we end and delete this monitoring collection, except for its files (which still may be in use on the client)
-      this.winston.debug('onWorkerExit(): Completing work for paused monitoring collection', this.rollingId);
+      winston.debug('onWorkerExit(): Completing work for paused monitoring collection', this.rollingId);
       this.dbUpdateCallback(this.collectionId);
       return;
     }
@@ -1075,14 +1062,14 @@ class RollingCollectionManager {
 
 
   onConnectionFromWorker(tempName) {
-    this.winston.info('RollingCollectionManager: onConnectionFromWorker()');
+    winston.info('RollingCollectionManager: onConnectionFromWorker()');
     // For rolling and monitoring collections
     // Handles all dealings with the worker process after it has been spawned, including sending it its configuration, and sending data received from it to the onDataFromWorker() function
     // It also purges old data from the collection as defined by the type of collection and number of hours back to retain
     
     this.runs++;
     
-    this.winston.debug("onConnectionFromWorker(): Connection received from worker to build rolling or monitoring collection", this.rollingId);
+    winston.debug("onConnectionFromWorker(): Connection received from worker to build rolling or monitoring collection", this.rollingId);
     
     if (this.monitoringCollection && !this.paused) {
       // clean up monitoring collection files from last run
@@ -1114,7 +1101,7 @@ class RollingCollectionManager {
     else if (!this.monitoringCollection && this.runs > 1) {
       // Purge events older than this.collection.lastHours
   
-      this.winston.debug('Running purge routine');
+      winston.debug('Running purge routine');
       let sessionsToPurge = [];
   
       // Calculate the maximum age a given session is allowed to be
@@ -1255,14 +1242,14 @@ class RollingCollectionManager {
       queryDelaySeconds = 60;
     }
 
-    this.winston.debug('The time is:', moment.utc().format('YYYY-MMMM-DD HH:mm:ss') );
+    winston.debug('The time is:', moment.utc().format('YYYY-MMMM-DD HH:mm:ss') );
     if (this.lastRun) {
       let mom = moment.utc(this.lastRun * 1000);
-      this.winston.debug('The time of lastRun is:', mom.format('YYYY-MMMM-DD HH:mm:ss') );
+      winston.debug('The time of lastRun is:', mom.format('YYYY-MMMM-DD HH:mm:ss') );
     }
     if (this.lastEnd) {
       let mom = moment.utc(this.lastEnd * 1000);
-      this.winston.debug('The time of lastEnd is:', mom.format('YYYY-MMMM-DD HH:mm:ss') );
+      winston.debug('The time of lastEnd is:', mom.format('YYYY-MMMM-DD HH:mm:ss') );
     }
 
     if (this.monitoringCollection) {
@@ -1273,8 +1260,8 @@ class RollingCollectionManager {
 
     else if (this.runs == 1) {
       // This is the first run of a rolling collection
-      // this.winston.debug('got to 1');
-      this.winston.debug('onConnectionFromWorker(): Got first run');
+      // winston.debug('got to 1');
+      winston.debug('onConnectionFromWorker(): Got first run');
       cfg['timeBegin'] = moment().startOf('minute').unix() - 1 - ( this.collection.lastHours * 60 * 60 ) - queryDelaySeconds ;
       cfg['timeEnd'] = moment().startOf('minute').unix() - 1 - queryDelaySeconds; // the beginning of the last minute minus one second, to give time for sessions to leave the assembler
 
@@ -1283,32 +1270,32 @@ class RollingCollectionManager {
     }
     
     else if ( ( !this.resumed && this.runs == 2 && ( moment().unix() - this.lastRun > 60 ) ) ) {
-      // this.winston.debug('got to 2');
+      // winston.debug('got to 2');
       // This is the second run of a non-resumed rolling collection - this allows the first run to exceed one minute of execution and will take up whatever excess time has elapsed
       // It will only enter this block if more than 61 seconds have elapsed since the last run
-      this.winston.debug('onConnectionFromWorker(): Got second run');
+      winston.debug('onConnectionFromWorker(): Got second run');
       cfg['timeBegin'] = this.lastEnd + 1; // one second after the last run
       cfg['timeEnd'] = moment().startOf('minute').unix() - 1 - queryDelaySeconds; // the beginning of the last minute minus one second, to give time for sessions to leave the assembler
       // cfg['timeEnd'] = moment().startOf('minute').unix() - 61 - queryDelaySeconds; // the beginning of the last minute minus one second, to give time for sessions to leave the assembler
     }
   
     else if ( !this.resumed && this.runs >= 2) {
-      // this.winston.debug('got to 3');
+      // winston.debug('got to 3');
       // This is the third or greater run of a non-resumed rolling collection
-      this.winston.debug('onConnectionFromWorker(): Got subsequent run');
+      winston.debug('onConnectionFromWorker(): Got subsequent run');
       cfg['timeBegin'] = this.lastEnd + 1; // one second after the last run
       cfg['timeEnd'] = cfg['timeBegin'] + 60; // add one minute to cfg[timeBegin]
     }
 
     else if ( this.resumed && ( moment().unix() - this.lastRun < 60 ) ) { // resumed and less than 60 seconds have elapsed since last run
-      this.winston.debug('onConnectionFromWorker(): Resumed collection and less than 60 seconds since last run');
+      winston.debug('onConnectionFromWorker(): Resumed collection and less than 60 seconds since last run');
       cfg['timeBegin'] = this.lastEnd + 1; // one second after the last run
       let secondsSinceLastRun = moment().unix() - this.lastRun;
       cfg['timeEnd'] = cfg['timeBegin'] + secondsSinceLastRun;
     }
 
     else if ( this.resumed && ( moment().unix() - this.lastRun >= 60 ) ) { // resumed and 60 seconds or more have elapsed since last run
-      this.winston.debug('onConnectionFromWorker(): Resumed collection and greater than 60 seconds since last run');
+      winston.debug('onConnectionFromWorker(): Resumed collection and greater than 60 seconds since last run');
       cfg['timeBegin'] = this.lastEnd + 1; // one second after the last run
       cfg['timeEnd'] = moment().startOf('minute').unix() - 1 - queryDelaySeconds;
     }
@@ -1316,10 +1303,10 @@ class RollingCollectionManager {
     this.resumed = false;
 
     let momBegin = moment.utc(cfg['timeBegin'] * 1000);
-    this.winston.debug('The time of timeBegin is:', momBegin.format('YYYY-MMMM-DD HH:mm:ss') );
+    winston.debug('The time of timeBegin is:', momBegin.format('YYYY-MMMM-DD HH:mm:ss') );
 
     let momEnd = moment.utc(cfg['timeEnd'] * 1000);
-    this.winston.debug('The time of timeEnd is:', momEnd.format('YYYY-MMMM-DD HH:mm:ss') );
+    winston.debug('The time of timeEnd is:', momEnd.format('YYYY-MMMM-DD HH:mm:ss') );
     
     this.lastRun = moment.utc().unix();
     this.lastEnd = cfg['timeEnd']; // store the time of last run so that we can reference it the next time we loop
@@ -1388,24 +1375,24 @@ class RollingCollectionManager {
   
 
   onWorkerDisconnected(tempName) {
-    this.winston.debug('Worker disconnected.  Rolling collection update cycle complete.');
+    winston.debug('Worker disconnected.  Rolling collection update cycle complete.');
     fs.unlink(tempName, () => {} ); // Delete the temporary UNIX socket file
   }
 
 
 
   purgeSessions(sessionsToPurge) {
-    // this.winston.debug('purgeSessions(): sessionsToPurge.length: ', sessionsToPurge.length)
-    this.winston.info('RollingCollectionManager: purgeSessions()');
+    // winston.debug('purgeSessions(): sessionsToPurge.length: ', sessionsToPurge.length)
+    winston.info('RollingCollectionManager: purgeSessions()');
     while (sessionsToPurge.length > 0) {
       let sessionToPurge = sessionsToPurge.shift();
-      // this.winston.debug('purgeSessions(): Trying to purge session', sessionToPurge);
+      // winston.debug('purgeSessions(): Trying to purge session', sessionToPurge);
   
       for (let i = 0; i < this.sessions.length; i++) {
         // Purge session
         let session = this.sessions[i];
         if (session.id == sessionToPurge) {
-          // this.winston.debug('purgeSessions(): purging session', session.id);
+          // winston.debug('purgeSessions(): purging session', session.id);
           this.sessions.splice(i, 1);
           break;
         }
@@ -1424,7 +1411,7 @@ class RollingCollectionManager {
           let search = this.search[i];
           if (searchToPurge.session == search.session && searchToPurge.contentFile == search.contentFile) {
             // Purge search
-            this.winston.debug('purgeSessions(): purging search', search.session);
+            winston.debug('purgeSessions(): purging search', search.session);
             this.search.splice(i, 1);
             break;
           }
@@ -1446,7 +1433,7 @@ class RollingCollectionManager {
           let content = this.content[i];
           if (contentToPurge.session == content.session && contentToPurge.contentFile == content.contentFile && contentToPurge.contentType == content.contentType) {
             // Purge content
-            this.winston.debug('purgeSessions(): purging content', content.session);
+            winston.debug('purgeSessions(): purging content', content.session);
             this.content.splice(i, 1);
             if ('contentFile' in content) {
               fs.unlink(content.contentFile, () => {});
@@ -1474,7 +1461,7 @@ class RollingCollectionManager {
   // onDataFromWorker = (chunk) => {
     // Handles socket data received from the worker process
     // This actually builds the collection data structures and sends updates to the client
-    this.winston.debug('RollingCollectionManager: onDataFromWorker(): Processing update from worker');
+    winston.debug('RollingCollectionManager: onDataFromWorker(): Processing update from worker');
     data += chunk
 
     var splt = data.split("\n").filter( (el) => {return el.length != 0}) ;
@@ -1525,7 +1512,7 @@ class RollingCollectionManager {
           }
         }
 
-        // modify image paths to point to /collections/:collectionId
+        /*// modify image paths to point to /collections/:collectionId
         for (let i = 0; i < update.collectionUpdate.images.length; i++) {
           
           update.collectionUpdate.images[i].contentFile = this.cfg.collectionsUrl + '/' + this.rollingId + '/' + update.collectionUpdate.images[i].contentFile;
@@ -1544,10 +1531,10 @@ class RollingCollectionManager {
             update.collectionUpdate.images[i].archiveFilename = this.cfg.collectionsUrl + '/' + this.rollingId + '/' + update.collectionUpdate.images[i].archiveFilename;
           }
           this.content.push(update.collectionUpdate.images[i]);
-        }
+        }*/
       }
       
-      // this.winston.debug('update:', update);
+      // winston.debug('update:', update);
       this.sendToChannel('update', update);
       this.sendToHttpClients(update);
     }

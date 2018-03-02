@@ -12,20 +12,20 @@ const multer  = require('multer');
 const session = require('express-session');
 const bodyParser = require('body-parser');
 const listenPort = 3002;
-const uuidV4 = require('uuid/v4');
-const fs = require('fs');
-const net = require('net'); //for unix sockets
-const rimraf = require('rimraf');
-const spawn = require('child_process').spawn;
+global.uuidV4 = require('uuid/v4');
+global.fs = require('fs');
+global.net = require('net'); //for unix sockets
+global.rimraf = require('rimraf');
+global.spawn = require('child_process').spawn;
 const exec = require('child_process').exec;
-const temp = require('temp');
-const moment = require('moment');
+global.temp = require('temp');
+global.moment = require('moment');
 const passport = require('passport');
 const LocalStrategy = require('passport-local').Strategy;
 const cookieParser = require('cookie-parser');
 const util = require('util');
 const sprintf = require('sprintf-js').sprintf;
-const winston = require('winston');
+global.winston = require('winston');
 const mongoose = require('mongoose');
 mongoose.Promise = Promise;
 const jwt = require('jsonwebtoken');
@@ -35,7 +35,7 @@ const mongo = require('mongodb').MongoClient;
 const NodeRSA = require('node-rsa');
 const sleep = require('sleep');
 const restClient = require('node-rest-client').Client;
-const request = require('request');
+global.request = require('request');
 const path = require('path');
 const nodeCleanup = require('node-cleanup');
 
@@ -194,7 +194,7 @@ const decryptor = new NodeRSA( internalPrivateKey );
 decryptor.setOptions({encryptionScheme: 'pkcs1'});
 
 // Set up feed scheduler
-var scheduler = new feedScheduler(feedsDir, winston, decryptor, (id) => schedulerUpdatedCallback(id), io);
+var scheduler = new feedScheduler(feedsDir, decryptor, (id) => schedulerUpdatedCallback(id), io);
 
 
 // Create LibreOffice profiles dir
@@ -3094,9 +3094,9 @@ function finishStartup() {
   io.on('connection', (socket) => onSocketIoConnect(socket) );
   
   
-  rollingHandler = new rollingCollectionHandler( updateCollectionsDbCallback, winston, collections, collectionsDir, feeds, feederSocketFile, gsPath, pdftotextPath, sofficePath, sofficeProfilesDir, unrarPath, internalPrivateKeyFile, useCasesObj, preferences, nwservers, saservers, collectionsUrl, collectionsChannel);
+  rollingHandler = new rollingCollectionHandler( updateCollectionsDbCallback, collections, collectionsDir, feeds, feederSocketFile, gsPath, pdftotextPath, sofficePath, sofficeProfilesDir, unrarPath, internalPrivateKeyFile, useCasesObj, preferences, nwservers, saservers, collectionsUrl, collectionsChannel);
 
-  fixedHandler = new fixedCollectionHandler( updateFixedCollectionsDbCallback, winston, collections, collectionsData, collectionsDir, feeds, feederSocketFile, gsPath, pdftotextPath, sofficePath, sofficeProfilesDir, unrarPath, internalPrivateKeyFile, useCasesObj, preferences, nwservers, saservers, collectionsUrl, collectionsChannel);
+  fixedHandler = new fixedCollectionHandler( updateFixedCollectionsDbCallback, collections, collectionsData, collectionsDir, feeds, feederSocketFile, gsPath, pdftotextPath, sofficePath, sofficeProfilesDir, unrarPath, internalPrivateKeyFile, useCasesObj, preferences, nwservers, saservers, collectionsUrl, collectionsChannel);
 
   winston.debug('Installing cleanup handler');
   nodeCleanup( (exitCode, signal) => onCleanup(exitCode, signal) );

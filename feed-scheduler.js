@@ -1,13 +1,8 @@
-const request = require('request');
-const fs = require('fs');
-
-var winston = null;
-
 module.exports = class {
 
   // the purpose of this class is to update feeds on a schedule
 
-  constructor(feedsDir, winst, decryptor, callback, io) {
+  constructor(feedsDir, decryptor, callback, io) {
     this.scheduledFeeds = {};
     this.schedule = {};
     this.callback = callback;
@@ -15,7 +10,6 @@ module.exports = class {
     this.decryptor = decryptor;
     this.state = {};  // stores the state of jobs.  id : { 'message': string, 'time' : number }
     this.io = io; // socket.io
-    winston = winst;
   }
 
 

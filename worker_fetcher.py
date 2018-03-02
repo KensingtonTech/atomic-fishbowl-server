@@ -23,17 +23,25 @@ logging.getLogger("urllib3").setLevel(logging.WARNING)
 log = logging.getLogger(__name__)
 requests.packages.urllib3.disable_warnings()
 
+
+
 def unwrapExtractFilesFromMultipart(*arg, **kwarg):
   #print "unwrapExtractFilesFromMultipart()"
   return ContentProcessor.extractFilesFromMultipart(*arg, **kwarg)
+
+
 
 def unwrapGo(*arg, **kwarg):
   #log.debug("unwrapGo()")
   return ContentProcessor.go(*arg, **kwarg)
 
+
+
 def unwrapPullFiles(*arg, **kwarg):
   #print "unwrapExtractFilesFromMultipart()"
   return ContentProcessor.pullFiles(*arg, **kwarg)
+
+
 
 class ApiUnsuccessful(Exception):
   pass
@@ -44,6 +52,8 @@ class ApiUnsuccessful(Exception):
 
 
 class TimerThread(Thread):
+
+
 
   def __init__(self, event, cb):
     Thread.__init__(self)
@@ -56,11 +66,19 @@ class TimerThread(Thread):
       self.cb()
 
 
+
+
+
+
 class FutureSessionWithShutdown(FuturesSession):
 
   def terminate(self):
     self.executor._threads.clear()
     concurrent.futures.thread._threads_queues.clear()
+
+
+
+
 
 
 
@@ -341,7 +359,10 @@ class SaFetcher(Fetcher): # For Solera
       self.fetchMeta(self.sessionIds, session)
     # Wait for all meta extraction results to complete
     for future in self.metaExtractionFutures:
-      future.result()
+      try:
+        future.result()
+      except Exception as e:
+        self.exitWithException(e)
     fetchTime1 = time.time()
     log.info("SaFetcher: fetchMeta(): Meta extraction completed in " + str(fetchTime1 - fetchTime0) + " seconds")
     log.debug('SaFetcher: fetchMeta(): Number of flows in meta list: ' + str(len(self.sessions)))
@@ -352,7 +373,10 @@ class SaFetcher(Fetcher): # For Solera
     log.debug('SaFetcher: fetchMeta(): waiting for file extraction to complete')
     while len(self.extractFutures) != 0:
       future = self.extractFutures.pop()
-      future.result()
+      try:
+        future.result()
+      except Exception as e:
+        self.exitWithException(e)
     log.debug('SaFetcher: fetchMeta(): we think the download is complete')
 
     
@@ -711,6 +735,7 @@ vlan_id"""
       log.debug('SaFetcher: fetchMeta(): starting download of artifact zip file')
       self.communicator.write_data(json.dumps( { 'workerProgress': 'Downloading', 'label': 'Extracted Artifacts' } ) + '\n')
       future = session.post(self.cfg['url'] + '/api/v6/artifacts/download', auth=self.queryDef['auth'], data=self.convertToPostBody(data, 'GET'), verify=False, stream=True, background_callback=self.onExtractedFileDownload )
+      #print "Appending future"
       self.extractFutures.append(future)
       
 
@@ -768,26 +793,33 @@ vlan_id"""
     self.communicator.write_data(json.dumps( { 'workerProgress': 'Processing', 'label': 'Artifacts' } ) + '\n')
     poolResults = []
     for zinfo in zipHandle.infolist():
-      archivedFilename = zinfo.filename
-      #if archivedFilename.startswith('META-INF/') or archivedFilename.startswith('AssetData/'):
-      #  continue
-      compressedFileHandle = zipHandle.open(archivedFilename)
-      payload = compressedFileHandle.read()
-      compressedFileHandle.close()
-      flowId = self.extractFilesMap[archivedFilename]['flow_id']
-      if flowId:
-        if not flowId in self.sessions:
-          log.warning('Flow ' + str(flowId) + ' was not found amongst extracted meta.  Skipping processing for this flow.')
-          continue
-        session = self.sessions[flowId]
-        #pprint(session)
-        if session:
-          # now fire!!!
-          #log.debug('SaFetcher: extractDownloadedZip(): Launching extractor from pool')
-          processor = ContentProcessor(self.cfg)
-          result = self.pool.apply_async( unwrapGo, args=(processor, payload, session, flowId, archivedFilename), callback=self.sendResult )
-          poolResults.append(result)
-          #r.get() # useful to see if an error was thrown during apply_sync()
+
+      print ("contentCount:", self.cfg['contentCount'].value)
+
+      if not self.cfg['contentCount'].value >= self.cfg['contentLimit']:
+        archivedFilename = zinfo.filename
+        #if archivedFilename.startswith('META-INF/') or archivedFilename.startswith('AssetData/'):
+        #  continue
+        compressedFileHandle = zipHandle.open(archivedFilename)
+        payload = compressedFileHandle.read()
+        compressedFileHandle.close()
+        flowId = self.extractFilesMap[archivedFilename]['flow_id']
+        if flowId:
+          if not flowId in self.sessions:
+            log.warning('Flow ' + str(flowId) + ' was not found amongst extracted meta.  Skipping processing for this flow.')
+            continue
+          session = self.sessions[flowId]
+          #pprint(session)
+          if session:
+            # now fire!!!
+            log.debug('SaFetcher: extractDownloadedZip(): Launching extractor from pool')
+            processor = ContentProcessor(self.cfg)
+            result = self.pool.apply_async( unwrapGo, args=(processor, payload, session, flowId, 'sa', archivedFilename), callback=self.sendResult )
+            poolResults.append(result)
+            #r.get() # useful to see if an error was thrown during apply_sync()
+      else:
+        log.info("SaFetcher: extractDownloadedZip(): Image limit of " + str(self.cfg['contentLimit']) + " has been reached.  Ending collection build.  You may want to narrow your result set with a more specific query")
+        break
     
     self.pool.close()
     for result in poolResults:
@@ -876,56 +908,6 @@ vlan_id"""
 
 class NwFetcher(Fetcher):
 
-  """
-  def __init__(self, cfg, communicator):
-    self.cfg = cfg
-    self.communicator = communicator
-    self.cfg['devmode'] = True
-    self.pool = Pool()
-    self.manager = Manager()
-    self.cfg['contentCount'] = self.manager.Value('I', 0)
-    self.cfg['contentErrors'] = self.manager.Value('I', 0)
-    self.summary = {}
-    self.sessions = {}
-
-    self.cfg['thumbnailSize'] = 350, 350
-    proto='http://'
-    if 'ssl' in cfg and cfg['ssl'] == True:
-      proto='https://'
-    host = cfg['host']
-    port = str(cfg['port'])
-    baseUrl = proto + host + ':' + port
-    self.cfg['url'] = baseUrl
-    
-    #convert to integers
-    if 'minX' in self.cfg and 'minY' in self.cfg:
-      self.cfg['minX'] = int(self.cfg['minX'])
-      self.cfg['minY'] = int(self.cfg['minY'])
-      log.debug("Fetcher: __init__(): Minimum dimensions are: " + str(self.cfg['minX']) + " x " + str(self.cfg['minY']))
-    self.cfg['contentLimit'] = int(self.cfg['contentLimit'])
-    self.cfg['summaryTimeout'] = int(self.cfg['summaryTimeout'])
-    self.cfg['queryTimeout'] = int(self.cfg['queryTimeout'])
-    self.cfg['contentTimeout'] = int(self.cfg['contentTimeout'])
-    self.cfg['maxContentErrors'] = int(self.cfg['maxContentErrors'])
-    
-    #self.contentTypes = contentTypes
-
-  '''curl "http://admin:netwitness@172.16.0.55:50104/sdk?msg=query&query=$query&force-content-type=application/json'''
-
-  def fetchSummary(self):
-    request = urllib2.Request(self.cfg['url'] + '/sdk?msg=summary')
-    base64string = base64.b64encode('%s:%s' % (self.cfg['user'], self.cfg['dpassword']))
-    request.add_header("Authorization", "Basic %s" % base64string)
-    request.add_header('Content-type', 'application/json')
-    request.add_header('Accept', 'application/json')
-    summaryResult = json.load(urllib2.urlopen(request, timeout=self.cfg['summaryTimeout']))
-    for e in summaryResult['string'].split():
-      (k, v) = e.split('=')
-      self.summary[k] = v
-  """
-
-
-
   def runQuery(self):
     reqStr = self.cfg['url'] + '/sdk?msg=query&query=' + self.cfg['queryEnc'] #&flags=4096
     ctx = ssl.create_default_context()
@@ -940,7 +922,7 @@ class NwFetcher(Fetcher):
       rawQueryRes = json.load(urllib2.urlopen(request, context=ctx, timeout=self.cfg['queryTimeout']))
       #pprint(rawQueryRes)
       #print "length of rawQueryRes", len(rawQueryRes)
-      log.debug('Fetcher: runQuery(): Parsing query results')
+      log.debug('NwFetcher: runQuery(): Parsing query results')
       for field in rawQueryRes:
         if 'results' in field and isinstance(field, dict):
           if 'fields' in field['results']:
@@ -1002,7 +984,7 @@ class NwFetcher(Fetcher):
         error = "runQuery(): URL Error whilst running query.  Exiting with code 1: "  + str(e)
       self.exitWithError(error)
     except Exception as e:
-      error = "Fetcher: runQuery(): Unhandled exception whilst running query.  Exiting with code 1: " + str(e)
+      error = "NwFetcher: runQuery(): Unhandled exception whilst running query.  Exiting with code 1: " + str(e)
       self.exitWithException(error)
     return len(self.sessions)
 
@@ -1020,7 +1002,7 @@ class NwFetcher(Fetcher):
         self.exitWithError(e)
       
       if self.cfg['contentCount'].value >= self.cfg['contentLimit']:
-        log.info("Fetcher: pullFiles(): Image limit of " + str(self.cfg['contentLimit']) + " has been reached.  Ending collection build.  You may want to narrow your result set with a more specific query")
+        log.info("NwFetcher: pullFiles(): Image limit of " + str(self.cfg['contentLimit']) + " has been reached.  Ending collection build.  You may want to narrow your result set with a more specific query")
         return
       
       elif not self.cfg['contentCount'].value >= self.cfg['contentLimit']:
@@ -1040,17 +1022,17 @@ class NwFetcher(Fetcher):
         except urllib2.HTTPError as e:
           self.cfg['contentErrors'].value += 1
           error = "HTTP exception pulling content for session " + str(sessionId) + ".  URI was '" + uri + "'.  The HTTP status code was " + str(e.code)
-          log.warning("Fetcher: pullFiles(): " + error )
+          log.warning("NwFetcher: pullFiles(): " + error )
           continue
         except urllib2.URLError as e:
           self.cfg['contentErrors'].value += 1
           error = "URL error pulling content for session " + str(sessionId) + ".  The reason was " + e.reason
-          log.warning("Fetcher: pullFiles(): " + error)
+          log.warning("NwFetcher: pullFiles(): " + error)
           continue
         except socket.timeout as e:
           self.cfg['contentErrors'].value += 1
           error = "Content call for session " + str(sessionId) + " timed out after " + str(self.cfg['contentTimeout']) + " seconds"
-          log.warning("Fetcher: pullFiles(): " + error)
+          log.warning("NwFetcher: pullFiles(): " + error)
           continue
 
         if 'res' in locals() and res.info().getheader('Content-Type').startswith('multipart/mixed'):
@@ -1059,9 +1041,9 @@ class NwFetcher(Fetcher):
           payload = 'Content-Type: ' + contentType + '\n' + 'Mime-Version: ' + mimeVersion + '\n' + res.read()
           
           ##############EXTRACT FILES AND DO THE WORK##############
-          log.debug('Fetcher: pullFiles(): Launching extractor from pool')
+          log.debug('NwFetcher: pullFiles(): Launching extractor from pool')
           processor = ContentProcessor(self.cfg)
-          result = self.pool.apply_async(unwrapGo, args=(processor, payload, self.sessions[sessionId], sessionId), callback=self.sendResult )
+          result = self.pool.apply_async(unwrapGo, args=(processor, payload, self.sessions[sessionId], sessionId, 'nw'), callback=self.sendResult )
           poolResults.append(result)
 
     self.pool.close()
@@ -1081,11 +1063,11 @@ class NwFetcher(Fetcher):
         processor = ContentProcessor(self.cfg)
 
         ##############PULL FILES AND PROCESS THEM##############
-        log.debug('Fetcher: newPullFiles(): Launching extractor from pool')
+        log.debug('NwFetcher: newPullFiles(): Launching extractor from pool')
         res = self.pool.apply_async(unwrapPullFiles, args=(processor, self.sessions[sessionId], sessionId), callback=self.sendResult )
         res.get()
 
       else:
-        log.info("Fetcher: newPullFiles(): Image limit of " + str(self.cfg['contentLimit']) + " has been reached.  Ending collection build.  You may want to narrow your result set with a more specific query")
+        log.info("NwFetcher: newPullFiles(): Image limit of " + str(self.cfg['contentLimit']) + " has been reached.  Ending collection build.  You may want to narrow your result set with a more specific query")
         return
     
