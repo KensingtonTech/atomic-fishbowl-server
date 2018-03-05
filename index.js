@@ -2344,11 +2344,12 @@ function extraJwtTokenValidation(jwt_payload, done) {
 
 function onMongooseConnected() {
   // Create the default user account, if we think the app was just installed and if the count of users is 0
-  User.count({}, (err, count) => {
+  User.count( {}, (err, count) => {
     if (err) {
       winston.error("Error getting user count:", err);
     }
-    else if (justInstalled == true && count == 0) {
+    else if (justInstalled && ( count == 0 || !count ) ) {
+        // we only create the default user on first run because we 
         winston.info("Adding default user 'admin'");
         createDefaultUser();
         justInstalled = false;
@@ -2398,6 +2399,8 @@ function mongooseInit() {
   passport.use(jwtStrategy);
   
 
+  
+
   // Connect to Mongoose
   mongoose.connect(mongooseUrl, mongooseOptions )
           .then( () => onMongooseConnected() )
@@ -2414,9 +2417,8 @@ function mongooseInit() {
 
 function processMongoCollections() {
   winston.debug('processMongoCollections()');
-
+  
   return db.collection('preferences').findOne().then( (res) => {
-    justInstalled = false;
     winston.debug("Reading preferences");
 
     let rewritePrefs = false; 
@@ -2450,6 +2452,7 @@ function processMongoCollections() {
       }
     }
     tokenExpirationSeconds = 60 * 60 * preferences.tokenExpirationHours; // 24 hours is default
+    justInstalled = false;
     if (rewritePrefs) {
       writePreferences();
     }
@@ -2585,34 +2588,35 @@ function onMongoConnected(database) {
 function connectToDB() {
   winston.debug('Initializing mongo db and reading settings');
 
+  
   // We use mongoose for auth, and MongoClient for everything else.  This is because Passport-Local Mongoose required it, and it is ill-suited to the free-formish objects which we want to use.
   let mongoUrl = `mongodb://${config['dbConfig']['host']}:${config['dbConfig']['port']}/afb`;
   if (config.dbConfig.authentication.enabled) {
     mongoUrl = `mongodb://${config.dbConfig.authentication.user}:${config.dbConfig.authentication.password}@${config['dbConfig']['host']}:${config['dbConfig']['port']}/afb?authSource=admin`;
   }
-
+  
   let connectionAttempts = 1;
   let connectorFunc = () => {
     mongo.connect(mongoUrl)
-      .then( (database) => onMongoConnected(database) )
-      .then( () => processMongoCollections() )
-      .then( () => mongooseInit() )
-      .catch( (err) => {
-        // winston.error(err);
-        if (connectionAttempts == 3) {
-          winston.error('Maximum retries reached whilst connecting to mongo.  Exiting with code 1');
-          winston.error(err.message);
-          process.exit(1);
-        }
-        winston.warn('Could not connect to Mongo DB');
-        connectionAttempts++;
-        if (connectionAttempts <= 3) {
-          winston.warn('Retrying mongo connection in 3 seconds');
-        }
-        sleep.sleep(3);
-        connectorFunc();
-      });
-    };
+    .then( (database) => onMongoConnected(database) )
+    .then( () => processMongoCollections() )
+    .then( () => mongooseInit() )
+    .catch( (err) => {
+      // winston.error(err);
+      if (connectionAttempts == 3) {
+        winston.error('Maximum retries reached whilst connecting to mongo.  Exiting with code 1');
+        winston.error(err.message);
+        process.exit(1);
+      }
+      winston.warn('Could not connect to Mongo DB');
+      connectionAttempts++;
+      if (connectionAttempts <= 3) {
+        winston.warn('Retrying mongo connection in 3 seconds');
+      }
+      sleep.sleep(3);
+      connectorFunc();
+    });
+  };
   connectorFunc();
 }
 
