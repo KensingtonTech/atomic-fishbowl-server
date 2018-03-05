@@ -1,4 +1,4 @@
-module.exports = class {
+class FeedScheduler {
 
   // the purpose of this class is to update feeds on a schedule
 
@@ -150,3 +150,5 @@ module.exports = class {
   }
 
 }
+
+module.exports = FeedScheduler;

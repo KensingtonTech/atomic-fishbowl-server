@@ -41,10 +41,30 @@ const nodeCleanup = require('node-cleanup');
 
 const buildProperties = require('./build-properties');
 const version = `${buildProperties.major}.${buildProperties.minor}.${buildProperties.patch}.${buildProperties.build}-${buildProperties.level}`;
-const feedScheduler = require('./feed-scheduler.js');
-const rollingCollectionHandler = require('./rolling-collections');
-const fixedCollectionHandler = require('./fixed-collections');
 
+var feedScheduler;
+try {
+  feedScheduler = FeedScheduler;
+}
+catch (e) {
+  feedScheduler = require('./feed-scheduler.js');
+}
+
+var rollingCollectionHandler;
+try {
+  rollingCollectionHandler = RollingCollectionHandler;
+}
+catch (e) {
+  rollingCollectionHandler = require('./rolling-collections');
+}
+
+var fixedCollectionHandler;
+try {
+  fixedCollectionHandler = FixedCollectionHandler;
+}
+catch(e) {
+  fixedCollectionHandler = require('./fixed-collections');
+}
 
 // export NODE_ENV='production'
 // export NODE_ENV='development'
