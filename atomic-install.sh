@@ -15,11 +15,11 @@ if [ ! -d ${HOST}${CERTDIR} ]; then
 fi
 
 # Create a .default version of our cfg file for reference
-cp -f /opt/kentech/afb-server/bin/$CFGFILE ${HOST}${ETCDIR}/${CFGFILE}.default
+cp -f /opt/kentech/afb-server/bin/$CFGFILE.default ${HOST}${ETCDIR}
 if [ ! -f ${HOST}${ETCDIR}/$CFGFILE ]; then
   # If our cfg file doesn't exist on the host, then create it
   echo "Creating Atomic Fishbowl server configuration file"
-  mv -f /opt/kentech/afb-server/bin/$CFGFILE ${HOST}${ETCDIR}/${CFGFILE}
+  cp -f /opt/kentech/afb-server/bin/$CFGFILE.default ${HOST}${ETCDIR}/${CFGFILE} #we can't make FS changes to container
 fi
 
 # Stop existing container, if already running

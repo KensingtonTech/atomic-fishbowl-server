@@ -2375,7 +2375,12 @@ function mongooseInit() {
   // This creates local authentication passport strategy
   // This authenticates a user against the account stored in MongoDB
   // This is only used by /api/login
-  User = require('./models/user');
+  try {
+    User = model;
+  }
+  catch(e) {
+    User = require('./models/user');
+  }
   let mongooseStrategy = new LocalStrategy( User.authenticate() );
   passport.use(mongooseStrategy);
   passport.serializeUser( User.serializeUser() );

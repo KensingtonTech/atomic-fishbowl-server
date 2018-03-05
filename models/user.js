@@ -1,8 +1,8 @@
-var mong = require('mongoose');
-var Schema = mong.Schema;
-var passportLocalMongoose = require('passport-local-mongoose');
+let mong = require('mongoose');
+let Schema = mong.Schema;
+let passportLocalMongoose = require('passport-local-mongoose');
 
-var User = new Schema({
+let UserSchema = new Schema({
   id: String,
   username: String,
   fullname: String,
@@ -16,9 +16,9 @@ var User = new Schema({
     }
 });
 
-User.plugin(passportLocalMongoose);
+UserSchema.plugin(passportLocalMongoose);
 
 // model contains authenticate(), serializeUser(), and deserializeUser() methods
-let model = mong.model('User', User);
+var model = mong.model('User', UserSchema);
 
 module.exports = model;
