@@ -38,6 +38,7 @@ const restClient = require('node-rest-client').Client;
 global.request = require('request');
 const path = require('path');
 const nodeCleanup = require('node-cleanup');
+const isDocker = require('is-docker');
 
 const buildProperties = require('./build-properties');
 const version = `${buildProperties.major}.${buildProperties.minor}.${buildProperties.patch}.${buildProperties.build}-${buildProperties.level}`;
@@ -3135,6 +3136,12 @@ function finishStartup() {
 
   winston.debug('Installing cleanup handler');
   nodeCleanup( (exitCode, signal) => onCleanup(exitCode, signal) );
+  
+  // Install SIGINT and SIGTERM handlers if we're running inside a container.  We need this to allow the process to exit normally when running in Docker
+  if ( isDocker() ) {
+    process.on('SIGINT', () => onCleanup(0, signal) );
+    process.on('SIGTERM', () => onCleanup(0, signal) );
+  }
 
 
   apiInitialized = true;
