@@ -69,6 +69,7 @@ catch(e) {
 // export NODE_ENV='production'
 // export NODE_ENV='development'
 var development = process.env.NODE_ENV !== 'production';
+var debug = 'AFBDEBUG' in process.env;
 const purgeHack = false; // causes sessions older than 5 minutes to be purged, if set to true.  Useful for testing purging without having to wait an hour
 var gsPath = '/usr/bin/gs';
 var sofficePath = '/usr/bin/soffice';
@@ -119,6 +120,11 @@ if (development) {
 }
 else {
   winston.level = 'info';
+}
+
+if (debug) {
+  winston.debug('Atomic Fishbowl Server debug logging is enabled');
+  winston.level = 'debug';
 }
 
 winston.info('Starting Atomic Fishbowl server version', version);
