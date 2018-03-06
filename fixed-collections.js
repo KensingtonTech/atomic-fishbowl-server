@@ -627,19 +627,18 @@ class FixedCollectionManager {
 
 
 
-  onWorkerExit(code) {
-    if (!code) {
+  onWorkerExit(code) {1
+    /*if (!code) {
       winston.debug('Worker process exited abnormally without an exit code');
       this.collection['state'] = 'error';
+    }*/
+    if (!code || code === 0) {
+      winston.debug('Worker process exited normally with exit code 0');
+      this.collection['state'] = 'complete'; 
     }
     else if (code !== 0) {
       winston.debug('Worker process exited abnormally with exit code',code);
       this.collection['state'] = 'error';
-    }
-    else {
-      winston.debug('Worker process exited normally with exit code', code);
-      this.collection['state'] = 'complete';
-      
     }
     this.sendToChannel('state', this.collection['state']);
     this.sendToHttpClients( { collection: { id: this.collectionId, state: this.collection['state'] } } );
