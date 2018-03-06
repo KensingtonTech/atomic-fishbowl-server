@@ -113,7 +113,7 @@ class ContentProcessor:
     #check file for dimensions and only write if minimum
     if x >= int(self.cfg['minX']) and y >= int(self.cfg['minY']):
       log.debug("ContentProcessor: processImage(): Keeping image " + contentObj.contentFile + " of resolution " + str(x) + ' x ' + str(y) )
-      fp = open(os.path.join(self.cfg['outputDir'], contentObj.contentFile), 'wb')
+      fp = open(os.path.join(self.cfg['outputDir'], contentObj.contentFile.encode('utf8')), 'wb')
       fp.write(output.getvalue())
       fp.close()
 

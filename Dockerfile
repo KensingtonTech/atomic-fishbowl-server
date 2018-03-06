@@ -25,10 +25,10 @@ echo 172.16.0.57 kentechrepo >> /etc/hosts; \
 /bin/sed -i'' 's/mirrorlist=/#mirrorlist=/g' /etc/yum.repos.d/CentOS-Base.repo; \
 /bin/sed -i'' 's/#baseurl=http:\/\/mirror.centos.org/baseurl=http:\/\/kentechrepo/g' /etc/yum.repos.d/CentOS-Base.repo; \
 yum clean all; \
-#yum update -y --disableplugin=fastestmirror; \
+yum update -y --disableplugin=fastestmirror; \
 rpm --import http://kentechrepo/yumrepo/afb_1.0.0_signed/afb-1.x.key; \
 curl http://kentechrepo/yumrepo/afb_1.0.0_signed/afb-1.0.0-signed.repo > /etc/yum.repos.d/afb-1.0.0-signed.repo; \
-yum install -y --disableplugin=fastestmirror nodejs ghostscript poppler-utils libjpeg-turbo openjpeg unzip unrar python-requests python2-crypto libreoffice; \
+yum install -y --disableplugin=fastestmirror nodejs ghostscript poppler-utils libjpeg-turbo openjpeg unzip unrar python-requests python2-crypto python-setuptools libreoffice; \
 curl https://bootstrap.pypa.io/get-pip.py > get-pip.py; \
 python get-pip.py; \
 pip install requests; \
@@ -43,4 +43,3 @@ yum clean all; \
 rm -rf /var/cache/yum; \
 H=`grep -v kentechrepo /etc/hosts`; \
 echo -n $H > /etc/hosts;
-#yum install -y --disableplugin=fastestmirror nodejs kta-python-magic kta-python-Pillow kta-python-rarfile ghostscript poppler-utils libjpeg-turbo openjpeg unzip unrar python-requests python2-crypto libreoffice; \
