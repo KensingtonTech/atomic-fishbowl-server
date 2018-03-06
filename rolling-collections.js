@@ -1512,26 +1512,10 @@ class RollingCollectionManager {
           }
         }
 
-        /*// modify image paths to point to /collections/:collectionId
         for (let i = 0; i < update.collectionUpdate.images.length; i++) {
-          
-          update.collectionUpdate.images[i].contentFile = this.cfg.collectionsUrl + '/' + this.rollingId + '/' + update.collectionUpdate.images[i].contentFile;
-          
-          if ('proxyContentFile' in update.collectionUpdate.images[i]) {
-            update.collectionUpdate.images[i].proxyContentFile = this.cfg.collectionsUrl + '/' + this.rollingId + '/' + update.collectionUpdate.images[i].proxyContentFile;
-          }
-
-          if ('thumbnail' in update.collectionUpdate.images[i]) {
-            update.collectionUpdate.images[i].thumbnail = this.cfg.collectionsUrl + '/' + this.rollingId + '/' + update.collectionUpdate.images[i].thumbnail;
-          }
-          if ('pdfImage' in update.collectionUpdate.images[i]) {
-            update.collectionUpdate.images[i].pdfImage = this.cfg.collectionsUrl + '/' + this.rollingId + '/' + update.collectionUpdate.images[i].pdfImage;
-          }
-          if ('archiveFilename' in update.collectionUpdate.images[i]) {
-            update.collectionUpdate.images[i].archiveFilename = this.cfg.collectionsUrl + '/' + this.rollingId + '/' + update.collectionUpdate.images[i].archiveFilename;
-          }
-          this.content.push(update.collectionUpdate.images[i]);
-        }*/
+          let image = update.collectionUpdate.images[i];
+          this.content.push(image);
+        }
       }
       
       // winston.debug('update:', update);
