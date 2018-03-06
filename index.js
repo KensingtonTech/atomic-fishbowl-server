@@ -3139,8 +3139,8 @@ function finishStartup() {
   
   // Install SIGINT and SIGTERM handlers if we're running inside a container.  We need this to allow the process to exit normally when running in Docker
   if ( isDocker() ) {
-    process.on('SIGINT', () => onCleanup(0, signal) );
-    process.on('SIGTERM', () => onCleanup(0, signal) );
+    process.on('SIGINT', () => onCleanup(0, 2) );
+    process.on('SIGTERM', () => onCleanup(0, 15) );
   }
 
 
