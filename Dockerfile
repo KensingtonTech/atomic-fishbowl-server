@@ -29,7 +29,7 @@ yum clean all; \
 rpm --import http://kentechrepo/yumrepo/afb_1.0.0_signed/afb-1.x.key; \
 curl http://kentechrepo/yumrepo/afb_1.0.0_signed/afb-1.0.0-signed.repo > /etc/yum.repos.d/afb-1.0.0-signed.repo; \
 yum install -y --disableplugin=fastestmirror nodejs ghostscript poppler-utils libjpeg-turbo openjpeg unzip unrar python-requests python2-crypto libreoffice; \
-curl 'https://bootstrap.pypa.io/get-pip.py' -o 'get-pip.py' \
+curl https://bootstrap.pypa.io/get-pip.py > get-pip.py \
 python get-pip.py \
 pip install requests \
 pip install requests-futures \
