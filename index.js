@@ -913,7 +913,7 @@ app.post('/api/collection', passport.authenticate('jwt', { session: false } ), (
     }
     
     if (collection.type == 'rolling' || collection.type == 'monitoring') {
-      collection['state'] = 'disconnected';
+      collection['state'] = 'stopped';
     }
     else {
       // fixed
@@ -965,7 +965,7 @@ app.post('/api/collection/edit', passport.authenticate('jwt', { session: false }
     winston.debug('collection:', collection);
     let id = collection.id;
     if (collection.type == 'rolling' || collection.type == 'monitoring') {
-      collection['state'] = 'disconnected';
+      collection['state'] = 'stopped';
     }
     else {
       collection['state'] = 'initial';
@@ -2546,7 +2546,7 @@ function processMongoCollections() {
       for (let x = 0; x < res.length; x++) {
         let collection = res[x];
         if (collection.type == 'monitoring' || collection.type == 'rolling') {
-          collection.state = 'disconnected';
+          collection.state = 'stopped';
         }
         collections[collection.id] = collection;
        }

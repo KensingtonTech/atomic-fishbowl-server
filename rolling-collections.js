@@ -524,7 +524,7 @@ class RollingCollectionManager {
       winston.debug('Not self-destructing as we\'re already being deleted');
       return;
     }*/
-    this.collection['state'] = 'disconnected';
+    this.collection['state'] = 'stopped';
     if (!this.monitoringCollection) {
       winston.debug("RollingCollectionManager: selfDestruct(): No clients reconnected to rolling collection " + this.rollingId + " within " + this.destroyThreshold + " seconds. Self-destructing");
     }
