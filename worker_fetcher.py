@@ -599,7 +599,7 @@ vlan_id"""
             flowidPos = i
       else:
         values = line.split('\t')
-        flowid = values[flowidPos]
+        flowid = int(values[flowidPos])
         thisSession = { 'images': [], 'session': { 'id': flowid, 'meta': {} } }
         for i in xrange(len(values)):
           metaKey = keyPositions[i]
@@ -623,7 +623,7 @@ vlan_id"""
             thisSession['session']['meta'][metaKey] = valueList
             #elif len(valueList) == 1:
             #  thisSession['session']['meta'][metaKey] = valueList.pop()
-        self.sessions[int(flowid)] = thisSession
+        self.sessions[flowid] = thisSession
       count += 1
 
 

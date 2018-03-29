@@ -71,7 +71,7 @@ catch(e) {
 // export NODE_ENV='development'
 var development = process.env.NODE_ENV !== 'production';
 var debug = 'AFBDEBUG' in process.env;
-const purgeHack = false; // causes sessions older than 5 minutes to be purged, if set to true.  Useful for testing purging without having to wait an hour
+global.purgeHack = false; // causes sessions older than 5 minutes to be purged, if set to true.  Useful for testing purging without having to wait an hour
 var gsPath = '/usr/bin/gs';
 var sofficePath = '/usr/bin/soffice';
 var pdftotextPath = '/usr/bin/pdftotext';

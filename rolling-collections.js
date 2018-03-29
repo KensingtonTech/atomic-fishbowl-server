@@ -1062,7 +1062,7 @@ class RollingCollectionManager {
 
 
   onConnectionFromWorker(tempName) {
-    winston.info('RollingCollectionManager: onConnectionFromWorker()');
+    winston.debug('RollingCollectionManager: onConnectionFromWorker()');
     // For rolling and monitoring collections
     // Handles all dealings with the worker process after it has been spawned, including sending it its configuration, and sending data received from it to the onDataFromWorker() function
     // It also purges old data from the collection as defined by the type of collection and number of hours back to retain
@@ -1104,17 +1104,20 @@ class RollingCollectionManager {
       winston.debug('Running purge routine');
       let sessionsToPurge = [];
   
-      // Calculate the maximum age a given session is allowed to be
+      // Calculate the maximum age a given session is allowed to be before purging it
       let maxTime = this.lastEnd - this.collection.lastHours * 60 * 60;
-      // if (purgeHack) { maxTime = thisRollingCollectionSubject.lastRun - 60 * 5; } // 5 minute setting used for testing
-  
+      if (purgeHack) { maxTime = this.lastRun - 60 * 5; } // 5 minute setting used for testing
   
       for (let i = 0; i < this.sessions.length; i++) {
         // Look at each session and determine whether it is older than maxtime
         // If so, add it to purgedSessionPositions and sessionsToPurge
         let session = this.sessions[i];
+        // winston.debug('session:', session);
         let sid = session.id;
-        if ( session.meta.time < maxTime ) {
+        if ( this.collection.serviceType == 'nw' && session.meta.time < maxTime ) {
+          sessionsToPurge.push(sid);
+        }
+        else if ( this.collection.serviceType == 'sa' && this.convertSATime(session.meta.stop_time[0]) < maxTime ) {
           sessionsToPurge.push(sid);
         }
       }
@@ -1383,13 +1386,14 @@ class RollingCollectionManager {
 
   purgeSessions(sessionsToPurge) {
     // winston.debug('purgeSessions(): sessionsToPurge.length: ', sessionsToPurge.length)
-    winston.info('RollingCollectionManager: purgeSessions()');
+    winston.debug('RollingCollectionManager: purgeSessions(): ' + sessionsToPurge);
     while (sessionsToPurge.length > 0) {
-      let sessionToPurge = sessionsToPurge.shift();
-      // winston.debug('purgeSessions(): Trying to purge session', sessionToPurge);
+      let sessionToPurge = sessionsToPurge.shift(); // a session ID
+      // winston.debug('purgeSessions(): purge for session', sessionToPurge);
   
-      for (let i = 0; i < this.sessions.length; i++) {
-        // Purge session
+      // for (let i = 0; i < this.sessions.length; i++) {
+      for (let i = this.sessions.length - 1; i != -1 ; i--) {
+        // Remove purged sessions from this.sessions
         let session = this.sessions[i];
         if (session.id == sessionToPurge) {
           // winston.debug('purgeSessions(): purging session', session.id);
@@ -1399,13 +1403,18 @@ class RollingCollectionManager {
       }
   
       let searchesToPurge = [];
-      for (let i = 0; i < this.search.length; i++) {
+      // for (let i = 0; i < this.search.length; i++) {
+      for (let i = this.search.length - 1; i != -1; i--) {
+        // Identify search items to purge from this.search
         let search = this.search[i];
         if (search.session == sessionToPurge) {
-          searchesToPurge.push(search);
+          // searchesToPurge.push(search);
+          winston.debug('purgeSessions(): purging search', search.session);
+          this.search.splice(i, 1);
         }
       }
-      while (searchesToPurge.length != 0) {
+      /*while (searchesToPurge.length != 0) {
+        // Remove purged search items from this.search
         let searchToPurge = searchesToPurge.shift();
         for (let i = 0; i < this.search.length; i++) {
           let search = this.search[i];
@@ -1416,18 +1425,33 @@ class RollingCollectionManager {
             break;
           }
         }
-      }
-  
-  
+      }*/
+      
       let contentsToPurge = [];
-      for (let i = 0; i < this.content.length; i++) {
+      // for (let i = 0; i < this.content.length; i++) {
+      for (let i = this.content.length - 1; i != -1; i--) {
         // Purge content
         let content = this.content[i];
         if (content.session == sessionToPurge) {
-          contentsToPurge.push(content);
+          winston.debug('purgeSessions(): purging content', content.session);
+          // contentsToPurge.push(content);
+          if ('contentFile' in content) {
+            fs.unlink(content.contentFile, () => {});
+          }
+          if ('proxyContentFile' in content) {
+            fs.unlink(content.proxyContentFile, () => {});
+          }
+          if ('thumbnail' in content) {
+            fs.unlink(content.thumbnail, () => {});
+          }
+          if ('pdfImage' in content) {
+            fs.unlink(content.pdfImage, () => {});
+          }
+          this.content.splice(i, 1);
         }
       }
-      while (contentsToPurge.length != 0) {
+
+      /*while (contentsToPurge.length != 0) {
         let contentToPurge = contentsToPurge.shift();
         for (let i = 0; i < this.content.length; i++) {
           let content = this.content[i];
@@ -1450,7 +1474,8 @@ class RollingCollectionManager {
             break;
           }
         }
-      }
+      }*/
+
     }
   }
 
@@ -1525,6 +1550,11 @@ class RollingCollectionManager {
 
     return data;
   };
+
+
+  convertSATime(value) {
+    return parseInt(value.substring(0, value.indexOf(':')), 10);
+  }
 
 
 }
