@@ -461,8 +461,6 @@ class ContentProcessor:
 
 
 
-
-
   def onFeederResponse(self, res, contentObj):
     #log.debug('ContentProcessor: feederResponse():\n' + pformat(res))
     log.debug("ContentProcessor: genHash(): Session " + str(contentObj.session) + ". Matched " + res['type'] + " hash " + res['hash'])
@@ -474,6 +472,7 @@ class ContentProcessor:
     if 'friendlyName' in res:
       contentObj.hashFriendly = res['friendlyName']
     self.thisSession['images'].append( contentObj.get() )
+
 
 
   def genHash(self, contentObj): #must specify either part or stringFile
@@ -517,9 +516,10 @@ class ContentProcessor:
     
     if not self.cfg['useHashFeed']:
 
-      def hashFinder(hash, hashes):
+      def hashFinder(hash, hashes, contentObj):
         for h in hashes:
           if hash == h['hash'].lower():
+            contentObj = contentObj.getCopy()
             log.debug("ContentProcessor: genHash(): Session " + str(contentObj.session) + ". Matched " + contentObj.hashType + " hash " + h['hash'])
             fp = open(os.path.join(self.cfg['outputDir'], contentObj.contentFile), 'wb')
             fp.write(contentFileObj.getvalue())
@@ -535,19 +535,19 @@ class ContentProcessor:
         hashRes = hasher.update(contentFileObj.getvalue())
         calcHash = hasher.hexdigest().decode('utf-8').lower()
         log.debug("ContentProcessor: genHash(): Session " + str(contentObj.session) + ". " + contentObj.hashType + " hash for " + contentObj.contentFile + " is " + calcHash)
-        hashFinder(calcHash, self.cfg['md5Hashes'])
+        hashFinder(calcHash, self.cfg['md5Hashes'], contentObj)
       if contentObj.hashType == 'sha1':
         hasher = hashlib.sha1()
         hashRes = hasher.update(contentFileObj.getvalue())
         calcHash = hasher.hexdigest().decode('utf-8').lower()
         log.debug("ContentProcessor: genHash(): Session " + str(contentObj.session) + ". " + contentObj.hashType + " hash for " + contentObj.contentFile + " is " + calcHash)
-        hashFinder(calcHash, self.cfg['sha1Hashes'])
+        hashFinder(calcHash, self.cfg['sha1Hashes'], contentObj)
       if contentObj.hashType == 'sha256':
         hasher = hashlib.sha256()
         hashRes = hasher.update(contentFileObj.getvalue())
         calcHash = hasher.hexdigest().decode('utf-8').lower()
         log.debug("ContentProcessor: genHash(): Session " + str(contentObj.session) + ". " + contentObj.hashType + " hash for " + contentObj.contentFile + " is " + calcHash)
-        hashFinder(calcHash, self.cfg['sha256Hashes'])
+        hashFinder(calcHash, self.cfg['sha256Hashes'], contentObj)
 
 
 
@@ -787,7 +787,8 @@ class ContentProcessor:
       contentObj.fromArchive = True
       contentObj.archiveType = 'zip'
       saveZipFile = False
-      origContentObj = copy(contentObj)
+      #origContentObj = copy(contentObj)
+      origContentObj = contentObj.getCopy()
       
       try:
         zipFileHandle = zipfile.ZipFile(payload)
@@ -806,7 +807,8 @@ class ContentProcessor:
         
       try:
         for zinfo in zipFileHandle.infolist():
-          contentObj = copy(origContentObj)
+          #contentObj = copy(origContentObj)
+          contentObj = origContentObj.getCopy()
           
           archivedFilename = zinfo.filename
           contentObj.contentFile = archivedFilename
@@ -882,7 +884,8 @@ class ContentProcessor:
       contentObj.fromArchive = True
       contentObj.archiveType = 'rar'
       saveRarFile = False
-      origContentObj = copy(contentObj)
+      #origContentObj = copy(contentObj)
+      origContentObj = contentObj.getCopy()
       
       try:
         rarFileHandle = rarfile.RarFile(payload, errors='strict')
@@ -967,7 +970,8 @@ class ContentProcessor:
         self.thisSession['images'].append( contentObj.get() )
 
       for rinfo in rarFileHandle.infolist():
-        contentObj = copy(origContentObj)
+        #contentObj = copy(origContentObj)
+        contentObj = origContentObj.getCopy()
 
         archivedFilename = rinfo.filename
         contentObj.contentFile = archivedFilename
@@ -1013,8 +1017,9 @@ class ContentProcessor:
   def processExtractedFile(self, contentObj):
     log.debug("ContentProcessor: processExtractedFile(): Attempting to process extracted file " + contentObj.contentFile )
     
-    #generate a new uuid for the content object
-    contentObj.newId()
+    # generate a new uuid for the content object
+    #contentObj = contentObj.getCopy()
+    #contentObj.newId()
     
     #get the file
     fileObj = contentObj.getFileContent()

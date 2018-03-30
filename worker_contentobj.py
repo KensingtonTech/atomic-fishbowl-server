@@ -1,6 +1,9 @@
+import logging
 import email
 import cStringIO
 from uuid import uuid4
+
+log = logging.getLogger(__name__)
 
 class ContentObj:
 
@@ -31,10 +34,14 @@ class ContentObj:
         self.textTermsMatched = textTermsMatched
         self.regexTermsMatched = regexTermsMatched
 
+        self.fileContent = None
+
         self.id = str(uuid4()) # generate a unique identifier for this content
+        #log.debug('ContentObj: __init__(): generated new id: ' + self.id)
 
     def newId(self):
         self.id = str(uuid4())
+        #log.debug('ContentObj: newId(): generated new id: ' + self.id)
         
 
     def get(self):
@@ -90,5 +97,6 @@ class ContentObj:
     def getCopy(self):
         # returns an ContentObj that should be a near copy of this object, excepting id
         obj = ContentObj(self.session, self.contentType, self.contentSubType, self.contentFile, self.proxyContentFile, self.pdfImage, self.thumbnail, self.hashType, self.hashValue, self.hashFriendly, self.fromArchive, self.archiveType, self.archiveFilename, self.isArchive, self.textDistillationEnabled, self.regexDistillationEnabled, self.textTermsMatched, self.regexTermsMatched)
-        obj.setStringIOContent(self.getFileContent())
+        if self.fileContent:
+            obj.setStringIOContent(self.getFileContent())
         return obj
