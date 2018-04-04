@@ -42,10 +42,16 @@ class FeedManager():
       self.hashTypes = res['types']
       return
     
-    if 'found' in res:
+    if 'found' in res and res['found']:
       id = res['id']
       contentObj = self.requests[id]
       self.callback(res, contentObj)
+      del self.requests[id]
+
+    if 'found' in res and not res['found']:
+      id = res['id']
+      #contentObj = self.requests[id]
+      #self.callback(res, contentObj)
       del self.requests[id]
 
 
@@ -54,5 +60,7 @@ class FeedManager():
     log.debug('FeedManager: end(): waiting for all Feeder responses')
     while len(self.requests) != 0:
       #wait for requests to complete
+      #log.debug(pformat(self.requests))
       pass
+    log.debug('FeedManager: end(): closing communicator')
     self.communicator.close()  

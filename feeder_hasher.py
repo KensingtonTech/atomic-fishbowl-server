@@ -290,13 +290,16 @@ class Hasher():
     feedId = req['feedId']
 
     res = { 'id': id, 'hash': hash, 'type': hashType }
+
     if feedId in self.feedData and hash in self.feedData[feedId][hashType]:
       res['found'] = True
       friendly = self.feedData[feedId][hashType][hash]
       if friendly != None:
         res['friendlyName'] = friendly
+      #log.debug('Hasher: submit(): found hash:\n' + pformat(res))
     else:
       res['found'] = False
+      #log.debug('Hasher: submit(): did not find hash:\n' + pformat(res))
     return res
 
   def isInitialized(self):
