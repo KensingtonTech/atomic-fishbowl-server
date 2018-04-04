@@ -1025,20 +1025,39 @@ class ContentProcessor:
     fileObj = contentObj.getFileContent()
 
     #identify the extracted file
-    fileType = magic.from_buffer( fileObj.getvalue(), mime=True) #this is where we identify the content file type
+    mimeType = magic.from_buffer( fileObj.getvalue(), mime=True) #this is where we identify the content file type
+    magicType = magic.from_buffer( fileObj.getvalue(), mime=False) #this is where we identify the content file type
+
+    log.debug("ContentProcessor: processExtractedFile(): mimeType: " + mimeType)
 
     #if fileType.startswith('image/') and len(self.cfg['distillationTerms']) == 0 and len(self.cfg['regexDistillationTerms']) == 0 and self.imagesAllowed:
     #if fileType.startswith('image/') and not self.cfg['distillationEnabled'] and not self.cfg['regexDistillationEnabled'] and self.imagesAllowed:
-    if fileType.startswith('image/') and self.imagesAllowed:
-      #log.debug("ContentProcessor: processExtractedFile(): Processing '" + archivedFilename + "' as image")
+
+    
+
+    if mimeType.startswith('image') and self.imagesAllowed:
+      log.debug("ContentProcessor: processExtractedFile(): Processing '" + contentObj.contentFile + "' as image")
+      contentObj.contentType = 'image'
       self.processImage(contentObj)
 
-    elif fileType == 'application/pdf' and self.pdfsAllowed:
-      #log.debug("ContentProcessor: processExtractedFile(): processing '" + contentObj.contentType + "' as pdf")
+    elif mimeType == 'application/pdf' and self.pdfsAllowed:
+      log.debug("ContentProcessor: processExtractedFile(): processing '" + contentObj.contentFile + "' as pdf")
+      contentObj.contentType = 'pdf'
       self.processPdf(contentObj)
 
-    elif fileType in [ 'Microsoft Word 2007+', 'Microsoft Excel 2007+', 'Microsoft PowerPoint 2007+' ] and self.officeAllowed:
-      #log.debug("ContentProcessor: processExtractedFile(): processing '" + contentObj.contentType + "' as office document")
+    elif magicType in [ 'Microsoft Word 2007+', 'Microsoft Excel 2007+', 'Microsoft PowerPoint 2007+' ] and self.officeAllowed:
+      log.debug("ContentProcessor: processExtractedFile(): processing '" + contentObj.contentFile + "' as office document")
+
+      if magicType == 'Microsoft Word 2007+':
+        contentObj.contentType = 'office'
+        contentObj.contentSubType = 'word'
+      elif magicType == 'Microsoft Excel 2007+':
+        contentObj.contentType = 'office'
+        contentObj.contentSubType = 'excel'
+      elif magicType == 'Microsoft PowerPoint 2007+':
+        contentObj.contentType = 'office'
+        contentObj.contentSubType = 'powerpoint'
+
       self.processOfficeDoc(contentObj)
 
     #else:
