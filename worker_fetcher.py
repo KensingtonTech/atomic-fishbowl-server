@@ -794,7 +794,7 @@ vlan_id"""
     poolResults = []
     for zinfo in zipHandle.infolist():
 
-      print ("contentCount:", self.cfg['contentCount'].value)
+      #print ("contentCount:", self.cfg['contentCount'].value)
 
       if not self.cfg['contentCount'].value >= self.cfg['contentLimit']:
         archivedFilename = zinfo.filename
