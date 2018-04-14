@@ -27,18 +27,20 @@ echo 172.16.0.57 kentechrepo >> /etc/hosts; \
 yum clean all; \
 yum update -y --disableplugin=fastestmirror; \
 rpm --import http://kentechrepo/yumrepo/afb_1.0.0_signed/afb-1.x.key; \
+rpm --import http://kentechrepo/yumrepo/afb_1.0.0_signed/NODESOURCE-GPG-SIGNING-KEY-EL; \
 curl http://kentechrepo/yumrepo/afb_1.0.0_signed/afb-1.0.0-signed.repo > /etc/yum.repos.d/afb-1.0.0-signed.repo; \
 yum install -y --disableplugin=fastestmirror nodejs ghostscript poppler-utils libjpeg-turbo openjpeg unzip unrar python-requests python2-crypto python-setuptools libreoffice; \
-curl https://bootstrap.pypa.io/get-pip.py > get-pip.py; \
-python get-pip.py; \
+yum install -y https://dl.fedoraproject.org/pub/epel/epel-release-latest-7.noarch.rpm; \
+yum install -y python-pip; \
+pip install --upgrade pip; \
 pip install requests; \
 pip install requests-futures; \
 pip install Pillow; \
 pip install rarfile; \
 pip install python-magic; \
 pip uninstall -y pip; \
-rm -f get-pip.py; \
 rm -f /etc/yum.repos.d/afb-1.0.0-signed.repo; \
+yum erase -y epel-release; \
 yum clean all; \
 rm -rf /var/cache/yum; \
 H=`grep -v kentechrepo /etc/hosts`; \
