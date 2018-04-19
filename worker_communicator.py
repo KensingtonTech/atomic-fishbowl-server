@@ -139,7 +139,7 @@ class FeederCommunicator(asynchat.async_chat):
 
   
   def write_data(self, data):
-    #print "communicator: write_data():", data
+    #print "FeederCommunicator: write_data():", data
     '''
     Public facing interface method.  This is the function
     external code will use to send data to this dispatcher.
@@ -177,6 +177,7 @@ class FeederCommunicator(asynchat.async_chat):
 
 
   def handle_close(self):
+    #log.debug("FeederCommunicator: handle_close()")
     #Flush the buffer
     try:
       while self.writable():

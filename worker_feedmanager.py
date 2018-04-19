@@ -8,13 +8,14 @@ log = logging.getLogger(__name__)
 
 class FeedManager():
  
-  def __init__(self, socketFile, callback, feedId):
+  def __init__(self, socketFile, callback, endCallback, feedId):
     self.communicator = FeederCommunicator(socketFile, self.onResponse)
     self.socketFile = socketFile
     self.feedId = feedId
     self.counter = 0
     self.requests = {}
     self.callback = callback
+    self.endCallback = endCallback
     self.hashTypes = {}
     # preemptively get hash types
     self.communicator.send( json.dumps( { 'getTypes' : True, 'feedId': self.feedId } ) + '\n' )
@@ -36,23 +37,29 @@ class FeedManager():
 
 
   def onResponse(self, res):
-    #log.debug('FeedManager: onResponse(): ' + pformat(res) )
+    log.debug('FeedManager: onResponse(): ' + pformat(res) )
 
     if 'types' in res:
+      log.debug('FeedManager: onResponse(): types were found in res.  Setting hashTypes and returning')
       self.hashTypes = res['types']
       return
     
     if 'found' in res and res['found']:
+      log.debug('FeedManager: onResponse(): found was found in res and found was true')
       id = res['id']
       contentObj = self.requests[id]
+      #del self.requests[id]
+      self.requests.pop(id, None)
       self.callback(res, contentObj)
-      del self.requests[id]
 
     if 'found' in res and not res['found']:
+      log.debug('FeedManager: onResponse(): found was found in res and found was false')
       id = res['id']
       #contentObj = self.requests[id]
       #self.callback(res, contentObj)
-      del self.requests[id]
+      self.requests.pop(id, None)
+
+    log.debug('FeedManager: onResponse(): got to end: self.requests: ' + pformat(self.requests) )
 
 
 
@@ -63,4 +70,6 @@ class FeedManager():
       #log.debug(pformat(self.requests))
       pass
     log.debug('FeedManager: end(): closing communicator')
-    self.communicator.close()  
+    #self.communicator.close()
+    #self.communicator.handle_close()
+    self.endCallback()

@@ -463,7 +463,7 @@ class ContentProcessor:
 
   def onFeederResponse(self, res, contentObj):
     #log.debug('ContentProcessor: feederResponse():\n' + pformat(res))
-    log.debug("ContentProcessor: genHash(): Session " + str(contentObj.session) + ". Matched " + res['type'] + " hash " + res['hash'])
+    log.debug("ContentProcessor: onFeederResponse(): Session " + str(contentObj.session) + ". Matched " + res['type'] + " hash " + res['hash'])
     fp = open(os.path.join(self.cfg['outputDir'], contentObj.contentFile), 'wb')
     contentFileObj = contentObj.getFileContent()
     fp.write(contentFileObj.getvalue())
@@ -556,6 +556,10 @@ class ContentProcessor:
       asyncore.loop(.25, use_poll = False)
     except Exception as e:
       pass
+
+
+  def stopCommunicator(self):
+    asyncore.close_all()
       
     
     
@@ -571,9 +575,8 @@ class ContentProcessor:
         log.debug('ContentProcessor: go(): Initializing FeedManager')
         self.socketFile = self.cfg['hashFeederSocket']
         self.hashFeedId = self.cfg['hashFeed']['id']
-        self.feedManager = FeedManager(self.socketFile, self.onFeederResponse, self.hashFeedId)
+        self.feedManager = FeedManager(self.socketFile, self.onFeederResponse, self.stopCommunicator, self.hashFeedId)
 
-        #self.thread =  Thread(target = asyncore.loop, kwargs = { 'use_poll': False, 'timeout': .25 } )
         self.thread =  Thread(target = self.startThread)
         self.thread.daemon = True
         self.thread.start()
@@ -598,7 +601,7 @@ class ContentProcessor:
           cPayload.seek(0)
           return self.processInboundFile(sessionId, filename, cPayload )
     except Exception as e:
-      #log.debug("ContentProcessor: go(): caught exception: " + str(e) )
+      log.debug("ContentProcessor: go(): caught exception: " + str(e) )
       t, v, tb = sys.exc_info()
       eMessage = traceback.format_exception(t, v, tb)
       if hasattr(self, 'feedManager'):
