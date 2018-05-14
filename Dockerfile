@@ -1,5 +1,6 @@
 FROM centos:centos7
 WORKDIR /opt/kentech/afb-server/bin
+ARG AFBDEBUG
 ENV NODE_ENV="production"
 ENV AFBDEBUG=$AFBDEBUG
 EXPOSE 3002
