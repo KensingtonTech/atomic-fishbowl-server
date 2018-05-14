@@ -299,22 +299,22 @@ class SaFetcher(Fetcher): # For Solera
         # move on to pulling meta
         pass
 
-    except requests.ConnectTimeout as e:
+    except requests.exceptions.Timeout as e:
       error = "Query timed out"
       self.exitWithError(error)
-    except requests.ConnectionError as e:
+    except requests.exceptions.ConnectionError as e:
       error = "A connection error occurred whilst executing query: " + str(e)
       self.exitWithError(error)
-    except requests.HTTPError as e:
+    except requests.exceptions.HTTPError as e:
       error = "An HTTP error occured whilst executing query: " + str(e)
       self.exitWithError(error)
-    except requests.URLRequired as e:
+    except requests.exceptions.URLRequired as e:
       error = "A valid URL is required to issue a query: " + str(e)
       self.exitWithError(error)
-    except requests.TooManyRedirects as e:
+    except requests.exceptions.TooManyRedirects as e:
       error = "Too many redirects whilst executing query"
       self.exitWithError(error)
-    except requests.RequestException as e:
+    except requests.exceptions.RequestException as e:
       error = "Ambiguous exception whilst executing query: " + str(e)
       self.exitWithError(error)
     except KeyError as e:

@@ -558,14 +558,12 @@ class ContentProcessor:
       pass
 
 
+
   def stopCommunicator(self):
     asyncore.close_all()
-      
-    
-    
 
 
-        
+
   def go(self, payload, session, sessionId, serviceType, filename=None):
     #log.debug('ContentProcessor: go()')
     try:
