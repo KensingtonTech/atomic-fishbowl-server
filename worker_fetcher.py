@@ -12,7 +12,11 @@ import zipfile
 from multiprocessing import Pool, Manager, Value, current_process, cpu_count
 import socket
 from httplib import BadStatusLine
+
 import requests
+from requests.packages.urllib3.exceptions import InsecureRequestWarning
+requests.packages.urllib3.disable_warnings(InsecureRequestWarning)
+
 from worker_contentprocessor import ContentProcessor
 from threading import Timer, Thread, Event
 from requests_futures.sessions import FuturesSession
@@ -21,8 +25,6 @@ import concurrent.futures.thread
 #logging.getLogger("requests").setLevel(logging.WARNING)
 logging.getLogger("urllib3").setLevel(logging.WARNING)
 log = logging.getLogger(__name__)
-requests.packages.urllib3.disable_warnings()
-
 
 
 def unwrapExtractFilesFromMultipart(*arg, **kwarg):
