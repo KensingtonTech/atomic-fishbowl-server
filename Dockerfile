@@ -1,6 +1,7 @@
 FROM centos:centos7
 WORKDIR /opt/kentech/afb-server/bin
 ENV NODE_ENV="production"
+ENV AFBDEBUG=$AFBDEBUG
 EXPOSE 3002
 VOLUME [ "/etc/kentech", "/var/kentech" ]
 # We will use systemd for logging, so we don't specify /var/log in 'VOLUME'

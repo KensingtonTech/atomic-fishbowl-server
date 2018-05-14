@@ -221,7 +221,6 @@ class SaFetcher(Fetcher): # For Solera
           'end': self.cfg['time2']
         },
         'field': 'flow_id',
-        #'query': self.cfg['saQuery']
         'query': json.loads(self.cfg['query'] )
       },
       'metrics' : '"sessions"',
@@ -254,10 +253,10 @@ class SaFetcher(Fetcher): # For Solera
         #pprint(res)
         resultCode = res['resultCode']
         if resultCode != 'API_SUCCESS_CODE':
-          raise ApiUnsuccessful("API call returned " + resultCode)
+          raise ApiUnsuccessful( [ "API call returned " + resultCode ] )
         state = res['result']['result']['status']['state']
         if state == 'error':
-          raise ApiUnsuccessful("API call returned an error")
+          raise ApiUnsuccessful( [ "API call returned an error", res ] )
 
       self.communicator.write_data(json.dumps( { 'workerProgress': 'First Results', 'label': 'Querying' } ) + '\n')
 
@@ -321,7 +320,8 @@ class SaFetcher(Fetcher): # For Solera
       error = "Could not locate initial query state"
       self.exitWithError(error)
     except ApiUnsuccessful as e:
-      self.exitWithError(str(e))
+      self.exitWithError( str( e[0] ) )
+      #self.exitWithError( str( e[0] ) + ": Request:\n\n" + pformat(self.queryDef) + "\n\nResponse:\n\n" + pformat( e[1] ) )
     except Exception as e:
       error = "SaFetcher: runQuery(): Unhandled exception whilst running query.  Exiting with code 1: " + str(e)
       self.exitWithException(error)
@@ -401,10 +401,10 @@ class SaFetcher(Fetcher): # For Solera
     res = result.json()
     resultCode = res['resultCode']
     if resultCode != 'API_SUCCESS_CODE':
-      raise ApiUnsuccessful("API call returned " + resultCode)
+      raise ApiUnsuccessful( [ "API call returned " + resultCode ] )
     state = res['result']['result']['status']['state']
     if state == 'error':
-      raise ApiUnsuccessful("API call returned an error")
+      raise ApiUnsuccessful( [ "API call returned an error" ] )
     if state != 'complete':
       log.debug('SaFetcher: checkForQueryResult(): trying to launch another session')
       parsedBody = urlparse.parse_qs(request.body)
@@ -640,7 +640,7 @@ vlan_id"""
     res = result.json()
     resultCode = res['resultCode']
     if resultCode != 'API_SUCCESS_CODE':
-      raise ApiUnsuccessful("API call returned " + resultCode)
+      raise ApiUnsuccessful( [ "API call returned " + resultCode ] )
     
     searchId = res['result']['artifact_search_id']
     percent = int(res['result']['percentcomplete'])
@@ -755,7 +755,7 @@ vlan_id"""
     res = result.json()
     resultCode = res['resultCode']
     if resultCode != 'API_SUCCESS_CODE':
-      raise ApiUnsuccessful("API call returned " + resultCode)
+      raise ApiUnsuccessful( [ "API call returned " + resultCode ] )
 
     for a in res['result']['sorted_artifacts']:
       artifact = a['Artifact']
