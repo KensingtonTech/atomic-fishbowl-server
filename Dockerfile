@@ -17,7 +17,8 @@ LABEL STOP="docker run --rm --name afb-server-stop-tmp --privileged -v /:/host -
 COPY atomic-*.sh /bin/
 COPY atomic-afb-server.service /usr/lib/systemd/system/afb-server.service
 COPY node_modules /opt/kentech/afb-server/bin/node_modules/
-COPY afb-server.conf.default *.js *.js.map worker_stub.py feeder_stub.py *.so LICENSE.txt /opt/kentech/afb-server/bin/
+#COPY afb-server.conf.default *.js *.js.map worker_stub.py feeder_stub.py *.so LICENSE.txt /opt/kentech/afb-server/bin/
+COPY afb-server.conf.default *.js *.js.map *.py *.so LICENSE.txt /opt/kentech/afb-server/bin/
 
 #install our rpm dependencies
 ARG CACHE_DATE=2016-01-01

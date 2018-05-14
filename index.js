@@ -2387,7 +2387,7 @@ function mongooseInit() {
     User = model;
   }
   catch(e) {
-    User = require('./models/user');
+    User = require('./user');
   }
   let mongooseStrategy = new LocalStrategy( User.authenticate() );
   passport.use(mongooseStrategy);
