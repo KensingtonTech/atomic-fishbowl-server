@@ -59,8 +59,8 @@ class RollingCollectionHandler {
     }
     socket['rollingId'] = rollingId; // add the rolling id to our socket so we can later identify it
 
-    winston.info('RollingCollectionHandler: onJoinCollection(): collectionId:', collectionId);
-    winston.info('RollingCollectionHandler: onJoinCollection(): rollingId:', rollingId);
+    winston.debug('RollingCollectionHandler: onJoinCollection(): collectionId:', collectionId);
+    winston.debug('RollingCollectionHandler: onJoinCollection(): rollingId:', rollingId);
 
     socket.join(rollingId); // this joins a room for rollingId
 
@@ -155,7 +155,7 @@ class RollingCollectionHandler {
     let collectionId = req.params.collectionId;
     let clientSessionId = req.headers['afbsessionid'];
     
-    winston.info('RollingCollectionHandler: onHttpConnection(): collectionId:', collectionId);
+    winston.debug('RollingCollectionHandler: onHttpConnection(): collectionId:', collectionId);
     // winston.debug('preferences:', this.cfg.preferences);
     
     let rollingId = collectionId;
@@ -166,7 +166,7 @@ class RollingCollectionHandler {
     }
     let collection = this.cfg.collections[collectionId];
 
-    winston.info('RollingCollectionHandler: onHttpConnection(): rollingId:', rollingId);
+    winston.debug('RollingCollectionHandler: onHttpConnection(): rollingId:', rollingId);
     
     // create a client connection handler for this connection
     // does a manager for the requested rolling collection exist?
@@ -197,7 +197,7 @@ class RollingCollectionHandler {
 
 
   collectionEdited(collectionId, collection) {
-    winston.info('RollingCollectionHandler: collectionEdited()');
+    winston.debug('RollingCollectionHandler: collectionEdited()');
     let managers = []
     if (collectionId in this.rollingCollectionManagers) {
       // manager = { rollingId: { collectionId: collectionId, manager: manager } }
@@ -223,7 +223,7 @@ class RollingCollectionHandler {
 
   
   collectionDeleted(collectionId, user) {
-    winston.info('RollingCollectionHandler: collectionDeleted()');
+    winston.debug('RollingCollectionHandler: collectionDeleted()');
     let managers = []
     if (collectionId in this.rollingCollectionManagers) {
       // manager = { rollingId: { collectionId: collectionId, manager: manager } }
@@ -257,7 +257,7 @@ class RollingCollectionHandler {
 
   pauseMonitoringCollection(req, res) {
     let clientSessionId = req.headers['afbsessionid'];
-    winston.info(`RollingCollectionHandler handlePauseMonitoringCollection(): Pausing monitoring collection ${clientSessionId}`);
+    winston.debug(`RollingCollectionHandler handlePauseMonitoringCollection(): Pausing monitoring collection ${clientSessionId}`);
     let manager = this.rollingCollectionManagers[clientSessionId]['manager'];
     manager.pause();
     res.status(202).send( JSON.stringify( { success: true } ) );
@@ -269,7 +269,7 @@ class RollingCollectionHandler {
     // This only gets used by the client if a monitoring collection is paused and then resumed within the minute the run is permitted to continue executing
     // Otherwise, the client will simply call /api/collection/rolling/:id again
     let clientSessionId = req.headers['afbsessionid'];
-    winston.info(`RollingCollectionHandler: handleUnpauseMonitoringCollection(): Resuming monitoring collection ${clientSessionId}`);
+    winston.debug(`RollingCollectionHandler: handleUnpauseMonitoringCollection(): Resuming monitoring collection ${clientSessionId}`);
     let manager = this.rollingCollectionManagers[clientSessionId]['manager'];
     manager.unpause();
     res.status(202).send( JSON.stringify( { success: true } ) );
@@ -313,7 +313,7 @@ class RollingCollectionHandler {
 class HttpConnection {
 
   constructor(req, res, collectionId, rollingId, cfg) {
-    winston.info('HttpConnection: constructor()');
+    winston.debug('HttpConnection: constructor()');
     this.cfg = cfg;
     this.id = uuidV4();
     this.req = req;
@@ -330,7 +330,7 @@ class HttpConnection {
 
   onConnect(collection) {
 
-    winston.info('HttpConnection: onConnect():');
+    winston.debug('HttpConnection: onConnect():');
 
     ////////////////////////////////////////////////////
     //////////////////RESPONSE HEADERS//////////////////
@@ -376,7 +376,7 @@ class HttpConnection {
 
 
   onClientClosedConnection() {
-    winston.info('HttpConnection: onClientClosedConnection()');
+    winston.debug('HttpConnection: onClientClosedConnection()');
     this.disconnected = true;
     // This block runs when the client disconnects from the session
     // But NOT when we terminate the session from the server
@@ -395,7 +395,7 @@ class HttpConnection {
 
 
   addManager(manager) {
-    winston.info('HttpConnection: addManager()');
+    winston.debug('HttpConnection: addManager()');
     this.manager = manager;
     this.manager.addHttpClient(this.id, this);
   }
@@ -403,7 +403,7 @@ class HttpConnection {
 
 
   send(data) {
-    // winston.info('HttpConnection: send()');
+    // winston.debug('HttpConnection: send()');
     // sends data to the client
     if (!this.disconnected) {
       this.res.write( JSON.stringify(data) + ',');
@@ -414,7 +414,7 @@ class HttpConnection {
 
 
   sendRaw(data) {
-    winston.info('HttpConnection: sendRaw()');
+    winston.debug('HttpConnection: sendRaw()');
     // sends data to the client
     if (!this.disconnected) {
       this.res.write( data );
@@ -425,7 +425,7 @@ class HttpConnection {
 
 
   end() {
-    winston.info('HttpConnection: end()');
+    winston.debug('HttpConnection: end()');
     if (this.heartbeatInterval) {
       // stop sending heartbeats to client
       clearInterval(this.heartbeatInterval);
@@ -461,7 +461,7 @@ class HttpConnection {
 class RollingCollectionManager {
 
   constructor(collection, collectionId, rollingId, removalCallback, dbUpdateCallback, cfg, channel = null) {
-    winston.info('RollingCollectionManager: constructor()');
+    winston.debug('RollingCollectionManager: constructor()');
     this.cfg = cfg;
     this.channel = channel; // a handle to our socket.io /collections namespace
     
@@ -508,7 +508,7 @@ class RollingCollectionManager {
 
 
   run() {
-    winston.info('RollingCollectionManager: run()');
+    winston.debug('RollingCollectionManager: run()');
     // Now schedule workLoop() to run every 60 seconds and store a reference to it in this.workInterval
     // which we can later use to terminate the timer and prevent future execution.
     // This will not initially execute work() until the first 60 seconds have elapsed, which is why we run workLoop() immediately after
@@ -519,7 +519,7 @@ class RollingCollectionManager {
 
 
   selfDestruct() {
-    winston.info('RollingCollectionManager: selfDestruct()');
+    winston.debug('RollingCollectionManager: selfDestruct()');
     /*if (isDestroyed) {
       winston.debug('Not self-destructing as we\'re already being deleted');
       return;
@@ -546,7 +546,7 @@ class RollingCollectionManager {
 
 
   addHttpClient(id, client) {
-    winston.info('RollingCollectionManager: addHttpClient()');
+    winston.debug('RollingCollectionManager: addHttpClient()');
     this.httpClients[id] = client;
     this.observers += 1;
     
@@ -560,7 +560,7 @@ class RollingCollectionManager {
     }
     
     if (this.runs > 0) {
-      winston.info(`RollingCollectionManager: addHttpClient(): This is not the first client to have connected to rolling collection ${this.rollingId}.  Playing back existing collection`);
+      winston.debug(`RollingCollectionManager: addHttpClient(): This is not the first client to have connected to rolling collection ${this.rollingId}.  Playing back existing collection`);
       let resp = null;
 
       let sessions = {};
@@ -594,7 +594,7 @@ class RollingCollectionManager {
 
 
   addSocketClient(socket) {
-    winston.info('RollingCollectionManager: addSocketClient()');
+    winston.debug('RollingCollectionManager: addSocketClient()');
     this.observers += 1;
     
     if (this.destroyTimeout) {
@@ -607,7 +607,7 @@ class RollingCollectionManager {
     }
     
     if (this.runs > 0) {
-      winston.info(`This is not the first client to have connected to rolling collection ${this.rollingId}.  Playing back existing collection`);
+      winston.debug(`This is not the first client to have connected to rolling collection ${this.rollingId}.  Playing back existing collection`);
 
       let sessions = {};
       for (let i = 0; i < this.sessions.length; i++) {
@@ -721,7 +721,7 @@ class RollingCollectionManager {
 
 
   abort() {
-    winston.info('RollingCollectionManager: abort()');
+    winston.debug('RollingCollectionManager: abort()');
 
     // we only get here if the program is exiting, either gracefully or due to an error
 
@@ -756,7 +756,7 @@ class RollingCollectionManager {
 
   killWorker() {
 
-    winston.info('RollingCollectionManager: killWorker()');
+    winston.debug('RollingCollectionManager: killWorker()');
 
     if (this.workerSocket) {
       this.workerSocket.removeAllListeners();
@@ -773,7 +773,7 @@ class RollingCollectionManager {
 
 
   removeHttpClient(id) {
-    winston.info('RollingCollectionManager: removeHttpClient()');
+    winston.debug('RollingCollectionManager: removeHttpClient()');
     this.observers -= 1;
 
     if (this.observers != 0) {
@@ -796,7 +796,7 @@ class RollingCollectionManager {
 
 
   removeSocketClient() {
-    winston.info('RollingCollectionManager: removeSocketClient()');
+    winston.debug('RollingCollectionManager: removeSocketClient()');
 
     if (this.monitoringCollection) {
       this.selfDestruct();
@@ -824,7 +824,7 @@ class RollingCollectionManager {
 
 
   pause() {
-    winston.info('RollingCollectionManager: pause()');
+    winston.debug('RollingCollectionManager: pause()');
     this.paused = true;
     this.timeOfPause = moment().unix();
     /*if (this.workInterval) {
@@ -842,20 +842,20 @@ class RollingCollectionManager {
 
 
   unpause() {
-    winston.info('RollingCollectionManager: unpause()');
+    winston.debug('RollingCollectionManager: unpause()');
     this.paused = false;
     
     let timeOfResume = moment().unix();
     let difference = timeOfResume - this.timeOfPause;
-    winston.info('RollingCollectionManager: unpause(): difference:', difference);
+    winston.debug('RollingCollectionManager: unpause(): difference:', difference);
     
     /*if (difference <= 60) {
       // less than a minute has elapsed or exactly 1 minute has elapsed since the collection was paused
       let resumeInXSeconds = 60 - difference;
-      winston.info('RollingCollectionManager: unpause(): resumeInXSeconds:', resumeInXSeconds);
+      winston.debug('RollingCollectionManager: unpause(): resumeInXSeconds:', resumeInXSeconds);
 
       this.pauseTimeout = setTimeout( () => {
-        winston.info('RollingCollectionManager: unpause(): resuming work');
+        winston.debug('RollingCollectionManager: unpause(): resuming work');
         this.pauseTimeout = null;
         this.workInterval = setInterval( () => this.workLoop(), 60000);
         this.workLoop();
@@ -877,14 +877,14 @@ class RollingCollectionManager {
 
 
   sendToWorker(data) {
-    winston.info('RollingCollectionManager: sendToWorker()');
+    winston.Debug('RollingCollectionManager: sendToWorker()');
     this.workerSocket.write( JSON.stringify(data) + '\n' );
   }
 
 
 
   sendToHttpClients(data) {
-    // winston.info('RollingCollectionManager: sendToHttpClients()');
+    // winston.debug('RollingCollectionManager: sendToHttpClients()');
     for (let id in this.httpClients) {
       if (this.httpClients.hasOwnProperty(id)) {
         let client = this.httpClients[id];
@@ -896,7 +896,7 @@ class RollingCollectionManager {
 
 
   sendToHttpClientsRaw(data) {
-    winston.info('RollingCollectionManager: sendToHttpClientsRaw()');
+    winston.debug('RollingCollectionManager: sendToHttpClientsRaw()');
     for (let id in this.httpClients) {
       if (this.httpClients.hasOwnProperty(id)) {
         let client = this.httpClients[id];
@@ -916,7 +916,7 @@ class RollingCollectionManager {
 
 
   endAllClients() {
-    winston.info('RollingCollectionManager: endAllClients()');
+    winston.debug('RollingCollectionManager: endAllClients()');
     for (let id in this.httpClients) {
       if (this.httpClients.hasOwnProperty(id)) {
         let client = this.httpClients[id];
@@ -929,7 +929,7 @@ class RollingCollectionManager {
 
   
   endHttpClients() {
-    winston.info('RollingCollectionManager: endHttpClients()');
+    winston.debug('RollingCollectionManager: endHttpClients()');
     for (let id in this.httpClients) {
       if (this.httpClients.hasOwnProperty(id)) {
         let client = this.httpClients[id];
@@ -942,7 +942,7 @@ class RollingCollectionManager {
 
   workLoop() {
     // Main body of worker execution
-    winston.info('RollingCollectionManager: workLoop()');
+    winston.debug('RollingCollectionManager: workLoop()');
 
     try {
 
@@ -956,13 +956,13 @@ class RollingCollectionManager {
 
       if ( !this.monitoringCollection && this.workerProcess && this.runs == 1) {
         // If we're a rolling collection still on our first run, let it continue running until it completes
-        winston.info('workLoop(): First run of rolling collection is still running.  Delaying next run by 60 seconds');
+        winston.debug('workLoop(): First run of rolling collection is still running.  Delaying next run by 60 seconds');
         return;
       }
       
       if ( this.workerProcess && ( this.runs > 1 || this.monitoringCollection ) ) {
         // Check if there's already a python worker process already running which has overrun the 60 second mark, and if so, kill it
-        winston.info('workLoop(): Timer expired for running worker.  Terminating worker');
+        winston.debug('workLoop(): Timer expired for running worker.  Terminating worker');
         this.workerProcess.kill('SIGINT');
       }
 

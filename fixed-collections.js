@@ -49,7 +49,7 @@ class FixedCollectionHandler {
     socket['collectionId'] = collectionId; // add the collection id to our socket so we can later identify it
     let collection = this.cfg.collections[collectionId];
 
-    winston.info('FixedCollectionHandler: onJoinCollection(): collectionId:', collectionId);
+    winston.debug('FixedCollectionHandler: onJoinCollection(): collectionId:', collectionId);
 
     socket.join(collectionId); // this joins a room for collectionId
 
@@ -143,7 +143,7 @@ class FixedCollectionHandler {
     let collectionId = req.params.id;
     let collection = this.cfg.collections[collectionId];
     
-    winston.info('FixedCollectionHandler: onHttpConnection(): collectionId:', collectionId);
+    winston.debug('FixedCollectionHandler: onHttpConnection(): collectionId:', collectionId);
     
     // create a client connection handler for this connection
     // does a manager for the requested collection exist?
@@ -190,7 +190,7 @@ class FixedCollectionHandler {
   collectionDeleted(collectionId, user) {
     // we should only get here if someone deletes a fixed collection...
     // which is in the process of building
-    winston.info('FixedCollectionHandler: collectionDeleted()');
+    winston.debug('FixedCollectionHandler: collectionDeleted()');
     if (collectionId in this.collectionManagers) {
       let manager = this.collectionManagers[collectionId];
       manager.onCollectionDeleted(user);
@@ -235,7 +235,7 @@ class FixedHttpConnection {
 
   constructor(req, res, collectionId, cfg) {
     this.cfg = cfg;
-    winston.info('FixedHttpConnection: constructor()');
+    winston.debug('FixedHttpConnection: constructor()');
     this.id = uuidV4();
     this.req = req;
     this.res = res;
@@ -249,7 +249,7 @@ class FixedHttpConnection {
 
   onConnect(collection) {
 
-    winston.info('FixedHttpConnection: onConnect():');
+    winston.debug('FixedHttpConnection: onConnect():');
 
     ////////////////////////////////////////////////////
     //////////////////RESPONSE HEADERS//////////////////
@@ -292,7 +292,7 @@ class FixedHttpConnection {
   }
 
   onClientClosedConnection() {
-    winston.info('FixedHttpConnection: onClientClosedConnection()');
+    winston.debug('FixedHttpConnection: onClientClosedConnection()');
     this.disconnected = true;
     // This block runs when the client disconnects from the session
     // It doesn't run when we end the session ourselves
@@ -310,7 +310,7 @@ class FixedHttpConnection {
 
 
   addManager(manager) {
-    winston.info('FixedHttpConnection: addManager()');
+    winston.debug('FixedHttpConnection: addManager()');
     this.manager = manager;
     this.manager.addClient(this.id, this);
   }
@@ -318,7 +318,7 @@ class FixedHttpConnection {
 
 
   send(data) {
-    // winston.info('FixedHttpConnection: send()');
+    // winston.debug('FixedHttpConnection: send()');
     // sends data to the client
     if (!this.disconnected) {
       this.res.write( JSON.stringify(data) + ',');
@@ -328,7 +328,7 @@ class FixedHttpConnection {
 
   
   sendRaw(data) {
-    winston.info('FixedHttpConnection: sendRaw()');
+    winston.debug('FixedHttpConnection: sendRaw()');
     // sends data to the client
     if (!this.disconnected) {
       this.res.write( data );
@@ -338,7 +338,7 @@ class FixedHttpConnection {
 
 
   end() {
-    winston.info('FixedHttpConnection: end()');
+    winston.debug('FixedHttpConnection: end()');
     if (this.heartbeatInterval) {
       // stop sending heartbeats to client
       clearInterval(this.heartbeatInterval);
@@ -369,7 +369,7 @@ class FixedHttpConnection {
 class FixedCollectionManager {
 
   constructor(collection, collectionId, removalCallback, dbUpdateCallback, cfg, channel = null) {
-    winston.info('FixedCollectionManager: constructor()');
+    winston.debug('FixedCollectionManager: constructor()');
     this.cfg = cfg;
     this.clients = {};
     this.socket = null;
@@ -389,14 +389,14 @@ class FixedCollectionManager {
 
 
   run() {
-    winston.info('FixedCollectionManager: run()');
+    winston.debug('FixedCollectionManager: run()');
     this.buildFixedCollection();
   }
 
 
 
   addClient(id, client) {
-    winston.info('FixedCollectionManager: addClient()');
+    winston.debug('FixedCollectionManager: addClient()');
     this.clients[id] = client;
     this.observers += 1;
     
@@ -405,7 +405,7 @@ class FixedCollectionManager {
     }
     
     if (this.hasRun) {
-      winston.info(`This is not the first client connected to fixed collection ${this.collectionId}.  Playing back existing collection`);
+      winston.debug(`This is not the first client connected to fixed collection ${this.collectionId}.  Playing back existing collection`);
 
       // client.send( { collection: { id: this.collectionId, state: 'building' } } );
 
@@ -427,7 +427,7 @@ class FixedCollectionManager {
 
 
   addSocketClient(socket) {
-    winston.info('FixedCollectionManager: addClient()');
+    winston.debug('FixedCollectionManager: addClient()');
     this.observers += 1;
     
     if (this.destroyTimeout) {
@@ -440,7 +440,7 @@ class FixedCollectionManager {
     }
     
     if (this.hasRun) {
-      winston.info(`This is not the first client connected to fixed collection ${this.collectionId}.  Playing back existing collection`);
+      winston.debug(`This is not the first client connected to fixed collection ${this.collectionId}.  Playing back existing collection`);
       let resp = null;
 
       // client.send( { collection: { id: this.collectionId, state: 'building' } } );
@@ -485,7 +485,7 @@ class FixedCollectionManager {
 
 
   abort() {
-    winston.info('FixedCollectionManager: abort()');
+    winston.debug('FixedCollectionManager: abort()');
 
     try {
       winston.debug("Deleting output directory for collection", this.collectionId);
@@ -523,7 +523,7 @@ class FixedCollectionManager {
 
 
   removeHttpClient(id) {
-    winston.info('FixedCollectionManager: removeHttpClient()');
+    winston.debug('FixedCollectionManager: removeHttpClient()');
     this.observers -= 1;
     if (this.observers != 0) {
       winston.debug("Client disconnected from fixed collection with collectionId", this.collectionId);
@@ -534,7 +534,7 @@ class FixedCollectionManager {
 
 
   removeSocketClient() {
-    winston.info('FixedCollectionManager: removeSocketClient()');
+    winston.debug('FixedCollectionManager: removeSocketClient()');
     this.observers -= 1;
     if (this.observers != 0) {
       winston.debug("FixedCollectionManager: removeSocketClient(): Socket client disconnected from collection with collectionId", this.collectionId);
@@ -544,14 +544,14 @@ class FixedCollectionManager {
 
 
   sendToWorker(data) {
-    winston.info('FixedCollectionManager: sendToWorker()');
+    winston.debug('FixedCollectionManager: sendToWorker()');
     this.socket.write( JSON.stringify(data) + '\n' );
   }
 
 
 
   sendToHttpClients(data) {
-    // winston.info('FixedCollectionManager: sendToHttpClients()');
+    // winston.debug('FixedCollectionManager: sendToHttpClients()');
     for (let id in this.clients) {
       if (this.clients.hasOwnProperty(id)) {
         let client = this.clients[id];
@@ -563,7 +563,7 @@ class FixedCollectionManager {
 
 
   sendToHttpClientsRaw(data) {
-    winston.info('FixedCollectionManager: sendToHttpClientsRaw()');
+    winston.debug('FixedCollectionManager: sendToHttpClientsRaw()');
     for (let id in this.clients) {
       if (this.clients.hasOwnProperty(id)) {
         let client = this.clients[id];
@@ -583,7 +583,7 @@ class FixedCollectionManager {
 
 
   endClients() {
-    winston.info('FixedCollectionManager: endClients()');
+    winston.debug('FixedCollectionManager: endClients()');
     for (let id in this.clients) {
       if (this.clients.hasOwnProperty(id)) {
         let client = this.clients[id];
@@ -596,7 +596,7 @@ class FixedCollectionManager {
 
   buildFixedCollection() {
     // Main body of worker execution
-    winston.info('FixedCollectionManager: buildFixedCollection()');
+    winston.debug('FixedCollectionManager: buildFixedCollection()');
 
     try {
     
@@ -657,7 +657,7 @@ class FixedCollectionManager {
 
     this.hasRun = true;
   
-    winston.info("onConnectionFromWorker(): Connection received from worker to build collection", this.collectionId);
+    winston.debug("onConnectionFromWorker(): Connection received from worker to build collection", this.collectionId);
     
     //////////////////////////////////
     //Build the worker configuration//
