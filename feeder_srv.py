@@ -174,10 +174,11 @@ def main():
     handler = logging.StreamHandler()
     formatStr = '%(asctime)s afb_feeder    %(levelname)-10s %(message)s'
     if 'SYSTEMD' in os.environ:
-      from systemd.journal import JournalHandler
-      handler = JournalHandler()
-      formatStr = 'afb_feeder    %(message)s'
-      #formatter = SystemdFormatter(formatStr)
+      #from systemd.journal import JournalHandler
+      #handler = JournalHandler(SYSLOG_IDENTIFIER="afb_feeder", _SYSTEMD_UNIT="afb-server")
+      formatStr = '%(message)s'
+      #formatStr = 'afb_feeder    %(message)s'
+      formatter = SystemdFormatter(formatStr)
 
     formatter = logging.Formatter(formatStr)
     handler.setFormatter(formatter)
