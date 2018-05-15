@@ -877,7 +877,7 @@ class RollingCollectionManager {
 
 
   sendToWorker(data) {
-    winston.Debug('RollingCollectionManager: sendToWorker()');
+    winston.debug('RollingCollectionManager: sendToWorker()');
     this.workerSocket.write( JSON.stringify(data) + '\n' );
   }
 
