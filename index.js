@@ -139,7 +139,7 @@ if ('SYSTEMD' in process.env) {
   // var journald = require('winston-journald').Journald;
   // winston.add(journald);
 }
-winston.add(winston.transports.Console);
+winston.add(winston.transports.Console, tOptions);
 
 
 if (development) {
