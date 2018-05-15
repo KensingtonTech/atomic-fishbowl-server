@@ -74,7 +74,7 @@ fi
 
 # Create container
 echo Creating container $NAME from image $IMAGE
-chroot $HOST /usr/bin/docker create --name $NAME --network afb-network --ip 172.31.255.243 --add-host afb-mongo:172.31.255.242 -v /etc/kentech:/etc/kentech:ro -v /var/kentech:/var/kentech:rw,z -e SYSTEMD=1 $IMAGE >/dev/null
+chroot $HOST /usr/bin/docker create --name $NAME --log-driver none --network afb-network --ip 172.31.255.243 --add-host afb-mongo:172.31.255.242 -v /etc/kentech:/etc/kentech:ro -v /var/kentech:/var/kentech:rw,z -e SYSTEMD=1 $IMAGE >/dev/null
 
 
 # Copy systemd unit file to host OS
