@@ -257,6 +257,9 @@ def main():
     #Set up logging
     global log
     log = logging.getLogger()
+    log.setLevel(logging.DEBUG)
+    #log.setLevel(logging.INFO) #for testing
+
     handler = logging.StreamHandler()
     formatStr = '%(asctime)s afb_worker    %(levelname)-10s %(message)s'
     if 'SYSTEMD' in os.environ:
@@ -264,13 +267,11 @@ def main():
       handler = JournalHandler()
       formatStr = 'afb_worker    %(message)s'
       #formatter = SystemdFormatter(formatStr)
-    else:
-      formatter = logging.Formatter(formatStr)
-    
-    handler.setFormatter(formatter)
-    log.setLevel(logging.DEBUG)
-    #log.setLevel(logging.INFO) #for testing
 
+    formatter = logging.Formatter(formatStr)
+    handler.setFormatter(formatter)
+    log.addHandler(handler)
+    
     try:
       NODE_ENV = os.environ['NODE_ENV']
       if NODE_ENV == 'production' and ( ('AFBDEBUG' not in os.environ) or ('AFBDEBUG' in os.environ and os.environ['AFBDEBUG'] == '0') ):
@@ -278,7 +279,6 @@ def main():
     except KeyError:
       pass
     
-    log.addHandler(handler)
 
     #Register handler for SIGINT
     signal.signal(signal.SIGINT, sigIntHandler)
