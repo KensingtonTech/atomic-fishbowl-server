@@ -39,6 +39,9 @@
     "uuid": "^3.1.0",
     "winston": "^2.3.1"
   },
+  "optionalDependencies": {
+    "winston-journald": "^0.4.0"
+  },
   "spec": {
     "installDir": "/opt/kentech/afb-server/bin",
     "specTemplate": "afb-server-spec.mustache",

@@ -169,16 +169,20 @@ def main():
     #Set up logging
     global log
     log = logging.getLogger()
+    log.setLevel(logging.DEBUG)
+    
     handler = logging.StreamHandler()
     formatStr = '%(asctime)s afb_feeder    %(levelname)-10s %(message)s'
     if 'SYSTEMD' in os.environ:
+      from systemd.journal import JournalHandler
+      handler = JournalHandler()
       formatStr = 'afb_feeder    %(message)s'
-      formatter = SystemdFormatter(formatStr)
-    else:
-      formatter = logging.Formatter(formatStr)
-    handler.setFormatter(formatter)
+      #formatter = SystemdFormatter(formatStr)
 
-    log.setLevel(logging.DEBUG)
+    formatter = logging.Formatter(formatStr)
+    handler.setFormatter(formatter)
+    log.addHandler(handler)
+
     #log.setLevel(logging.INFO) #for testing
 
     try:
@@ -188,7 +192,6 @@ def main():
     except KeyError:
       pass
     
-    log.addHandler(handler)
 
     #Register handler for SIGINT
     signal.signal(signal.SIGINT, sigIntHandler)
