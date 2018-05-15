@@ -132,7 +132,8 @@ let tOptions = {
 };
 if ('SYSTEMD' in process.env) {
   // systemd journal adds its own timestamp
-  delete tOptions.timestamp;
+  // delete tOptions.timestamp;
+  tOptions.timestamp = null;
   tOptions.formatter = (options) => systemdLevelFormatter(options.level) + (options.message ? options.message : '') + (options.meta && Object.keys(options.meta).length ? '\n\t'+ JSON.stringify(options.meta) : '' );
   // tOptions.formatter = (options) => systemdLevelFormatter(options.level) + 'afb_server    ' + (options.message ? options.message : '') + (options.meta && Object.keys(options.meta).length ? '\n\t'+ JSON.stringify(options.meta) : '' );
   // tOptions.formatter = (options) => 'afb_server    ' + (options.message ? options.message : '') + (options.meta && Object.keys(options.meta).length ? '\n\t'+ JSON.stringify(options.meta) : '' );
