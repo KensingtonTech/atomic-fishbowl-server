@@ -260,8 +260,10 @@ def main():
     handler = logging.StreamHandler()
     formatStr = '%(asctime)s afb_worker    %(levelname)-10s %(message)s'
     if 'SYSTEMD' in os.environ:
+      from systemd.journal import JournalHandler
+      handler = JournalHandler()
       formatStr = 'afb_worker    %(message)s'
-      formatter = SystemdFormatter(formatStr)
+      #formatter = SystemdFormatter(formatStr)
     else:
       formatter = logging.Formatter(formatStr)
     
