@@ -14,6 +14,7 @@ import socket
 from httplib import BadStatusLine
 
 import requests
+#requests.packages.urllib3.disable_warnings()
 from requests.packages.urllib3.exceptions import InsecureRequestWarning
 requests.packages.urllib3.disable_warnings(InsecureRequestWarning)
 
@@ -25,7 +26,6 @@ import concurrent.futures.thread
 #logging.getLogger("requests").setLevel(logging.WARNING)
 logging.getLogger("urllib3").setLevel(logging.WARNING)
 log = logging.getLogger(__name__)
-
 
 def unwrapExtractFilesFromMultipart(*arg, **kwarg):
   #print "unwrapExtractFilesFromMultipart()"
