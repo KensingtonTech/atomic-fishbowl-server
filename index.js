@@ -128,18 +128,18 @@ winston.remove(winston.transports.Console);
 
 let tOptions = {
   'timestamp': () => moment().format('YYYY-MM-DD HH:mm:ss,SSS') + ' ',
-  'formatter': (options) => options.timestamp() + 'afb_server    ' + sprintf('%-10s', options.level.toUpperCase()) + ' ' + (options.message ? options.message : '') +
-(options.meta && Object.keys(options.meta).length ? '\n\t'+ JSON.stringify(options.meta) : '' )
+  'formatter': (options) => options.timestamp() + 'afb_server    ' + sprintf('%-10s', options.level.toUpperCase()) + ' ' + (options.message ? options.message : '') +(options.meta && Object.keys(options.meta).length ? '\n\t'+ JSON.stringify(options.meta) : '' )
 };
 if ('SYSTEMD' in process.env) {
   // systemd journal adds its own timestamp
-  require('winston-journald').Journald;
-  tOptions.formatter = (options) => systemdLevelFormatter(options.level) + 'afb_server    ' + (options.message ? options.message : '') +
-(options.meta && Object.keys(options.meta).length ? '\n\t'+ JSON.stringify(options.meta) : '' )
-  winston.add(winston.transports.Journald, tOptions);
+  // delete tOptions.timestamp;
+  // tOptions.formatter = (options) => systemdLevelFormatter(options.level) + 'afb_server    ' + (options.message ? options.message : '') + (options.meta && Object.keys(options.meta).length ? '\n\t'+ JSON.stringify(options.meta) : '' );
+  // tOptions.formatter = (options) => 'afb_server    ' + (options.message ? options.message : '') + (options.meta && Object.keys(options.meta).length ? '\n\t'+ JSON.stringify(options.meta) : '' );
+  var journald = require('winston-journald').Journald;
+  winston.add(journald);
 }
 else {
-  winston.add(winston.transports.Console, tOptions);
+  winston.add(winston.transports.Console);
 }
 
 
