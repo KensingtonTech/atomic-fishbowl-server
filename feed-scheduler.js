@@ -15,7 +15,7 @@ class FeedScheduler {
 
 
   updateSchedule(feeds) {
-    winston.debug('updateSchedule(): received update');
+    winston.debug('FeedScheduler: updateSchedule(): received update');
     // this method helps initialise the scheduler.  It should only be run once when the application starts up
     for (let id in feeds) {
       if (feeds.hasOwnProperty(id)) {
@@ -38,7 +38,7 @@ class FeedScheduler {
 
   updateFeed(feed) {
     let id = feed.id;
-    winston.debug('updateFeed(): id', id);
+    winston.debug('FeedScheduler: updateFeed(): id', id);
 
     if (!(id in this.scheduledFeeds)) {
       this.addFeed(feed);
@@ -56,7 +56,7 @@ class FeedScheduler {
 
   delFeed(id) {
     // used when a feed is deleted
-    winston.debug('delFeed(): id', id);
+    winston.debug('FeedScheduler: delFeed(): id', id);
     clearInterval(this.schedule[id]);
     delete this.schedule[id];
     delete this.scheduledFeeds[id];
@@ -68,7 +68,7 @@ class FeedScheduler {
 
   addFeed(feed) {
     let id = feed.id;
-    winston.debug('addFeed(): id', id);
+    winston.debug('FeedScheduler: addFeed(): id', id);
     this.scheduledFeeds[id] = feed;
     if (feed.schedule.type == 'hours') {
       let hours = feed.schedule.value;
@@ -98,7 +98,12 @@ class FeedScheduler {
   updateFeedCallback(id) {
     // this actually updates the feed, and triggers the callback from the caller
 
-    // winston.debug('updateFeedCallback(): updating feed', id);
+    // winston.debug('FeedScheduler: updateFeedCallback(): updating feed', id);
+
+    if (!(id in this.scheduledFeeds)) {
+      winston.error(`FeedScheduler: updateFeedCallback(): feed ${id} was not found in scheduledFeeds.  This may be harmless.  Returning`);
+      return;
+    }
 
     let feed = this.scheduledFeeds[id];
     // now we need to fetch the file and write it to disk
@@ -114,14 +119,14 @@ class FeedScheduler {
       let timestamp = new Date().getTime();
 
       if (error) {
-        winston.error('updateFeedCallback(): caught error updating feed ' + id + ':', error);
+        winston.error('FeedScheduler: updateFeedCallback(): caught error updating feed ' + id + ':', error);
         this.state[id] = { good : false, time: timestamp };
         this.io.emit('feedStatus', this.status() );
         return;
       }
 
       if (result.statusCode != 200) {
-        winston.error('updateFeedCallback(): non-success HTTP status code received whilst updating feed ' + id + ': received', result.statusCode);
+        winston.error('FeedScheduler: updateFeedCallback(): non-success HTTP status code received whilst updating feed ' + id + ': received', result.statusCode);
         this.state[id] = { good : false, time: timestamp };
         this.io.emit('feedStatus', this.status() );
         return;
@@ -135,7 +140,7 @@ class FeedScheduler {
     })
     .on('error', (err) => {
       let timestamp = new Date().getTime();
-      winston.debug('updateFeedCallback(): caught error updating feed file' + id + '.feed :', err);
+      winston.debug('FeedScheduler: updateFeedCallback(): caught error updating feed file' + id + '.feed :', err);
       this.state[id] = { good : false, time: timestamp };
       this.io.emit('feedStatus', this.status() );
     })
@@ -145,7 +150,7 @@ class FeedScheduler {
 
 
   status() {
-    // winston.debug('status(): state:', this.state)
+    // winston.debug('FeedScheduler: status(): state:', this.state)
     return this.state;
   }
 

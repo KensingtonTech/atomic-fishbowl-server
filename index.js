@@ -134,8 +134,8 @@ if ('SYSTEMD' in process.env) {
   // systemd journal adds its own timestamp
   // delete tOptions.timestamp;
   tOptions.timestamp = null;
-  tOptions.formatter = (options) => systemdLevelFormatter(options.level) + (options.message ? options.message : '') + (options.meta && Object.keys(options.meta).length ? '\n\t'+ JSON.stringify(options.meta) : '' );
-  // tOptions.formatter = (options) => systemdLevelFormatter(options.level) + 'afb_server    ' + (options.message ? options.message : '') + (options.meta && Object.keys(options.meta).length ? '\n\t'+ JSON.stringify(options.meta) : '' );
+  // tOptions.formatter = (options) => systemdLevelFormatter(options.level) + (options.message ? options.message : '') + (options.meta && Object.keys(options.meta).length ? '\n\t'+ JSON.stringify(options.meta) : '' );
+  tOptions.formatter = (options) => systemdLevelFormatter(options.level) + 'afb_server    ' + (options.message ? options.message : '') + (options.meta && Object.keys(options.meta).length ? '\n\t'+ JSON.stringify(options.meta) : '' );
   // tOptions.formatter = (options) => 'afb_server    ' + (options.message ? options.message : '') + (options.meta && Object.keys(options.meta).length ? '\n\t'+ JSON.stringify(options.meta) : '' );
   // var journald = require('winston-journald').Journald;
   // winston.add(journald);
@@ -506,7 +506,7 @@ connectToDB(); // this must come before mongoose user connection so that we know
 //////////////////////LOGIN & LOGOUT//////////////////////
 
 app.post('/api/login', passport.authenticate('local'), (req,res) => {
-  winston.info('POST /api/login');
+  winston.debug(`POST /api/login from ${req.headers['x-forwarded-for'] || req.connection.remoteAddress}`);
   User.findOne({username: req.body.username, enabled: true}, (err, user) => {
     if (err) {
       winston.info("Error looking up user " + req.body.username + ': ' + err);
@@ -516,7 +516,7 @@ app.post('/api/login', passport.authenticate('local'), (req,res) => {
       res.json({ success: false, message: 'Authentication failed' });
     }
     else {
-      winston.info("Login successful for user", req.body.username);
+      winston.info(`User ${req.body.username} has logged in`);
       winston.debug("Found user " + req.body.username + ".  Signing token");
       winston.debug("tokenExpirationSeconds:", tokenExpirationSeconds);
       let token = jwt.sign(user.toObject({versionKey: false, transform: transformUser}), jwtPrivateKey, { subject: user.id, algorithm: 'RS256', expiresIn: tokenExpirationSeconds, jwtid: uuidV4() }); // expires in 24 hours
@@ -534,7 +534,8 @@ app.post('/api/login', passport.authenticate('local'), (req,res) => {
 
 
 app.get('/api/logout', passport.authenticate('jwt', { session: false } ), (req,res) => {
-  winston.info('GET /api/logout');
+  winston.debug(`GET /api/logout from ${req.headers['x-forwarded-for'] || req.connection.remoteAddress}`);
+  winston.info(`User '${req.user.username}' has logged out`);
   let decoded = jwt.decode(req.cookies.access_token); //we can use jwt.decode here without signature verification as it's already been verified during authentication
   // winston.debug("decoded:", decoded);
   let tokenId = decoded.jti; //store this
@@ -548,7 +549,8 @@ app.get('/api/logout', passport.authenticate('jwt', { session: false } ), (req,r
 
 
 app.get('/api/isloggedin', passport.authenticate('jwt', { session: false } ), (req, res) => {
-  winston.debug("GET /api/isloggedin");
+  winston.debug(`GET /api/isloggedin from ${req.headers['x-forwarded-for'] || req.connection.remoteAddress}`);
+  winston.info(`User '${req.user.username}' has logged in`);
   // winston.debug('sessionID:', req.session.id);
   // winston.debug('Session object:', req.session);
   // res.cookie('access_token', token, { httpOnly: true, secure: true })
@@ -647,7 +649,8 @@ function emitUsers(sock) {
 
 app.get('/api/user/:uname', passport.authenticate('jwt', { session: false } ), (req,res) => {
   let uname = req.params.uname;
-  winston.info('GET /api/user/' + uname);
+  winston.debug(`GET /api/user/${uname} from ${req.headers['x-forwarded-for'] || req.connection.remoteAddress}`);
+  winston.info(`User '${req.user.username}' has requested info for user ${uname}`);
   try {
     User.findOne( {'username' : uname },(err, user) => {
       if (err) {
@@ -669,7 +672,8 @@ app.get('/api/user/:uname', passport.authenticate('jwt', { session: false } ), (
 
 app.post('/api/user', passport.authenticate('jwt', { session: false } ), (req, res) => {
   // add a new user
-  winston.info("POST /api/user for user " + req.body.username);
+  winston.debug(`POST /api/user from ${req.headers['x-forwarded-for'] || req.connection.remoteAddress}`);
+  
   let u = req.body;
   let uPassword = decryptor.decrypt(u.password, 'utf8');
   u.password = uPassword;
@@ -679,7 +683,7 @@ app.post('/api/user', passport.authenticate('jwt', { session: false } ), (req, r
       res.status(500).send( JSON.stringify( { success: false, error: err } ) );
     }
     else {
-      winston.info("User " + req.body.username + " added user " + u.username);
+      winston.info(`User '${req.user.username}' has added a new user '${u.username}'`);
       emitUsers(io);
       res.status(201).send( JSON.stringify( { success: true } ) );
     }
@@ -687,17 +691,22 @@ app.post('/api/user', passport.authenticate('jwt', { session: false } ), (req, r
 });
 
 
-function updateUser(req, res) {
+function updateUser(req, res, passChange = false) {
   let u = req.body;
   User.findOneAndUpdate( { id: u.id }, u, (err, doc) => {
-    winston.info("Updating user object with id", u.id);
+    // winston.info("Updating user object with id", u.id);
     //now update user object
     if (err) {
-      winston.error("modifying user with id" + u.id + ':', err);
+      winston.error("ERROR modifying user with id" + u.id + ':', err);
       res.status(500).send( JSON.stringify( { success: false, error: err } ) );
     }
     else {
-      winston.info("Updated user with id:", u.id);
+      if (!passChange) {
+        winston.info(`User '${req.user.username}' has edited user ${doc._doc.username}`);
+      }
+      else {
+        winston.info(`User '${req.user.username}' has changed the password for user ${doc._doc.username}`);
+      }
       emitUsers(io);
       res.status(201).send( JSON.stringify( { success: true } ) );
     }
@@ -709,7 +718,7 @@ function updateUser(req, res) {
 
 app.post('/api/user/edit', passport.authenticate('jwt', { session: false } ), (req, res) => {
   // edit an existing user
-  winston.info("POST /api/user/edit");
+  winston.debug(`POST /api/user/edit from ${req.headers['x-forwarded-for'] || req.connection.remoteAddress}`);
 
   let u = req.body;
   //winston.debug('user:', u);
@@ -718,7 +727,7 @@ app.post('/api/user/edit', passport.authenticate('jwt', { session: false } ), (r
     updateUser(req, res);
   }
   else {
-    winston.info("Updating password for user with id", u.id);
+    winston.debug("Updating password for user with id", u.id);
 
     let uPassword = decryptor.decrypt(u.password, 'utf8');
     u.password = uPassword;
@@ -738,14 +747,14 @@ app.post('/api/user/edit', passport.authenticate('jwt', { session: false } ), (r
             user.save( (error) => { 
               if (err) throw(err);
               delete u.password; //we don't want this getting set when we update the user object
-              updateUser(req, res);
+              updateUser(req, res, true);
             });
           });
         });
       });
     }
     catch(e) {
-      winston.error("Error changing changing password:", e);
+      winston.error("ERROR changing changing password:", e);
       res.status(500).send( JSON.stringify( { success: false, error: e.message || e } ) );
       return;
     }
@@ -756,21 +765,29 @@ app.post('/api/user/edit', passport.authenticate('jwt', { session: false } ), (r
 
 app.delete('/api/user/:id', passport.authenticate('jwt', { session: false } ), (req, res) => {
   let id = req.params.id;
-  winston.info(`DELETE /api/user/${id}`);
+  winston.debug(`DELETE /api/user/${id} from ${req.headers['x-forwarded-for'] || req.connection.remoteAddress}`);
   try {
-    User.find( {id: id} ).remove( (err) => {
+    User.findOne( {id: id}, (err, doc) => {
       if (err) {
         throw err;
       }
-      else {
-        emitUsers(io);
-        res.status(204).send( JSON.stringify( { success: true } ) );
-      }
+      
+      User.find( {id: id} ).remove( (err) => {
+        if (err) {
+          throw err;
+        }
+        else {
+          winston.info(`User '${req.user.username}' has deleted user ${doc._doc.username}`);
+          emitUsers(io);
+          res.status(204).send( JSON.stringify( { success: true } ) );
+        }
+      } );
     } );
   }
   catch(e) {
-    winston.error("Error removing user:", e);
+    winston.error("ERROR removing user:", e);
     res.status(500).send( JSON.stringify( { success: false, error: e.message || e } ) );
+    return;
   }
 });
 
@@ -804,7 +821,8 @@ app.delete('/api/user/:id', passport.authenticate('jwt', { session: false } ), (
 
 app.get('/api/collection', passport.authenticate('jwt', { session: false } ), (req,res) => {
   // Gets the configuration of all collections
-  winston.info('GET /api/collections');
+  winston.debug(`GET /api/collections from ${req.headers['x-forwarded-for'] || req.connection.remoteAddress}`);
+  winston.info(`User '${req.user.username}' has requested the collections list`);
   try {
     res.json(collections);
   }
@@ -830,7 +848,7 @@ function getCollectionPosition(id) {
 app.delete('/api/collection/:id', passport.authenticate('jwt', { session: false } ), (req, res) => {
   // Deletes a collection
   let id = req.params.id;
-  winston.info(`DELETE /api/collection/${id}`);
+  winston.debug(`DELETE /api/collection/${id} from ${req.headers['x-forwarded-for'] || req.connection.remoteAddress}`);
   let collection = null;
   try {
     collection = collections[id];
@@ -847,6 +865,7 @@ app.delete('/api/collection/:id', passport.authenticate('jwt', { session: false 
         if (err) throw err;
         db.collection('collectionsData').remove( { id: id }, (err, result) => {
           if (err) throw err;
+          winston.info(`User '${req.user.username}' has deleted collection '${collection.name}'`);
           delete collections[id];
           delete collectionsData[id];
           io.emit('collections', collections);
@@ -881,9 +900,10 @@ app.delete('/api/collection/:id', passport.authenticate('jwt', { session: false 
 app.get('/api/collection/data/:id', passport.authenticate('jwt', { session: false } ), (req, res) => {
   // Gets the collection data for a collection (content, sessions, and search)
   let id = req.params.id;
-  winston.info(`GET /api/collection/data/${id}`);
+  winston.debug(`GET /api/collection/data/${id} from ${req.headers['x-forwarded-for'] || req.connection.remoteAddress}`);
   try {
     res.json(collectionsData[id]);
+    winston.info(`User '${req.user.username}' has requested the defintion of collection '${collections[id].name}'`);
   }
   catch(e) {
     winston.error('ERROR GET /api/collection/data/:id:', e);
@@ -897,7 +917,7 @@ app.post('/api/collection', passport.authenticate('jwt', { session: false } ), (
   // Adds a new collection
   // 'state' should always be at initial
 
-  winston.info("POST /api/collection");
+  winston.debug(`POST /api/collection from ${req.headers['x-forwarded-for'] || req.connection.remoteAddress}`);
   // winston.debug(req);
   try {
     let timestamp = new Date().getTime();
@@ -970,6 +990,7 @@ app.post('/api/collection', passport.authenticate('jwt', { session: false } ), (
 
       db.collection('collectionsData').insertOne( { id: collection.id, data: JSON.stringify(cDef)}, (err) => {
         if (err) throw err;
+        winston.info(`User '${req.user.username}' has added a new collection '${collection.name}'`);
         io.emit('collections', collections);
         res.status(201).send( JSON.stringify( { success: true } ) );
       });
@@ -986,12 +1007,13 @@ app.post('/api/collection', passport.authenticate('jwt', { session: false } ), (
 
 app.post('/api/collection/edit', passport.authenticate('jwt', { session: false } ), (req, res) => {
   // Edits an existing collection
-  winston.info("POST /api/collection/edit");
+  winston.debug(`POST /api/collection/edit from ${req.headers['x-forwarded-for'] || req.connection.remoteAddress}`);
   try {
     let timestamp = new Date().getTime();
     let collection = req.body;
     winston.debug('collection:', collection);
     let id = collection.id;
+    let oldCollection = JSON.parse(JSON.stringify(collections[id]));
     if (collection.type == 'rolling' || collection.type == 'monitoring') {
       collection['state'] = 'stopped';
     }
@@ -999,7 +1021,7 @@ app.post('/api/collection/edit', passport.authenticate('jwt', { session: false }
       collection['state'] = 'initial';
     }
     if (!(id) in collections) {
-      throw(`Cannot update collection ${collection.name}.  Collection ${id} does not exist`);
+      throw([oldCollection, `Cannot update collection ${collection.name}.  Collection ${id} does not exist`]);
     }
 
     // do something here to stop / reload an existing rolling collection
@@ -1024,19 +1046,23 @@ app.post('/api/collection/edit', passport.authenticate('jwt', { session: false }
     
     // Update collection in mongo
     db.collection('collections').updateOne( { id: id }, { $set: collection}, (err, result) => {
-      if (err) throw err;
+      if (err) throw( [oldCollection, err] );
 
       db.collection('collectionsData').updateOne( { id: collection.id }, { $set: { data: JSON.stringify(cDef) } }, (err, result) => {
         // Update collection data in mongo
-        if (err) throw err;
+        if (err) throw( [ oldCollection, err ] );
+        winston.info(`User '${req.user.username}' has edited collection '${oldCollection.name}'`);
         io.emit('collections', collections);
         res.status(205).send( JSON.stringify( { success: true } ) );
       });
     });
 
   }
-  catch(e) {
-    winston.error("POST /api/collection/edit:", e);
+  catch(vars) {
+    let collection = vars[0];
+    let e = vars[1];
+    winston.debug("ERROR: POST /api/collection/edit". e);
+    winston.error(`An exception was raised whilst User '${req.user.username}' was editing collection ${collection.name}:\n`, e);
     res.status(500).send( JSON.stringify( { success: false, error: e.message || e } ) );
   }
 });
@@ -1063,7 +1089,7 @@ app.post('/api/collection/edit', passport.authenticate('jwt', { session: false }
 
 app.post('/api/feed/manual', passport.authenticate('jwt', { session: false } ), upload.single('file'), (req, res) => {
   // Add a manual feed
-  winston.info("POST /api/feed/manual");
+  winston.debug(`POST /api/feed/manual from ${req.headers['x-forwarded-for'] || req.connection.remoteAddress}`);
   // winston.debug('req:', req);
   let timestamp = new Date().getTime();
   try {
@@ -1142,6 +1168,7 @@ app.post('/api/feed/manual', passport.authenticate('jwt', { session: false } ), 
           else 
           {
             feeds[id] = feed;
+            winston.info(`User '${req.user.username}' has added a new manual feed '${feed.name}'`);
             io.emit('feeds', feeds);
             res.status(201).send( JSON.stringify( { success: true } ) );
             writeToSocket( feederSocket, JSON.stringify( { new: true, feed: feed } ) );
@@ -1161,7 +1188,7 @@ app.post('/api/feed/manual', passport.authenticate('jwt', { session: false } ), 
 
 app.post('/api/feed/scheduled', passport.authenticate('jwt', { session: false } ), (req, res) => {
   // Add a scheduled feed
-  winston.info("POST /api/feed/scheduled");
+  winston.debug(`POST /api/feed/scheduled from ${req.headers['x-forwarded-for'] || req.connection.remoteAddress}`);
   // winston.debug('req:', req);
   let timestamp = new Date().getTime();
   try {
@@ -1251,6 +1278,7 @@ app.post('/api/feed/scheduled', passport.authenticate('jwt', { session: false } 
         else 
         {
           winston.debug('/api/feed/scheduled: insertOne(): feed added to db');
+          winston.info(`User '${req.user.username}' has added a new scheduled feed '${feed.name}'`);
           feeds[id] = feed;
           scheduler.addFeed(feed);
           io.emit('feeds', feeds);
@@ -1279,7 +1307,7 @@ app.post('/api/feed/scheduled', passport.authenticate('jwt', { session: false } 
 
 app.post('/api/feed/edit/withfile', passport.authenticate('jwt', { session: false } ), upload.single('file'), (req, res) => {
   // this is for editing of manual feeds which contain a new file
-  winston.info("POST /api/feed/edit/withfile");
+  winston.debug(`POST /api/feed/edit/withfile from ${req.headers['x-forwarded-for'] || req.connection.remoteAddress}`);
   // winston.debug('req:', req);
   
   try {
@@ -1298,6 +1326,7 @@ app.post('/api/feed/edit/withfile', passport.authenticate('jwt', { session: fals
     // get creator from old feed
     let oldFeed = feeds[id];
     let creator = oldFeed.creator
+    let oldFeedName = oldFeed.name;
     feed['creator'] = creator;
     feed['version'] = oldFeed.version + 1;
 
@@ -1326,6 +1355,7 @@ app.post('/api/feed/edit/withfile', passport.authenticate('jwt', { session: fals
           }
           else {
             feeds[id] = feed;
+            winston.info(`User '${req.user.username}' has edited feed '${oldFeedName}' and updated its CSV file`);
             io.emit('feeds', feeds);
             writeToSocket( feederSocket, JSON.stringify( { update: true, feed: feed } ) ); // let feeder server know of our update
             res.status(201).send( JSON.stringify( { success: true } ) );
@@ -1347,7 +1377,7 @@ app.post('/api/feed/edit/withfile', passport.authenticate('jwt', { session: fals
 
 app.post('/api/feed/edit/withoutfile', passport.authenticate('jwt', { session: false } ), (req, res) => {
   // this is for editing of any feed which does not include a new file, both manual or scheduled
-  winston.info("POST /api/feed/edit/withoutfile");
+  winston.debug(`POST /api/feed/edit/withoutfile from ${req.headers['x-forwarded-for'] || req.connection.remoteAddress}`);
   // winston.debug('req:', req);
   
   try {
@@ -1366,6 +1396,7 @@ app.post('/api/feed/edit/withoutfile', passport.authenticate('jwt', { session: f
     // get creator from old feed
     let oldFeed = feeds[id];
     let creator = oldFeed.creator
+    let oldFeedName = oldFeed.name;
     feed['creator'] = creator;
     feed['version'] = oldFeed.version + 1;
 
@@ -1386,6 +1417,7 @@ app.post('/api/feed/edit/withoutfile', passport.authenticate('jwt', { session: f
         }
         else {
           feeds[id] = feed;
+          winston.info(`User '${req.user.username}' has edited manual feed '${oldFeedName}' without updating its CSV file`);
           io.emit('feeds', feeds);
           writeToSocket( feederSocket, JSON.stringify( { update: true, feed: feed } ) ); // let feeder server know of our update
           res.status(201).send( JSON.stringify( { success: true } ) );
@@ -1422,6 +1454,7 @@ app.post('/api/feed/edit/withoutfile', passport.authenticate('jwt', { session: f
           else 
           {
             winston.debug('/api/feed/edit/withoutfile: updateOne(): feed modified in db');
+            winston.info(`User '${req.user.username}' has edited scheduled feed '${oldFeedName}' without updating its CSV file`);
             // calculate file hash for feed file
             feeds[id] = feed;
             io.emit('feeds', feeds);
@@ -1453,7 +1486,7 @@ app.post('/api/feed/edit/withoutfile', passport.authenticate('jwt', { session: f
 
 
 app.post('/api/feed/testurl', passport.authenticate('jwt', { session: false } ), (req, res) => {
-  winston.debug('/api/feed/testurl');
+  winston.debug(`POST /api/feed/testurl from ${req.headers['x-forwarded-for'] || req.connection.remoteAddress}`);
 
   let url = '';
   let options = { method: 'GET', gzip: true };
@@ -1501,7 +1534,8 @@ app.post('/api/feed/testurl', passport.authenticate('jwt', { session: false } ),
     myRes = result;
 
     if (error) {
-      winston.debug('/api/feed/testurl: caught error:', error);
+      // winston.debug('/api/feed/testurl: caught error:', error);
+      winston.debug(`User '${req.user.username}' caught an error whilst testing feed URL '${url}':`, error);
       let body = { success: false, error: error };
       if (result.statusCode) {
         body['statusCode'] = result.statusCode;
@@ -1509,6 +1543,8 @@ app.post('/api/feed/testurl', passport.authenticate('jwt', { session: false } ),
       res.status(200).send( JSON.stringify( body ) );
       return;
     }
+
+    winston.info(`User '${req.user.username}' has tested feed URL '${url}'.  Status Code: ${result.statusCode}`);
     
     if (result.statusCode != 200) {
       res.status(200).send( JSON.stringify( { success: false, error: 'Bad HTTP status code', statusCode: result.statusCode } ) );
@@ -1560,13 +1596,14 @@ app.post('/api/feed/testurl', passport.authenticate('jwt', { session: false } ),
 app.get('/api/feed/filehead/:id', passport.authenticate('jwt', { session: false } ), (req, res) => {
   try {
     let id = req.params.id;
-    winston.info("GET /api/feed/filehead/" + id);
-
+    winston.debug(`GET /api/feed/filehead/${id} from ${req.headers['x-forwarded-for'] || req.connection.remoteAddress}`);
+    
     if ( !(id in feeds) ) {
       throw('Feed not found');
     }
     
     let feed = feeds[id];
+    winston.info(`User '${req.user.username}' has requested CSV file content for feed ${feed.name}`);
     let chunkSize = 1024;
     let maxBufSize = 262144;
     let buffer = new Buffer(maxBufSize);
@@ -1646,9 +1683,10 @@ app.get('/api/feed/filehead/:id', passport.authenticate('jwt', { session: false 
 app.delete('/api/feed/:id', passport.authenticate('jwt', { session: false } ), (req, res) => {
   // delete a feed
   let id = req.params.id;
-  winston.info(`DELETE /api/feed/${id}`);
+  winston.debug(`DELETE /api/feed/${id} from ${req.headers['x-forwarded-for'] || req.connection.remoteAddress}`);
   try {
     if (id in feeds) {
+      let oldFeedName = feeds[id].name;
       fs.unlink(feedsDir + '/' + id + '.feed', (err) => {
 
         if (err) throw(err);
@@ -1657,11 +1695,12 @@ app.delete('/api/feed/:id', passport.authenticate('jwt', { session: false } ), (
           
           if (err) throw err;
           
-          delete feeds[id];
+          winston.info(`User '${req.user.username}' has deleted feed ${oldFeedName}`);
           io.emit('feeds', feeds);
           writeToSocket( feederSocket, JSON.stringify( { delete: true, id: id } ) ); // let feeder server know of our update
           res.status(200).send( JSON.stringify( { success: true } ) );
           scheduler.delFeed(id);
+          delete feeds[id];
         });
       });
     }
@@ -1725,18 +1764,20 @@ app.delete('/api/feed/:id', passport.authenticate('jwt', { session: false } ), (
 
 
 app.delete('/api/nwserver/:id', passport.authenticate('jwt', { session: false } ), (req, res) => {
-  let servId = req.params.id;
-  winston.info(`DELETE /api/nwserver/${servId}`);
+  let id = req.params.id;
+  winston.debug(`DELETE /api/nwserver/${id} from ${req.headers['x-forwarded-for'] || req.connection.remoteAddress}`);
   try {
-    delete nwservers[servId];
-    db.collection('nwservers').remove( { 'id': servId }, (err, result) => {
+    let oldNwserver = nwservers[id];
+    db.collection('nwservers').remove( { 'id': id }, (err, result) => {
       if (err) throw err;
+      winston.info(`User '${req.user.username}' has deleted NetWitness server '${oldNwserver.user}@${oldNwserver.host}:${oldNwserver.port}'`);
+      delete nwservers[id];
       io.emit('nwservers', redactApiServerPasswords(nwservers));
       res.status(200).send( JSON.stringify( { success: true } ) );
     });
   }
   catch(e) {
-    winston.error(`ERROR DELETE /api/nwserver/${servId} :`, e);
+    winston.error(`ERROR DELETE /api/nwserver/${id} :`, e);
     res.status(500).send( JSON.stringify( { success: false, error: e.message || e } ) );
   }
 });
@@ -1745,7 +1786,7 @@ app.delete('/api/nwserver/:id', passport.authenticate('jwt', { session: false } 
 
 app.post('/api/nwserver', passport.authenticate('jwt', { session: false } ), (req, res) => {
   // for adding a netwitness server
-  winston.info("POST /api/nwserver");
+  winston.debug(`POST /api/nwserver from ${req.headers['x-forwarded-for'] || req.connection.remoteAddress}`);
   try {
     //winston.debug(req.body);
     let nwserver = req.body;
@@ -1774,6 +1815,7 @@ app.post('/api/nwserver', passport.authenticate('jwt', { session: false } ), (re
     nwservers[id] = nwserver;
     db.collection('nwservers').insertOne( nwserver, (err, result) => {
       if (err) throw err;
+      winston.info(`User '${req.user.username}' has added NetWitness server '${nwserver.user}@${nwserver.host}:${nwserver.port}'`);
       io.emit('nwservers', redactApiServerPasswords(nwservers));
       res.status(201).send( JSON.stringify( { success: true } ) );
     });
@@ -1788,7 +1830,7 @@ app.post('/api/nwserver', passport.authenticate('jwt', { session: false } ), (re
 
 
 app.post('/api/nwserver/edit', passport.authenticate('jwt', { session: false } ), (req, res) => {
-  winston.info("POST /api/nwserver/edit");
+  winston.debug(`POST /api/nwserver/edit from ${req.headers['x-forwarded-for'] || req.connection.remoteAddress}`);
   try {
     //winston.debug(req.body);
     let nwserver = req.body;
@@ -1796,6 +1838,7 @@ app.post('/api/nwserver/edit', passport.authenticate('jwt', { session: false } )
       throw("'id' is not defined");
     }
     let id = nwserver.id;
+    let oldNwserver = JSON.parse(JSON.stringify(nwservers[id]));
     if (!nwserver.friendlyName) {
       throw("'friendlyName' is not defined");
     }
@@ -1818,6 +1861,7 @@ app.post('/api/nwserver/edit', passport.authenticate('jwt', { session: false } )
     nwservers[id] = nwserver;
     db.collection('nwservers').updateOne( { id: id }, { $set: nwserver }, (err, result) => {
       if (err) throw err;
+      winston.info(`User '${req.user.username}' has edited NetWitness server '${oldNwserver.user}@${oldNwserver.host}:${oldNwserver.port}'`);
       io.emit('nwservers', redactApiServerPasswords(nwservers));
       res.status(200).send( JSON.stringify( { success: true } ) );
     });
@@ -1832,9 +1876,10 @@ app.post('/api/nwserver/edit', passport.authenticate('jwt', { session: false } )
 
 
 app.post('/api/nwserver/test', passport.authenticate('jwt', { session: false } ), (req, res) => {
-  winston.info("POST /api/nwserver/test");
+  winston.debug(`POST /api/nwserver/test from ${req.headers['x-forwarded-for'] || req.connection.remoteAddress}`);
+  let nwserver;
   try {
-    let nwserver = req.body;
+    nwserver = req.body;
     var uPassword = '';
     // console.log(nwserver);
     if (nwserver.hasOwnProperty('id') && !(nwserver.hasOwnProperty('password'))) {
@@ -1876,14 +1921,17 @@ app.post('/api/nwserver/test', passport.authenticate('jwt', { session: false } )
   let request = client.get(url, (data, response) => {
     // console.log(response);
     if (response.statusCode == 200) {
-      winston.debug(`REST connection test to url ${url} was successful`);
+      // winston.debug(`REST connection test to url ${url} was successful`);
+      winston.info(`User '${req.user.username}' tested NetWitness server '${nwserver.user}@${nwserver.host}:${nwserver.port}' with result success`);
     }
     else {
-      winston.debug(`REST connection test to url ${url} failed.`);  
+      // winston.debug(`REST connection test to url ${url} failed.`);
+      winston.info(`User '${req.user.username}' tested NetWitness server '${nwserver.user}@${nwserver.host}:${nwserver.port}' with result failure.  STATUS CODE: ${response.statusCode}`);
     }
     res.status(response.statusCode).send( JSON.stringify( { error: response.statusMessage } ) );
   }).on('error', err => {
-    winston.debug(`REST connection test to url ${url} failed with error: ${err.message}`);
+    // winston.debug(`REST connection test to url ${url} failed with error: ${err.message}`);
+    winston.info(`User '${req.user.username}' tested NetWitness server '${nwserver.user}@${nwserver.host}:${nwserver.port}' with result failure.  ${err}`);
     res.status(403).send( JSON.stringify({ error: err.message }) );
   });
 
@@ -1921,18 +1969,20 @@ app.post('/api/nwserver/test', passport.authenticate('jwt', { session: false } )
 
 
 app.delete('/api/saserver/:id', passport.authenticate('jwt', { session: false } ), (req, res) => {
-  let servId = req.params.id;
-  winston.info(`DELETE /api/saserver/${servId}`);
+  let id = req.params.id;
+  winston.debug(`DELETE /api/saserver/${id} from ${req.headers['x-forwarded-for'] || req.connection.remoteAddress}`);
   try {
-    delete saservers[servId];
-    db.collection('saservers').remove( { 'id': servId }, (err, result) => {
+    let oldSaserver = saservers[id];
+    db.collection('saservers').remove( { 'id': id }, (err, result) => {
       if (err) throw err;
+      winston.info(`User '${req.user.username}' has deleted SA server '${oldSaserver.user}@${oldSaserver.host}:${oldSaserver.port}'`);
+      delete saservers[id];
       io.emit('saservers', redactApiServerPasswords(saservers));
       res.status(200).send( JSON.stringify( { success: true } ) );
     });
   }
   catch(e) {
-    winston.error(`ERROR DELETE /api/saserver/${servId} :`, e);
+    winston.error(`ERROR DELETE /api/saserver/${id} :`, e);
     res.status(500).send( JSON.stringify( { success: false, error: e.message || e } ) );
   }
 });
@@ -1941,7 +1991,7 @@ app.delete('/api/saserver/:id', passport.authenticate('jwt', { session: false } 
 
 app.post('/api/saserver', passport.authenticate('jwt', { session: false } ), (req, res) => {
   // for adding a netwitness server
-  winston.info("POST /api/saserver");
+  winston.debug(`POST /api/saserver from ${req.headers['x-forwarded-for'] || req.connection.remoteAddress}`);
   try {
     //winston.debug(req.body);
     let saserver = req.body;
@@ -1970,6 +2020,7 @@ app.post('/api/saserver', passport.authenticate('jwt', { session: false } ), (re
     saservers[id] = saserver;
     db.collection('saservers').insertOne( saserver, (err, result) => {
       if (err) throw err;
+      winston.info(`User '${req.user.username}' has added SA server '${saserver.user}@${saserver.host}:${saserver.port}'`);
       io.emit('saservers', redactApiServerPasswords(saservers));
       res.status(201).send( JSON.stringify( { success: true } ) );
     });
@@ -1984,7 +2035,7 @@ app.post('/api/saserver', passport.authenticate('jwt', { session: false } ), (re
 
 
 app.post('/api/saserver/edit', passport.authenticate('jwt', { session: false } ), (req, res) => {
-  winston.info("POST /api/saserver/edit");
+  winston.debug(`POST /api/saserver/edit from ${req.headers['x-forwarded-for'] || req.connection.remoteAddress}`);
   try {
     //winston.debug(req.body);
     let saserver = req.body;
@@ -1992,6 +2043,7 @@ app.post('/api/saserver/edit', passport.authenticate('jwt', { session: false } )
       throw("'id' is not defined");
     }
     let id = saserver.id;
+    let oldSaserver = JSON.parse(JSON.stringify(saservers[id]));
     if (!saserver.friendlyName) {
       throw("'friendlyName' is not defined");
     }
@@ -2014,6 +2066,7 @@ app.post('/api/saserver/edit', passport.authenticate('jwt', { session: false } )
     saservers[id] = saserver;
     db.collection('saservers').updateOne( { id: id }, { $set: saserver }, (err, result) => {
       if (err) throw err;
+      winston.info(`User '${req.user.username}' has edited SA server '${oldSaserver.user}@${oldSaserver.host}:${oldSaserver.port}'`);
       io.emit('saservers', redactApiServerPasswords(saservers));
       res.status(200).send( JSON.stringify( { success: true } ) );
     });
@@ -2028,9 +2081,10 @@ app.post('/api/saserver/edit', passport.authenticate('jwt', { session: false } )
 
 
 app.post('/api/saserver/test', passport.authenticate('jwt', { session: false } ), (req, res) => {
-  winston.info("POST /api/saserver/test");
+  winston.debug(`POST /api/saserver/test from ${req.headers['x-forwarded-for'] || req.connection.remoteAddress}`);
+  let saserver;
   try {
-    let saserver = req.body;
+    saserver = req.body;
     var uPassword = '';
     // console.log(saserver);
     if (saserver.hasOwnProperty('id') && !(saserver.hasOwnProperty('password'))) {
@@ -2068,24 +2122,29 @@ app.post('/api/saserver/test', passport.authenticate('jwt', { session: false } )
   // Now perform test
   let options = { user: user, password: uPassword, connection: { rejectUnauthorized: false }}; // {requestConfig: {timeout: 5000}, responseConfig: {timeout: 5000}},
   let args = { headers: { 'Content-Type': 'application/x-www-form-urlencoded'},
-               data: { '_method': 'GET' } };
+               data: { '_method': 'GET' },
+               requestConfig: { timeout: 1000 },
+               responseConfig: { timeout: 1000 }
+              } //request timeout in milliseconds
   let client = new restClient(options);
 
     let request = client.post(url, args, (data, response) => {
       // console.log(response);
       if (response.statusCode == 200) {
         // winston.debug(`REST connection test to url ${url} was successful`);
-        // winston.debug(data.resultCode);
         if (!('resultCode' in data) || data.resultCode != 'API_SUCCESS_CODE') {
-          winston.debug(`REST connection test to url ${url} failed with error:`, data);
+          // winston.debug(`REST connection test to url ${url} failed with error:`, data);
+          winston.info(`User '${req.user.username}' tested SA server '${saserver.user}@${saserver.host}:${saserver.port}' with result failure.  resultCode: ${data.resultCode || null}`);
           res.status(403).send( JSON.stringify( { success: false, error: data.resultCode } ) );
           return;
         }
+        winston.info(`User '${req.user.username}' tested SA server '${saserver.user}@${saserver.host}:${saserver.port}' with result success`);
         res.status(200).send( JSON.stringify( { success: true } ) );
         return;
       }
       else {
         winston.debug(`REST connection test to url ${url} failed.`);
+        winston.info(`User '${req.user.username}' tested SA server '${saserver.user}@${saserver.host}:${saserver.port}' with result failure.  STATUS CODE: ${response.statusCode}`);
         // throw(response.statusCode);
         res.status(403).send( JSON.stringify( { success: false, error: data.resultCode } ) );
         return;
@@ -2094,7 +2153,9 @@ app.post('/api/saserver/test', passport.authenticate('jwt', { session: false } )
       }
     })
     .on('error', err => {
-      throw(err);
+      winston.info(`User '${req.user.username}' tested SA server '${saserver.user}@${saserver.host}:${saserver.port}' with result failure.  ${err}`);
+      res.status(403).send( JSON.stringify({ error: err.message }) );
+      // throw(err);
     });
 
 });
@@ -2139,7 +2200,7 @@ app.get('/api/preferences', passport.authenticate('jwt', { session: false } ), (
 
 app.post('/api/preferences', passport.authenticate('jwt', { session: false } ), (req, res) => {
   // Set global preferences
-  winston.info("POST /api/preferences");
+  winston.debug(`POST /api/preferences from ${req.headers['x-forwarded-for'] || req.connection.remoteAddress}`);
   try {
     let prefs = req.body;
     // winston.debug(prefs);
@@ -2170,6 +2231,7 @@ app.post('/api/preferences', passport.authenticate('jwt', { session: false } ), 
     
     db.collection('preferences').updateOne( {}, prefs, (err, result) => {
       if (err) throw err;
+      winston.info(`User '${req.user.username}' has updated the global preferences`);
       preferences = prefs;
       tokenExpirationSeconds = 60 * 60 * preferences.tokenExpirationHours
       io.emit('preferences', preferences);
@@ -2222,13 +2284,15 @@ function updateFixedCollectionsDbCallback(collectionId, collection) {
 app.get('/api/collection/fixed/:id', passport.authenticate('jwt', { session: false } ), (req, res) => {
   // Returns a fixed collection, either complete, or in the process of building
   let collectionId = req.params.id;
-  winston.info('GET /api/collection/fixed/:id', collectionId);
+  winston.debug(`GET /api/collection/fixed/${collectionId} from ${req.headers['x-forwarded-for'] || req.connection.remoteAddress}`);
   if (collectionId in collections && collections[collectionId]['state'] == 'initial' || collections[collectionId]['state'] == 'building' || collections[collectionId]['state'] == 'error') {
     // collection is either new or is building
+    winston.info(`User '${req.user.username}' has requested incomplete fixed collection ${collections[collectionId.name]}`);
     fixedHandler.onHttpConnection(req, res);
   }
   else if (collectionId in collections) { // && this.collections[collectionId]['state'] == 'complete' // we should even use this if state is 'error'
     // this is a complete fixed collection
+    winston.info(`User '${req.user.username}' has requested complete fixed collection ${collections[collectionId.name]}`);
     try {
       res.json( [ { wholeCollection: collectionsData[collectionId] }, { close: true } ] );
     }
@@ -2239,6 +2303,7 @@ app.get('/api/collection/fixed/:id', passport.authenticate('jwt', { session: fal
   }
   else {
     // couldn't find the collection
+    winston.warn(`User '${req.user.username}' has requested a non-existant fixed collection with id '${collectionId}'`);
     res.status(500).send( JSON.stringify( { success: false, error: e.message || e } ) );
   }
 

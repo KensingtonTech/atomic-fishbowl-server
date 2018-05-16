@@ -265,8 +265,8 @@ def main():
     if 'SYSTEMD' in os.environ:
       #from systemd.journal import JournalHandler
       #handler = JournalHandler(SYSLOG_IDENTIFIER="afb_worker", _SYSTEMD_UNIT="afb-server")
-      formatStr = '%(message)s'
-      #formatStr = 'afb_worker    %(message)s'
+      #formatStr = '%(message)s'
+      formatStr = 'afb_worker    %(message)s'
       formatter = SystemdFormatter(formatStr)
 
     formatter = logging.Formatter(formatStr)
