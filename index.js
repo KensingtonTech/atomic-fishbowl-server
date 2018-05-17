@@ -2311,20 +2311,26 @@ app.get('/api/collection/fixed/:id', passport.authenticate('jwt', { session: fal
 
 
 
-app.get('/api/collection/monitoring/pause/:id', passport.authenticate('jwt', { session: false } ), (req, res) => {
-  rollingHandler.pauseMonitoringCollection(req, res);
-});
-
-
-
-app.get('/api/collection/monitoring/unpause/:id', passport.authenticate('jwt', { session: false } ), (req, res) => {
-  rollingHandler.unpauseMonitoringCollection(req, res);
-});
+///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+//////////////////////////////////////////////////////ROLLING / MONITORING COLLECTIONS/////////////////////////////////////////////////////////////
+///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
 
 
 app.get('/api/collection/rolling/:collectionId', passport.authenticate('jwt', { session: false } ), (req, res) => {
   rollingHandler.onHttpConnection(req, res);
+});
+
+
+
+app.get('/api/collection/monitoring/pause/:id', passport.authenticate('jwt', { session: false } ), (req, res) => {
+  rollingHandler.pauseMonitoringCollectionHttp(req, res);
+});
+
+
+
+app.get('/api/collection/monitoring/unpause/:id', passport.authenticate('jwt', { session: false } ), (req, res) => {
+  rollingHandler.unpauseMonitoringCollectionHttp(req, res);
 });
 
 
@@ -3076,6 +3082,7 @@ var tokensToIoSockets = {};
 function ioAuthenticator(socket, done) {
   let req = socket.request;
   // winston.debug('cookie:', req.headers.cookie);
+  // winston.debug(socket.conn);
   let cookies = req.headers.cookie;
   if (!cookies) {
     socket.error('Failed to authenticate socket.io connection: no cookies in header');
@@ -3096,7 +3103,8 @@ function ioAuthenticator(socket, done) {
       // winston.debug('auth error:', err);
 
       // winston.debug('jwt:', decoded);
-      socket['user'] = decoded; // write our token info to the socket so it can be accessed later
+      socket.conn['user'] = decoded; // write our token info to the socket so it can be accessed later
+      
       
       if (err) {
         // authentication failed

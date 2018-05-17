@@ -47,6 +47,7 @@ class RollingCollectionHandler {
     // data must contain properties collectionID and sessionId
     // sessionId should be null if a standard rolling collection
     winston.debug('RollingCollectionHandler: onJoinCollection()');
+    // winston.debug('RollingCollectionHandler: onJoinCollection(): socket', socket);
     
     let collectionId = data['collectionId'];
     let collection = this.cfg.collections[collectionId];
@@ -58,9 +59,11 @@ class RollingCollectionHandler {
       rollingId = collectionId + '_' + sessionId;
     }
     socket['rollingId'] = rollingId; // add the rolling id to our socket so we can later identify it
+    socket['collectionId'] = collectionId;
 
     winston.debug('RollingCollectionHandler: onJoinCollection(): collectionId:', collectionId);
     winston.debug('RollingCollectionHandler: onJoinCollection(): rollingId:', rollingId);
+    winston.info(`User '${socket.conn.user.username}' has connected to ${collection.type} collection '${collection.name}'`);
 
     socket.join(rollingId); // this joins a room for rollingId
 
@@ -86,11 +89,15 @@ class RollingCollectionHandler {
   onLeaveCollection(socket) {
     // when a socket disconnects gracefully
     winston.debug('RollingCollectionHandler: onLeaveCollection()');
+
     
     if ('rollingId' in socket) {
       let rollingId = socket['rollingId'];
+      let collectionId = socket.collectionId;
+      winston.info(`User '${socket.conn.user.username}' has disconnected from ${this.cfg.collections[collectionId].type} collection '${this.cfg.collections[collectionId].name}'`)
       socket.leave(rollingId);
       delete socket['rollingId'];
+      delete socket['collectionId'];
     }
 
     if ('rollingCollectionManager' in socket) {
@@ -109,9 +116,12 @@ class RollingCollectionHandler {
       
     if ('rollingId' in socket) {
       let rollingId = socket['rollingId'];
-      winston.debug('RollingCollectionHandler: onChannelDisconnect(): matched rolling collection id:', rollingId);
+      let collectionId = socket.collectionId;
+      winston.debug('RollingCollectionHandler: onChannelDisconnect(): matched collection id:', collectionId);
+      winston.info(`User '${socket.conn.user.username}' has disconnected from ${this.cfg.collections[collectionId].type} collection '${this.cfg.collections[collectionId].name}'`);
       socket.leave(rollingId);
       delete socket['rollingId'];
+      delete socket['collectionId'];
     }
 
     if ('rollingCollectionManager' in socket) {
@@ -129,6 +139,10 @@ class RollingCollectionHandler {
     winston.debug('RollingCollectionHandler: onPauseCollection()');
     
     if ('rollingCollectionManager' in socket) {
+      let rollingId = socket['rollingId'].substring(0,36);
+      winston.info(`User '${socket.conn.user.username}' has paused monitoring collection '${this.cfg.collections[rollingId].name}'`)
+      // winston.info(`User '${socket.conn.user.username}' has paused monitoring collection '${rollingId}'`)
+      // winston.info(`this.collections[rollingId]:`, this.cfg.collections)
       let manager = socket['rollingCollectionManager'];
       manager.pause();
     }
@@ -141,6 +155,9 @@ class RollingCollectionHandler {
     winston.debug('RollingCollectionHandler: onUnpauseCollection()');
 
     if ('rollingCollectionManager' in socket) {
+      let rollingId = socket['rollingId'].substring(0,36);
+      winston.info(`User '${socket.conn.user.username}' has unpaused monitoring collection '${this.cfg.collections[rollingId].name}'`)
+      // winston.info(`User '${socket.conn.user.username}' has unpaused monitoring collection '${rollingId}'`)
       let manager = socket['rollingCollectionManager'];
       manager.unpause();
     }
@@ -167,6 +184,7 @@ class RollingCollectionHandler {
     let collection = this.cfg.collections[collectionId];
 
     winston.debug('RollingCollectionHandler: onHttpConnection(): rollingId:', rollingId);
+    winston.info(`User '${req.user.username}' has connected to ${collection.type} collection '${collection.name}'`);
     
     // create a client connection handler for this connection
     // does a manager for the requested rolling collection exist?
@@ -192,6 +210,30 @@ class RollingCollectionHandler {
     // give the client connection object the rolling collection manager to attach itself to
     clientConnection.addManager(rollingCollectionManager);
     
+  }
+
+
+
+  pauseMonitoringCollectionHttp(req, res) {
+    let clientSessionId = req.headers['afbsessionid'];
+    winston.debug(`RollingCollectionHandler pauseMonitoringCollectionHttp(): Pausing monitoring collection ${clientSessionId}`);
+    // winston.info(`User '${req.user.username}' has paused monitoring collection '${this.cfg.collections[rollingId].name}'`)
+    let manager = this.rollingCollectionManagers[clientSessionId]['manager'];
+    manager.pause();
+    res.status(202).send( JSON.stringify( { success: true } ) );
+  }
+
+
+
+  unpauseMonitoringCollectionHttp(req, res) {
+    // This only gets used by the client if a monitoring collection is paused and then resumed within the minute the run is permitted to continue executing
+    // Otherwise, the client will simply call /api/collection/rolling/:id again
+    let clientSessionId = req.headers['afbsessionid'];
+    winston.debug(`RollingCollectionHandler: unpauseMonitoringCollectionHttp(): Resuming monitoring collection ${clientSessionId}`);
+    // winston.info(`User '${req.user.username}' has unpaused monitoring collection '${this.cfg.collections[rollingId].name}'`)
+    let manager = this.rollingCollectionManagers[clientSessionId]['manager'];
+    manager.unpause();
+    res.status(202).send( JSON.stringify( { success: true } ) );
   }
 
 
@@ -251,28 +293,6 @@ class RollingCollectionHandler {
   rollingCollectionManagerRemovalCallback(id) {
     winston.debug('RollingCollectionHandler: rollingCollectionManagerRemovalCallback()');
     delete this.rollingCollectionManagers[id];
-  }
-
-
-
-  pauseMonitoringCollection(req, res) {
-    let clientSessionId = req.headers['afbsessionid'];
-    winston.debug(`RollingCollectionHandler handlePauseMonitoringCollection(): Pausing monitoring collection ${clientSessionId}`);
-    let manager = this.rollingCollectionManagers[clientSessionId]['manager'];
-    manager.pause();
-    res.status(202).send( JSON.stringify( { success: true } ) );
-  }
-
-
-
-  unpauseMonitoringCollection(req, res) {
-    // This only gets used by the client if a monitoring collection is paused and then resumed within the minute the run is permitted to continue executing
-    // Otherwise, the client will simply call /api/collection/rolling/:id again
-    let clientSessionId = req.headers['afbsessionid'];
-    winston.debug(`RollingCollectionHandler: handleUnpauseMonitoringCollection(): Resuming monitoring collection ${clientSessionId}`);
-    let manager = this.rollingCollectionManagers[clientSessionId]['manager'];
-    manager.unpause();
-    res.status(202).send( JSON.stringify( { success: true } ) );
   }
 
 
@@ -377,6 +397,7 @@ class HttpConnection {
 
   onClientClosedConnection() {
     winston.debug('HttpConnection: onClientClosedConnection()');
+    winston.info(`User '${this.req.user.username}' has disconnected from ${this.cfg.collections[this.collectionId].type} collection '${this.cfg.collections[this.collectionId].name}'`);
     this.disconnected = true;
     // This block runs when the client disconnects from the session
     // But NOT when we terminate the session from the server

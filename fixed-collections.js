@@ -50,6 +50,7 @@ class FixedCollectionHandler {
     let collection = this.cfg.collections[collectionId];
 
     winston.debug('FixedCollectionHandler: onJoinCollection(): collectionId:', collectionId);
+    winston.info(`User '${socket.conn.user.username}' has connected to fixed collection '${collection.name}'`);
 
     socket.join(collectionId); // this joins a room for collectionId
 
@@ -103,7 +104,8 @@ class FixedCollectionHandler {
     delete socket['collectionId'];
 
     if (collectionId in socket.rooms) {
-      socket.leave(collectionId);  
+      socket.leave(collectionId);
+      winston.info(`User '${socket.conn.user.username}' has disconnected from fixed collection '${this.cfg.collections[collectionId].name}'`)
     }
   
     if ( collectionId in this.collectionManagers ) {
@@ -122,6 +124,7 @@ class FixedCollectionHandler {
     if ('collectionId' in socket) {
       let collectionId = socket['collectionId'];
       winston.debug('FixedCollectionHandler: onChannelDisconnect(): matched collectionId:', collectionId);
+      winston.info(`User '${socket.conn.user.username}' has disconnected from fixed collection '${this.cfg.collections[collectionId].name}'`)
   
       if (collectionId in socket.rooms) {
         socket.leave(collectionId);  
@@ -144,6 +147,7 @@ class FixedCollectionHandler {
     let collection = this.cfg.collections[collectionId];
     
     winston.debug('FixedCollectionHandler: onHttpConnection(): collectionId:', collectionId);
+    winston.info(`User '${req.user.username}' has connected to fixed collection '${collection.name}'`);
     
     // create a client connection handler for this connection
     // does a manager for the requested collection exist?
@@ -293,6 +297,7 @@ class FixedHttpConnection {
 
   onClientClosedConnection() {
     winston.debug('FixedHttpConnection: onClientClosedConnection()');
+    winston.info(`User '${this.req.user.username}' has disconnected from ${this.cfg.collections[this.collectionId].type} collection '${this.cfg.collections[this.collectionId].name}'`);
     this.disconnected = true;
     // This block runs when the client disconnects from the session
     // It doesn't run when we end the session ourselves
