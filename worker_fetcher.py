@@ -119,6 +119,11 @@ class Fetcher:
     self.cfg['contentTimeout'] = int(self.cfg['contentTimeout'])
     self.cfg['maxContentErrors'] = int(self.cfg['maxContentErrors'])
 
+    self.saMonitoring = False
+    if self.cfg['type'] == 'monitoring' and self.cfg['serviceType'] == 'sa':
+      self.saMonitoring = True
+    self.sentCollectionState = False # only used if saMonitoriing is true.  We need to tell the client to wipe its view only when data has been processed and is ready to send to the client, as SA takes too bloody long to run
+
 
 
   def exitWithError(self, message):
@@ -143,14 +148,22 @@ class Fetcher:
     #log.debug('Fetcher: sendResult()')
     #log.debug( 'Fetcher(): sendResult(): ' + str(type(res)) )
     if res and isinstance(res, list):
+      # this is an exception from the ContentProcessor which must be printed
       #log.error('Fetcher: sendResult(): Caught error in worker:\n' + str(res))
       for l in res:
         print l.rstrip()
     elif res and len(res['images']) != 0:
       #log.debug("Fetcher: sendResult(): Worker sending update")
+      if self.saMonitoring and not self.sentCollectionState:
+        log.debug('sending state monitoring')
+        self.communicator.write_data(json.dumps( { 'state': 'monitoring' } ) + '\n')
+        self.sentCollectionState = True
       self.communicator.write_data(json.dumps( { 'collectionUpdate': res } ) + '\n')
     elif not res:
       log.debug("SaFetcher: sendResult(): no results")
+      if self.saMonitoring and not self.sentCollectionState:
+        self.communicator.write_data(json.dumps( { 'state': 'monitoring' } ) + '\n')
+        self.sentCollectionState = True
 
 
 
