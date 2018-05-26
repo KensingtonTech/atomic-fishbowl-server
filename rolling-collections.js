@@ -60,6 +60,8 @@ class RollingCollectionHandler {
     }
     socket['rollingId'] = rollingId; // add the rolling id to our socket so we can later identify it
     socket['collectionId'] = collectionId;
+    socket['collectionName'] = collection.name;
+    socket['collectionType'] = collection.type;
 
     winston.debug('RollingCollectionHandler: onJoinCollection(): collectionId:', collectionId);
     winston.debug('RollingCollectionHandler: onJoinCollection(): rollingId:', rollingId);
@@ -94,10 +96,12 @@ class RollingCollectionHandler {
     if ('rollingId' in socket) {
       let rollingId = socket['rollingId'];
       let collectionId = socket.collectionId;
-      winston.info(`User '${socket.conn.user.username}' has disconnected from ${this.cfg.collections[collectionId].type} collection '${this.cfg.collections[collectionId].name}'`)
+      winston.info(`User '${socket.conn.user.username}' has disconnected from ${socket.collectionType} collection '${socket.collectionName}'`)
       socket.leave(rollingId);
       delete socket['rollingId'];
       delete socket['collectionId'];
+      delete socket['collectionName'];
+      delete socket['collectionType'];
     }
 
     if ('rollingCollectionManager' in socket) {

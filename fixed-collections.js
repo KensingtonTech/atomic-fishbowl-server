@@ -48,6 +48,7 @@ class FixedCollectionHandler {
 
     socket['collectionId'] = collectionId; // add the collection id to our socket so we can later identify it
     let collection = this.cfg.collections[collectionId];
+    socket['collectionName'] = collection.name;
 
     winston.debug('FixedCollectionHandler: onJoinCollection(): collectionId:', collectionId);
     winston.info(`User '${socket.conn.user.username}' has connected to fixed collection '${collection.name}'`);
@@ -101,11 +102,12 @@ class FixedCollectionHandler {
     winston.debug('FixedCollectionHandler: onLeaveCollection()');
 
     let collectionId = socket['collectionId'];
-    delete socket['collectionId'];
 
     if (collectionId in socket.rooms) {
       socket.leave(collectionId);
-      winston.info(`User '${socket.conn.user.username}' has disconnected from fixed collection '${this.cfg.collections[collectionId].name}'`)
+      winston.info(`User '${socket.conn.user.username}' has disconnected from fixed collection '${socket.collectionName}'`)
+      delete socket['collectionId'];
+      delete socket['collectionName'];
     }
   
     if ( collectionId in this.collectionManagers ) {
