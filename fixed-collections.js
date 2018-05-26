@@ -686,6 +686,7 @@ class FixedCollectionManager {
       privateKeyFile: this.cfg.internalPrivateKeyFile,
       useHashFeed: this.collection.useHashFeed,
       serviceType: this.collection.serviceType,
+      type: this.collection.type,
       onlyContentFromArchives: this.collection.onlyContentFromArchives || false
     };
   
