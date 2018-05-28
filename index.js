@@ -856,21 +856,25 @@ app.delete('/api/collection/:id', passport.authenticate('jwt', { session: false 
     if (collection.type == 'rolling' || collection.type == 'monitoring') {
       setTimeout( () => rollingHandler.collectionDeleted(id, req.user.username) );
     }
-    else {
+    else { // fixed
       setTimeout( () => fixedHandler.collectionDeleted(id, req.user.username) );
     }
 
-    if (id in collectionsData) {
+    if (id in collections) {
       db.collection('collections').remove( { id: id }, (err, result) => {
         if (err) throw err;
-        db.collection('collectionsData').remove( { id: id }, (err, result) => {
-          if (err) throw err;
-          winston.info(`User '${req.user.username}' has deleted collection '${collection.name}'`);
-          delete collections[id];
-          delete collectionsData[id];
-          io.emit('collections', collections);
-          res.status(200).send( JSON.stringify( { success: true } ) );
-        });
+        // we don't want to do this from inside the collectsData callback
+        // as the collection may be defined but the collectionsData may not be
+        delete collections[id];
+        io.emit('collections', collections);
+        res.status(200).send( JSON.stringify( { success: true } ) );
+        if (id in collectionsData) {
+          db.collection('collectionsData').remove( { id: id }, (err, result) => {
+            if (err) throw err;
+            winston.info(`User '${req.user.username}' has deleted collection '${collection.name}'`);
+            delete collectionsData[id];
+          });
+        }
       });
       
     }
@@ -2269,6 +2273,7 @@ function updateFixedCollectionsDbCallback(collectionId, collection) {
   try {
     db.collection('collections').update( {id: collectionId }, collection, (err, res) => {
       if (err) throw err;
+      io.emit('collections', collections);
     });
     db.collection('collectionsData').update( {id: collectionId }, { id: collectionId, 'data': JSON.stringify(collectionsData[collectionId]) }, (err, res) => {
       if (err) throw err;
@@ -2342,6 +2347,7 @@ function updateCollectionsDbCallback(collectionId) {
   try {
     db.collection('collections').update( { id: collectionId }, collection, (err, res) => {
       if (err) throw err;
+      io.emit('collections', collections);
     });
   }
   catch(e) {
