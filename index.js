@@ -2,7 +2,6 @@
 
 // Load dependencies
 require('source-map-support').install();
-const Observable = require('rxjs/Observable').Observable;
 const Subject = require('rxjs/Subject').Subject;
 const app = require('express')();
 const server = require('http').createServer(app);  
@@ -648,6 +647,7 @@ function emitUsers(sock) {
 
 
 app.get('/api/user/:uname', passport.authenticate('jwt', { session: false } ), (req,res) => {
+  // get details of user uname
   let uname = req.params.uname;
   winston.debug(`GET /api/user/${uname} from ${req.headers['x-forwarded-for'] || req.connection.remoteAddress}`);
   winston.info(`User '${req.user.username}' has requested info for user ${uname}`);
@@ -1700,11 +1700,11 @@ app.delete('/api/feed/:id', passport.authenticate('jwt', { session: false } ), (
           if (err) throw err;
           
           winston.info(`User '${req.user.username}' has deleted feed ${oldFeedName}`);
-          io.emit('feeds', feeds);
           writeToSocket( feederSocket, JSON.stringify( { delete: true, id: id } ) ); // let feeder server know of our update
-          res.status(200).send( JSON.stringify( { success: true } ) );
           scheduler.delFeed(id);
           delete feeds[id];
+          io.emit('feeds', feeds);
+          res.status(200).send( JSON.stringify( { success: true } ) );
         });
       });
     }
@@ -3252,5 +3252,5 @@ function finishStartup() {
 
 
   apiInitialized = true;
-  winston.info('Serving on localhost:' + listenPort);
+  winston.info('Serving on port', listenPort);
 }
