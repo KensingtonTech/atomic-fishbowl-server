@@ -505,7 +505,7 @@ connectToDB(); // this must come before mongoose user connection so that we know
 //////////////////////LOGIN & LOGOUT//////////////////////
 
 app.post('/api/login', passport.authenticate('local'), (req,res) => {
-  winston.debug(`POST /api/login from ${req.headers['x-forwarded-for'] || req.connection.remoteAddress}`);
+  winston.debug(`${req.method} ${req.url} from ${req.headers['x-forwarded-for'] || req.connection.remoteAddress}`);
   User.findOne({username: req.body.username, enabled: true}, (err, user) => {
     if (err) {
       winston.info("Error looking up user " + req.body.username + ': ' + err);
@@ -533,7 +533,7 @@ app.post('/api/login', passport.authenticate('local'), (req,res) => {
 
 
 app.get('/api/logout', passport.authenticate('jwt', { session: false } ), (req,res) => {
-  winston.debug(`GET /api/logout from ${req.headers['x-forwarded-for'] || req.connection.remoteAddress}`);
+  winston.debug(`${req.method} ${req.url} from ${req.headers['x-forwarded-for'] || req.connection.remoteAddress}`);
   winston.info(`User '${req.user.username}' has logged out`);
   let decoded = jwt.decode(req.cookies.access_token); //we can use jwt.decode here without signature verification as it's already been verified during authentication
   // winston.debug("decoded:", decoded);
@@ -548,7 +548,7 @@ app.get('/api/logout', passport.authenticate('jwt', { session: false } ), (req,r
 
 
 app.get('/api/isloggedin', passport.authenticate('jwt', { session: false } ), (req, res) => {
-  winston.debug(`GET /api/isloggedin from ${req.headers['x-forwarded-for'] || req.connection.remoteAddress}`);
+  winston.debug(`${req.method} ${req.url} from ${req.headers['x-forwarded-for'] || req.connection.remoteAddress}`);
   winston.info(`User '${req.user.username}' has logged in`);
   // winston.debug('sessionID:', req.session.id);
   // winston.debug('Session object:', req.session);
@@ -575,7 +575,7 @@ app.get('/api/isloggedin', passport.authenticate('jwt', { session: false } ), (r
 //////////////////////SERVER PUBLIC KEY//////////////////////
 
 /*app.get('/api/publickey', passport.authenticate('jwt', { session: false } ), (req, res)=>{
-  winston.debug("GET /api/publickey");
+  winston.debug(`${req.method} ${req.url} from ${req.headers['x-forwarded-for'] || req.connection.remoteAddress}`);
   res.json( { pubKey: internalPublicKey });
 });
 */
@@ -593,7 +593,7 @@ app.get('/api/isloggedin', passport.authenticate('jwt', { session: false } ), (r
 //////////////////////USE CASES//////////////////////
 
 /*app.get('/api/usecases', passport.authenticate('jwt', { session: false } ), (req, res) => {
-  winston.debug("GET /api/usecases");
+  winston.debug(`${req.method} ${req.url} from ${req.headers['x-forwarded-for'] || req.connection.remoteAddress}`);
   res.json( { useCases: useCases } );
 });*/
 
@@ -607,7 +607,7 @@ app.get('/api/isloggedin', passport.authenticate('jwt', { session: false } ), (r
 //////////////////////USERS//////////////////////
 
 /*app.get('/api/user', passport.authenticate('jwt', { session: false } ), (req,res) => {
-  winston.info('GET /api/user');
+  winston.debug(`${req.method} ${req.url} from ${req.headers['x-forwarded-for'] || req.connection.remoteAddress}`);
   try {
     User.find( (err, users) => {
       if (err) {
@@ -649,7 +649,7 @@ function emitUsers(sock) {
 app.get('/api/user/:uname', passport.authenticate('jwt', { session: false } ), (req,res) => {
   // get details of user uname
   let uname = req.params.uname;
-  winston.debug(`GET /api/user/${uname} from ${req.headers['x-forwarded-for'] || req.connection.remoteAddress}`);
+  winston.debug(`${req.method} ${req.url} from ${req.headers['x-forwarded-for'] || req.connection.remoteAddress}`);
   winston.info(`User '${req.user.username}' has requested info for user ${uname}`);
   try {
     User.findOne( {'username' : uname },(err, user) => {
@@ -672,7 +672,7 @@ app.get('/api/user/:uname', passport.authenticate('jwt', { session: false } ), (
 
 app.post('/api/user', passport.authenticate('jwt', { session: false } ), (req, res) => {
   // add a new user
-  winston.debug(`POST /api/user from ${req.headers['x-forwarded-for'] || req.connection.remoteAddress}`);
+  winston.debug(`${req.method} ${req.url} from ${req.headers['x-forwarded-for'] || req.connection.remoteAddress}`);
   
   let u = req.body;
   let uPassword = decryptor.decrypt(u.password, 'utf8');
@@ -718,7 +718,7 @@ function updateUser(req, res, passChange = false) {
 
 app.post('/api/user/edit', passport.authenticate('jwt', { session: false } ), (req, res) => {
   // edit an existing user
-  winston.debug(`POST /api/user/edit from ${req.headers['x-forwarded-for'] || req.connection.remoteAddress}`);
+  winston.debug(`${req.method} ${req.url} from ${req.headers['x-forwarded-for'] || req.connection.remoteAddress}`);
 
   let u = req.body;
   //winston.debug('user:', u);
@@ -765,7 +765,7 @@ app.post('/api/user/edit', passport.authenticate('jwt', { session: false } ), (r
 
 app.delete('/api/user/:id', passport.authenticate('jwt', { session: false } ), (req, res) => {
   let id = req.params.id;
-  winston.debug(`DELETE /api/user/${id} from ${req.headers['x-forwarded-for'] || req.connection.remoteAddress}`);
+  winston.debug(`${req.method} ${req.url} from ${req.headers['x-forwarded-for'] || req.connection.remoteAddress}`);
   try {
     User.findOne( {id: id}, (err, doc) => {
       if (err) {
@@ -801,7 +801,7 @@ app.delete('/api/user/:id', passport.authenticate('jwt', { session: false } ), (
 
 /*app.get('/api/version', passport.authenticate('jwt', { session: false } ), (req,res) => {
   // Gets the server version
-  winston.info('GET /api/version');
+  winston.debug(`${req.method} ${req.url} from ${req.headers['x-forwarded-for'] || req.connection.remoteAddress}`);
   try {
     res.json({version: version});
   }
@@ -821,7 +821,7 @@ app.delete('/api/user/:id', passport.authenticate('jwt', { session: false } ), (
 
 app.get('/api/collection', passport.authenticate('jwt', { session: false } ), (req,res) => {
   // Gets the configuration of all collections
-  winston.debug(`GET /api/collections from ${req.headers['x-forwarded-for'] || req.connection.remoteAddress}`);
+  winston.debug(`${req.method} ${req.url} from ${req.headers['x-forwarded-for'] || req.connection.remoteAddress}`);
   winston.info(`User '${req.user.username}' has requested the collections list`);
   try {
     res.json(collections);
@@ -848,7 +848,7 @@ function getCollectionPosition(id) {
 app.delete('/api/collection/:id', passport.authenticate('jwt', { session: false } ), (req, res) => {
   // Deletes a collection
   let id = req.params.id;
-  winston.debug(`DELETE /api/collection/${id} from ${req.headers['x-forwarded-for'] || req.connection.remoteAddress}`);
+  winston.debug(`${req.method} ${req.url} from ${req.headers['x-forwarded-for'] || req.connection.remoteAddress}`);
   let collection = null;
   try {
     collection = collections[id];
@@ -904,7 +904,7 @@ app.delete('/api/collection/:id', passport.authenticate('jwt', { session: false 
 app.get('/api/collection/data/:id', passport.authenticate('jwt', { session: false } ), (req, res) => {
   // Gets the collection data for a collection (content, sessions, and search)
   let id = req.params.id;
-  winston.debug(`GET /api/collection/data/${id} from ${req.headers['x-forwarded-for'] || req.connection.remoteAddress}`);
+  winston.debug(`${req.method} ${req.url} from ${req.headers['x-forwarded-for'] || req.connection.remoteAddress}`);
   try {
     res.json(collectionsData[id]);
     winston.info(`User '${req.user.username}' has requested the defintion of collection '${collections[id].name}'`);
@@ -921,7 +921,7 @@ app.post('/api/collection', passport.authenticate('jwt', { session: false } ), (
   // Adds a new collection
   // 'state' should always be at initial
 
-  winston.debug(`POST /api/collection from ${req.headers['x-forwarded-for'] || req.connection.remoteAddress}`);
+  winston.debug(`${req.method} ${req.url} from ${req.headers['x-forwarded-for'] || req.connection.remoteAddress}`);
   // winston.debug(req);
   try {
     let timestamp = new Date().getTime();
@@ -1011,7 +1011,7 @@ app.post('/api/collection', passport.authenticate('jwt', { session: false } ), (
 
 app.post('/api/collection/edit', passport.authenticate('jwt', { session: false } ), (req, res) => {
   // Edits an existing collection
-  winston.debug(`POST /api/collection/edit from ${req.headers['x-forwarded-for'] || req.connection.remoteAddress}`);
+  winston.debug(`${req.method} ${req.url} from ${req.headers['x-forwarded-for'] || req.connection.remoteAddress}`);
   try {
     let timestamp = new Date().getTime();
     let collection = req.body;
@@ -1079,7 +1079,7 @@ app.post('/api/collection/edit', passport.authenticate('jwt', { session: false }
 //////////////////////FEEDS//////////////////////
 
 /*app.get('/api/feed', passport.authenticate('jwt', { session: false } ), (req,res) => {
-  winston.info('GET /api/feeds');
+  winston.debug(`${req.method} ${req.url} from ${req.headers['x-forwarded-for'] || req.connection.remoteAddress}`);
   try {
     res.json(feeds);
   }
@@ -1093,7 +1093,7 @@ app.post('/api/collection/edit', passport.authenticate('jwt', { session: false }
 
 app.post('/api/feed/manual', passport.authenticate('jwt', { session: false } ), upload.single('file'), (req, res) => {
   // Add a manual feed
-  winston.debug(`POST /api/feed/manual from ${req.headers['x-forwarded-for'] || req.connection.remoteAddress}`);
+  winston.debug(`${req.method} ${req.url} from ${req.headers['x-forwarded-for'] || req.connection.remoteAddress}`);
   // winston.debug('req:', req);
   let timestamp = new Date().getTime();
   try {
@@ -1192,7 +1192,7 @@ app.post('/api/feed/manual', passport.authenticate('jwt', { session: false } ), 
 
 app.post('/api/feed/scheduled', passport.authenticate('jwt', { session: false } ), (req, res) => {
   // Add a scheduled feed
-  winston.debug(`POST /api/feed/scheduled from ${req.headers['x-forwarded-for'] || req.connection.remoteAddress}`);
+  winston.debug(`${req.method} ${req.url} from ${req.headers['x-forwarded-for'] || req.connection.remoteAddress}`);
   // winston.debug('req:', req);
   let timestamp = new Date().getTime();
   try {
@@ -1311,7 +1311,7 @@ app.post('/api/feed/scheduled', passport.authenticate('jwt', { session: false } 
 
 app.post('/api/feed/edit/withfile', passport.authenticate('jwt', { session: false } ), upload.single('file'), (req, res) => {
   // this is for editing of manual feeds which contain a new file
-  winston.debug(`POST /api/feed/edit/withfile from ${req.headers['x-forwarded-for'] || req.connection.remoteAddress}`);
+  winston.debug(`${req.method} ${req.url} from ${req.headers['x-forwarded-for'] || req.connection.remoteAddress}`);
   // winston.debug('req:', req);
   
   try {
@@ -1381,7 +1381,7 @@ app.post('/api/feed/edit/withfile', passport.authenticate('jwt', { session: fals
 
 app.post('/api/feed/edit/withoutfile', passport.authenticate('jwt', { session: false } ), (req, res) => {
   // this is for editing of any feed which does not include a new file, both manual or scheduled
-  winston.debug(`POST /api/feed/edit/withoutfile from ${req.headers['x-forwarded-for'] || req.connection.remoteAddress}`);
+  winston.debug(`${req.method} ${req.url} from ${req.headers['x-forwarded-for'] || req.connection.remoteAddress}`);
   // winston.debug('req:', req);
   
   try {
@@ -1490,7 +1490,7 @@ app.post('/api/feed/edit/withoutfile', passport.authenticate('jwt', { session: f
 
 
 app.post('/api/feed/testurl', passport.authenticate('jwt', { session: false } ), (req, res) => {
-  winston.debug(`POST /api/feed/testurl from ${req.headers['x-forwarded-for'] || req.connection.remoteAddress}`);
+  winston.debug(`${req.method} ${req.url} from ${req.headers['x-forwarded-for'] || req.connection.remoteAddress}`);
 
   let url = '';
   let options = { method: 'GET', gzip: true };
@@ -1600,7 +1600,7 @@ app.post('/api/feed/testurl', passport.authenticate('jwt', { session: false } ),
 app.get('/api/feed/filehead/:id', passport.authenticate('jwt', { session: false } ), (req, res) => {
   try {
     let id = req.params.id;
-    winston.debug(`GET /api/feed/filehead/${id} from ${req.headers['x-forwarded-for'] || req.connection.remoteAddress}`);
+    winston.debug(`${req.method} ${req.url} from ${req.headers['x-forwarded-for'] || req.connection.remoteAddress}`);
     
     if ( !(id in feeds) ) {
       throw('Feed not found');
@@ -1687,7 +1687,7 @@ app.get('/api/feed/filehead/:id', passport.authenticate('jwt', { session: false 
 app.delete('/api/feed/:id', passport.authenticate('jwt', { session: false } ), (req, res) => {
   // delete a feed
   let id = req.params.id;
-  winston.debug(`DELETE /api/feed/${id} from ${req.headers['x-forwarded-for'] || req.connection.remoteAddress}`);
+  winston.debug(`${req.method} ${req.url} from ${req.headers['x-forwarded-for'] || req.connection.remoteAddress}`);
   try {
     if (id in feeds) {
       let oldFeedName = feeds[id].name;
@@ -1728,6 +1728,7 @@ app.delete('/api/feed/:id', passport.authenticate('jwt', { session: false } ), (
 
 
 /*app.get('/api/feed/status', passport.authenticate('jwt', { session: false } ), (req, res) => {
+  winston.debug(`${req.method} ${req.url} from ${req.headers['x-forwarded-for'] || req.connection.remoteAddress}`);
   try {
     res.status(200).send( JSON.stringify( scheduler.status() ) );
   }
@@ -1747,7 +1748,7 @@ app.delete('/api/feed/:id', passport.authenticate('jwt', { session: false } ), (
 //////////////////////NWSERVERS//////////////////////
 
 /*app.get('/api/nwserver', passport.authenticate('jwt', { session: false } ), (req, res) => {
-  winston.info('GET /api/nwserver');
+  winston.debug(`${req.method} ${req.url} from ${req.headers['x-forwarded-for'] || req.connection.remoteAddress}`);
   try {
     let servers = JSON.parse(JSON.stringify(nwservers));  // make deep copy of nwservers
     for (let server in servers) {
@@ -1769,7 +1770,7 @@ app.delete('/api/feed/:id', passport.authenticate('jwt', { session: false } ), (
 
 app.delete('/api/nwserver/:id', passport.authenticate('jwt', { session: false } ), (req, res) => {
   let id = req.params.id;
-  winston.debug(`DELETE /api/nwserver/${id} from ${req.headers['x-forwarded-for'] || req.connection.remoteAddress}`);
+  winston.debug(`${req.method} ${req.url} from ${req.headers['x-forwarded-for'] || req.connection.remoteAddress}`);
   try {
     let oldNwserver = nwservers[id];
     db.collection('nwservers').remove( { 'id': id }, (err, result) => {
@@ -1790,7 +1791,7 @@ app.delete('/api/nwserver/:id', passport.authenticate('jwt', { session: false } 
 
 app.post('/api/nwserver', passport.authenticate('jwt', { session: false } ), (req, res) => {
   // for adding a netwitness server
-  winston.debug(`POST /api/nwserver from ${req.headers['x-forwarded-for'] || req.connection.remoteAddress}`);
+  winston.debug(`${req.method} ${req.url} from ${req.headers['x-forwarded-for'] || req.connection.remoteAddress}`);
   try {
     //winston.debug(req.body);
     let nwserver = req.body;
@@ -1834,7 +1835,7 @@ app.post('/api/nwserver', passport.authenticate('jwt', { session: false } ), (re
 
 
 app.post('/api/nwserver/edit', passport.authenticate('jwt', { session: false } ), (req, res) => {
-  winston.debug(`POST /api/nwserver/edit from ${req.headers['x-forwarded-for'] || req.connection.remoteAddress}`);
+  winston.debug(`${req.method} ${req.url} from ${req.headers['x-forwarded-for'] || req.connection.remoteAddress}`);
   try {
     //winston.debug(req.body);
     let nwserver = req.body;
@@ -1880,7 +1881,7 @@ app.post('/api/nwserver/edit', passport.authenticate('jwt', { session: false } )
 
 
 app.post('/api/nwserver/test', passport.authenticate('jwt', { session: false } ), (req, res) => {
-  winston.debug(`POST /api/nwserver/test from ${req.headers['x-forwarded-for'] || req.connection.remoteAddress}`);
+  winston.debug(`${req.method} ${req.url} from ${req.headers['x-forwarded-for'] || req.connection.remoteAddress}`);
   let nwserver;
   try {
     nwserver = req.body;
@@ -1952,7 +1953,7 @@ app.post('/api/nwserver/test', passport.authenticate('jwt', { session: false } )
 //////////////////////SASERVERS//////////////////////
 
 /*app.get('/api/saserver', passport.authenticate('jwt', { session: false } ), (req, res) => {
-  winston.info('GET /api/saserver');
+  winston.debug(`${req.method} ${req.url} from ${req.headers['x-forwarded-for'] || req.connection.remoteAddress}`);
   try {
     let servers = JSON.parse(JSON.stringify(saservers));  // make deep copy of saservers
     for (let server in servers) {
@@ -1974,7 +1975,7 @@ app.post('/api/nwserver/test', passport.authenticate('jwt', { session: false } )
 
 app.delete('/api/saserver/:id', passport.authenticate('jwt', { session: false } ), (req, res) => {
   let id = req.params.id;
-  winston.debug(`DELETE /api/saserver/${id} from ${req.headers['x-forwarded-for'] || req.connection.remoteAddress}`);
+  winston.debug(`${req.method} ${req.url} from ${req.headers['x-forwarded-for'] || req.connection.remoteAddress}`);
   try {
     let oldSaserver = saservers[id];
     db.collection('saservers').remove( { 'id': id }, (err, result) => {
@@ -1995,7 +1996,7 @@ app.delete('/api/saserver/:id', passport.authenticate('jwt', { session: false } 
 
 app.post('/api/saserver', passport.authenticate('jwt', { session: false } ), (req, res) => {
   // for adding a netwitness server
-  winston.debug(`POST /api/saserver from ${req.headers['x-forwarded-for'] || req.connection.remoteAddress}`);
+  winston.debug(`${req.method} ${req.url} from ${req.headers['x-forwarded-for'] || req.connection.remoteAddress}`);
   try {
     //winston.debug(req.body);
     let saserver = req.body;
@@ -2039,7 +2040,7 @@ app.post('/api/saserver', passport.authenticate('jwt', { session: false } ), (re
 
 
 app.post('/api/saserver/edit', passport.authenticate('jwt', { session: false } ), (req, res) => {
-  winston.debug(`POST /api/saserver/edit from ${req.headers['x-forwarded-for'] || req.connection.remoteAddress}`);
+  winston.debug(`${req.method} ${req.url} from ${req.headers['x-forwarded-for'] || req.connection.remoteAddress}`);
   try {
     //winston.debug(req.body);
     let saserver = req.body;
@@ -2085,7 +2086,7 @@ app.post('/api/saserver/edit', passport.authenticate('jwt', { session: false } )
 
 
 app.post('/api/saserver/test', passport.authenticate('jwt', { session: false } ), (req, res) => {
-  winston.debug(`POST /api/saserver/test from ${req.headers['x-forwarded-for'] || req.connection.remoteAddress}`);
+  winston.debug(`${req.method} ${req.url} from ${req.headers['x-forwarded-for'] || req.connection.remoteAddress}`);
   let saserver;
   try {
     saserver = req.body;
@@ -2176,7 +2177,7 @@ app.post('/api/saserver/test', passport.authenticate('jwt', { session: false } )
 //////////////////////PING//////////////////////
 
 app.get('/api/ping', (req, res) => {
-  //winston.debug("GET /api/ping");
+  // winston.debug(`${req.method} ${req.url} from ${req.headers['x-forwarded-for'] || req.connection.remoteAddress}`);
   res.status(200).send( JSON.stringify( { success: true } ) );
 });
 
@@ -2189,7 +2190,7 @@ app.get('/api/ping', (req, res) => {
 
 /*
 app.get('/api/preferences', passport.authenticate('jwt', { session: false } ), (req, res) => {
-  winston.info("GET /api/preferences");
+  winston.debug(`${req.method} ${req.url} from ${req.headers['x-forwarded-for'] || req.connection.remoteAddress}`);
   try {
     res.json(preferences);
   }
@@ -2204,7 +2205,7 @@ app.get('/api/preferences', passport.authenticate('jwt', { session: false } ), (
 
 app.post('/api/preferences', passport.authenticate('jwt', { session: false } ), (req, res) => {
   // Set global preferences
-  winston.debug(`POST /api/preferences from ${req.headers['x-forwarded-for'] || req.connection.remoteAddress}`);
+  winston.debug(`${req.method} ${req.url} from ${req.headers['x-forwarded-for'] || req.connection.remoteAddress}`);
   try {
     let prefs = req.body;
     // winston.debug(prefs);

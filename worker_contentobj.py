@@ -15,7 +15,7 @@ class ContentObj:
         self.contentFile = contentFile           # the image or office or pdf or exe filename
         self.proxyContentFile = proxyContentFile # optional, this is a pdf document which we may substitute for a converted original office doc.  This will be rendered by the client instead
         self.pdfImage = image                    # the PDF gs-generated image filename
-        self.thumbnail = thumbnail               # thumbnail image file
+        self.thumbnail = thumbnail               # thumbnail image file - only used for images, not pdf's or office
         self.archiveFilename = archiveFilename   # the name of the zip or rar archive
 
         # Hash
