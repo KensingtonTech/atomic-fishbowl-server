@@ -113,7 +113,7 @@ class ContentProcessor:
     #check file for dimensions and only write if minimum
     if x >= int(self.cfg['minX']) and y >= int(self.cfg['minY']):
       log.debug("ContentProcessor: processImage(): Keeping image " + contentObj.contentFile + " of resolution " + str(x) + ' x ' + str(y) )
-      fp = open(os.path.join(self.cfg['outputDir'], contentObj.contentFile), 'wb')
+      fp = open( bytes(os.path.join(self.cfg['outputDir'], contentObj.contentFile), 'utf-8'), 'wb')
       fp.write(output.getvalue())
       fp.close()
 
@@ -161,7 +161,7 @@ class ContentProcessor:
     
     #write document to disk
     log.debug("ContentProcessor: processOfficeDoc(): Session " + str(contentObj.session) + ". Writing document to " + os.path.join(self.cfg['outputDir'], contentObj.contentFile) )
-    fp = open(os.path.join(self.cfg['outputDir'], contentObj.contentFile), 'wb')
+    fp = open( bytes(os.path.join(self.cfg['outputDir'], contentObj.contentFile), 'utf-8'), 'wb')
     shutil.copyfileobj(contentObj.getFileContent(), fp)
     fp.close()
     
@@ -279,7 +279,7 @@ class ContentProcessor:
 
     # write pdf to disk
     log.debug("ContentProcessor: processPdf(): Session " + str(contentObj.session) + ". Writing pdf to " + os.path.join(self.cfg['outputDir'], contentObj.contentFile) )
-    fp = open(os.path.join(self.cfg['outputDir'], contentObj.contentFile), 'wb')
+    fp = open( bytes(os.path.join(self.cfg['outputDir'], contentObj.contentFile), 'utf-8'), 'wb')
     shutil.copyfileobj(contentObj.getFileContent(), fp)
     fp.close()
     
@@ -464,7 +464,7 @@ class ContentProcessor:
   def onFeederResponse(self, res, contentObj):
     #log.debug('ContentProcessor: feederResponse():\n' + pformat(res))
     log.debug("ContentProcessor: onFeederResponse(): Session " + str(contentObj.session) + ". Matched " + res['type'] + " hash " + res['hash'])
-    fp = open(os.path.join(self.cfg['outputDir'], contentObj.contentFile), 'wb')
+    fp = open( bytes(os.path.join(self.cfg['outputDir'], contentObj.contentFile), 'utf-8'), 'wb')
     contentFileObj = contentObj.getFileContent()
     fp.write(contentFileObj.getvalue())
     fp.close()
@@ -521,7 +521,7 @@ class ContentProcessor:
           if hash == h['hash'].lower():
             contentObj = contentObj.getCopy()
             log.debug("ContentProcessor: genHash(): Session " + str(contentObj.session) + ". Matched " + contentObj.hashType + " hash " + h['hash'])
-            fp = open(os.path.join(self.cfg['outputDir'], contentObj.contentFile), 'wb')
+            fp = open( bytes(os.path.join(self.cfg['outputDir'], contentObj.contentFile), 'utf-8'), 'wb')
             fp.write(contentFileObj.getvalue())
             fp.close()
             ###imgObj = { 'session': sessionId, 'contentType': 'md5Matched', 'contentFile': filename, 'image': filename, 'md5Hash': hash_md5.hexdigest() }
@@ -872,7 +872,7 @@ class ContentProcessor:
         log.exception("ContentProcessor: processInboundFile(): Unhandled exception during zip file extraction")
 
       if saveZipFile:
-        fp = open(os.path.join(self.cfg['outputDir'], filename), 'wb')
+        fp = open( bytes(os.path.join(self.cfg['outputDir'], filename), 'utf-8'), 'wb')
         fp.write(payload.getvalue())
         fp.close()
       return self.thisSession
@@ -1006,7 +1006,7 @@ class ContentProcessor:
           self.processExtractedFile(contentObj) #now let's process the extracted file
 
       if saveRarFile:
-        fp = open(os.path.join(self.cfg['outputDir'], filename), 'wb')
+        fp = open( bytes(os.path.join(self.cfg['outputDir'], filename), 'utf-8'), 'wb')
         fp.write(payload.getvalue())
         fp.close()
       return self.thisSession
