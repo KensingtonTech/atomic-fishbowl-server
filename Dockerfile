@@ -33,9 +33,9 @@ echo 172.16.0.57 kentechrepo >> /etc/hosts \
 && rpm --import http://kentechrepo/yumrepo/afb_1.0.0_signed/afb-1.x.key \
 && rpm --import http://kentechrepo/yumrepo/afb_1.0.0_signed/NODESOURCE-GPG-SIGNING-KEY-EL \
 && curl http://kentechrepo/yumrepo/afb_1.0.0_signed/afb-1.0.0-signed.repo > /etc/yum.repos.d/afb-1.0.0-signed.repo \
-&& yum install -y --disableplugin=fastestmirror nodejs ghostscript poppler-utils libjpeg-turbo openjpeg unzip unrar libreoffice python34 python34-requests python34-crypto python34-setuptools \
+&& yum install -y --disableplugin=fastestmirror nodejs ghostscript poppler-utils libjpeg-turbo openjpeg unzip unrar libreoffice \
 && yum install -y https://dl.fedoraproject.org/pub/epel/epel-release-latest-7.noarch.rpm \
-&& yum install -y --disableplugin=fastestmirror python34-pip \
+&& yum install -y --disableplugin=fastestmirror python34 python34-pip python34-requests python34-crypto python34-setuptools \
 && pip3.4 install --upgrade pip \
 #&& pip3.4 install requests \
 && pip3.4 install requests-futures \
