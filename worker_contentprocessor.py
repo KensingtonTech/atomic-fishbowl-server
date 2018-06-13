@@ -130,7 +130,7 @@ class ContentProcessor:
         return False
       
       try:
-        im.save(os.path.join(self.cfg['outputDir'], thumbnailName), im.format)
+        im.save( bytes(os.path.join(self.cfg['outputDir'], thumbnailName), 'utf-8'), im.format)
       except IOError as e:
         log.warning('ContentProcessor: processImage(): File ' +  + ' was truncated.  Discarding file.')
       contentObj.thumbnail = thumbnailName
