@@ -32,7 +32,7 @@ class Communicator(asynchat.async_chat):
     msg = b''.join(self.in_buffer)
     self.in_buffer = []
     try:
-      obj = json.loads(msg)
+      obj = json.loads(msg.decode('utf-8'))
     except Exception as e:
       log.exception("Exception in found_terminator().  Exiting with code 1")
       sys.exit(1)
@@ -129,7 +129,7 @@ class FeederCommunicator(asynchat.async_chat):
     msg = b''.join(self.in_buffer)
     self.in_buffer = []
     try:
-      obj = json.loads(msg)
+      obj = json.loads(msg.decode('utf-8'))
     except Exception as e:
       log.exception("Exception parsing JSON in found_terminator().  Exiting with code 1")
       sys.exit(1)

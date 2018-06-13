@@ -31,7 +31,7 @@ class Communicator(asynchat.async_chat):
     msg = b''.join(self.in_buffer)
     self.in_buffer = []
     try:
-      obj = json.loads(msg)
+      obj = json.loads(msg.decode('utf-8'))
       self.callback(obj)
     except Exception as e:
       log.exception("Exception in found_terminator().  Exiting with code 1")
@@ -160,7 +160,7 @@ class HashClientConnectionHandler(asynchat.async_chat):
     self.in_buffer = []
     req = None
     try:
-      req = json.loads(msg)
+      req = json.loads(msg.decode('utf-8'))
       #print(pformat(req))
     except Exception as e:
       log.exception("HashClientConnectionHandler: found_terminator(): Exception parsing JSON in found_terminator()")
