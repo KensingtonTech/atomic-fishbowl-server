@@ -1,16 +1,14 @@
-#!/usr/bin/env python
-
 import os
 import sys
 import socket
 import json
 import asyncore
-from feeder_communicator import Communicator, HashServer
-from feeder_hasher import Hasher
 from pprint import pprint, pformat
 import logging
 import signal
 import tempfile
+from feeder_communicator import Communicator, HashServer
+from feeder_hasher import Hasher
 
 config = {}
 feeds = {}
@@ -150,9 +148,9 @@ def configReceived(cfg):
     global initialized
     if not initialized and hasher.isInitialized():
       initialized = True
-      configCommunicator.send( json.dumps( { 'initialized': True, 'feederSocket': listenerSocketFile } ) + '\n' )
+      configCommunicator.write_data( json.dumps( { 'initialized': True, 'feederSocket': listenerSocketFile } ) + '\n' )
     else:
-      configCommunicator.send( json.dumps( { 'initialized': False } ) + '\n' )
+      configCommunicator.write_data( json.dumps( { 'initialized': False } ) + '\n' )
 
   except KeyError as e:
     raise
@@ -163,7 +161,7 @@ def configReceived(cfg):
 
 def main():
   if len(sys.argv) == 1:
-    print "Argument must be a path to a UNIX socket"
+    print("Argument must be a path to a UNIX socket")
     sys.exit(1)
   try:
     #Set up logging

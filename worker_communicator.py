@@ -16,9 +16,9 @@ class Communicator(asynchat.async_chat):
     self.create_socket(socket.AF_UNIX, socket.SOCK_STREAM)
     #self.socket.settimeout(None)
     self.connect( file )
-    self.set_terminator('\n')
+    self.set_terminator(b'\n')
     self.in_buffer = []
-    self.out_buffer = ''
+    self.out_buffer = b''
     self.callback = callback
 
   
@@ -29,7 +29,7 @@ class Communicator(asynchat.async_chat):
 
 
   def found_terminator(self):
-    msg = ''.join(self.in_buffer)
+    msg = b''.join(self.in_buffer)
     self.in_buffer = []
     try:
       obj = json.loads(msg)
@@ -56,7 +56,7 @@ class Communicator(asynchat.async_chat):
     Public facing interface method.  This is the function
     external code will use to send data to this dispatcher.
     '''
-    self.out_buffer += data
+    self.out_buffer += data.encode('utf-8')
     self.handle_write()
      
 
@@ -113,9 +113,9 @@ class FeederCommunicator(asynchat.async_chat):
     self.create_socket(socket.AF_UNIX, socket.SOCK_STREAM)
     self.socket.settimeout(None)
     self.connect( file )
-    self.set_terminator('\n')
+    self.set_terminator(b'\n')
     self.in_buffer = []
-    self.out_buffer = ''
+    self.out_buffer = b''
     self.callback = callback
 
 
@@ -126,7 +126,7 @@ class FeederCommunicator(asynchat.async_chat):
 
 
   def found_terminator(self):
-    msg = ''.join(self.in_buffer)
+    msg = b''.join(self.in_buffer)
     self.in_buffer = []
     try:
       obj = json.loads(msg)
@@ -144,7 +144,7 @@ class FeederCommunicator(asynchat.async_chat):
     Public facing interface method.  This is the function
     external code will use to send data to this dispatcher.
     '''
-    self.out_buffer += data
+    self.out_buffer += data.encode('utf-8')
     self.handle_write()
 
 

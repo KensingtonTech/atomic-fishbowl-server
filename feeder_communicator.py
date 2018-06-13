@@ -15,16 +15,20 @@ class Communicator(asynchat.async_chat):
     asynchat.async_chat.__init__(self)
     self.create_socket(socket.AF_UNIX, socket.SOCK_STREAM)
     self.connect( file )
-    self.set_terminator('\n')
+    self.set_terminator(b'\n')
     self.in_buffer = []
-    self.out_buffer = ''
+    self.out_buffer = b''
     self.callback = callback
-    
+
+
+
   def collect_incoming_data(self, data):
     self.in_buffer.append(data)
-    
+
+
+
   def found_terminator(self):
-    msg = ''.join(self.in_buffer)
+    msg = b''.join(self.in_buffer)
     self.in_buffer = []
     try:
       obj = json.loads(msg)
@@ -32,28 +36,37 @@ class Communicator(asynchat.async_chat):
     except Exception as e:
       log.exception("Exception in found_terminator().  Exiting with code 1")
       sys.exit(1)
-  
+
+
+
   def write_data(self, data):
     #print "communicator: write_data():", data
     '''
     Public facing interface method.  This is the function
     external code will use to send data to this dispatcher.
     '''
-    self.out_buffer += data
+    #self.out_buffer += data
+    self.out_buffer += data.encode('utf-8')
     self.handle_write()
-     
+
+
+
   def handle_write(self):
     #print "communicator: handle_write()"
     #Data must be placed in a buffer somewhere.
     #(In this case out_buffer)
     sent = self.send(self.out_buffer)
     self.out_buffer = self.out_buffer[sent:]
-  
+
+
+
   """
   def readable(self):
     #Test for select() and friends
     return True
   """
+
+
 
   #There is no 'e' in 'writeable' here.
   def writable(self):
@@ -62,6 +75,8 @@ class Communicator(asynchat.async_chat):
     if self.connected and len(self.out_buffer) > 0:
         return True
     return False
+
+
 
   def handle_close(self):
     #Flush the buffer
@@ -78,6 +93,9 @@ class Communicator(asynchat.async_chat):
     self.close()
 
 
+
+
+
   
 class HashServer(asyncore.dispatcher):
 
@@ -89,6 +107,8 @@ class HashServer(asyncore.dispatcher):
     self.set_reuse_addr()
     self.bind( file )
     self.listen(5)
+
+
 
   def handle_accept(self):
     # Called when a client connects to our socket
@@ -104,11 +124,16 @@ class HashServer(asyncore.dispatcher):
     # to stop.
     #self.handle_close()
     return
-  
+
+
+
   def handle_close(self):
     log.debug('handle_close()')
     self.close()
     return
+
+
+
 
 
 
@@ -118,16 +143,20 @@ class HashClientConnectionHandler(asynchat.async_chat):
     #log.debug("HashClientConnectionHandler: __init__()")
     asynchat.async_chat.__init__(self, sock=sock)
     self.hasher = hasher
-    self.set_terminator('\n')
+    self.set_terminator(b'\n')
     self.in_buffer = []
+
+
 
   def collect_incoming_data(self, data):
     #log.debug("HashClientConnectionHandler: collect_incoming_data()")
     self.in_buffer.append(data)
-    
+
+
+
   def found_terminator(self):
-    msg = ''.join(self.in_buffer)
-    #log.debug('HashClientConnectionHandler: found_terminator(): msg:' + msg)
+    msg = b''.join(self.in_buffer)
+    #log.debug('HashClientConnectionHandler: found_terminator(): msg:' + msg.decode('utf-8'))
     self.in_buffer = []
     req = None
     try:
@@ -145,4 +174,4 @@ class HashClientConnectionHandler(asynchat.async_chat):
       return
 
     #log.debug('HashClientConnectionHandler: found_terminator(): res:\n' + pformat(res))
-    self.send(json.dumps(res) + '\n')
+    self.send( bytes(json.dumps(res) + '\n', 'utf-8'))

@@ -1,13 +1,13 @@
 import logging
 import os
 import sys
-import urllib2
+import urllib.request, urllib.error, urllib.parse
 import ssl
 import base64
 import email
 import mimetypes
 from pprint import pprint, pformat
-import cStringIO
+from io import BytesIO
 from PIL import Image, ImageFile ##install
 ImageFile.LOAD_TRUNCATED_IMAGES = True
 from subprocess import Popen, PIPE
@@ -22,11 +22,11 @@ from copy import copy
 from multiprocessing import Pool, Manager, Value, current_process, cpu_count
 import shlex
 import socket
-from httplib import BadStatusLine
-from worker_feedmanager import FeedManager
+from http.client import BadStatusLine
 from threading import Thread
 import asyncore
 import traceback
+from worker_feedmanager import FeedManager
 
 log = logging.getLogger(__name__)
 logging.getLogger("PIL").setLevel(logging.WARNING)
@@ -54,7 +54,7 @@ class ContentProcessor:
     if 'officedocs' in self.cfg['contentTypes']:
       self.officeAllowed = True
     #log.debug('My Process Identifier: ' + str(self.processId))
-    #print current_process()
+    #print(current_process())
     
 
 
@@ -63,23 +63,23 @@ class ContentProcessor:
     ctx = ssl.create_default_context()
     ctx.check_hostname = False
     ctx.verify_mode = ssl.CERT_NONE
-    request = urllib2.Request(self.cfg['url'] + '/sdk/content?render=107&session=' + str(sessionId))
+    request = urllib.request.Request(self.cfg['url'] + '/sdk/content?render=107&session=' + str(sessionId))
     base64string = base64.b64encode('%s:%s' % (self.cfg['user'], self.cfg['dpassword']))
     request.add_header("Authorization", "Basic %s" % base64string)
     request.add_header('Content-type', 'application/json')
     request.add_header('Accept', 'application/json')
     while self.cfg['contentErrors'].value < self.cfg['maxContentErrors']:
       try:
-        res = urllib2.urlopen(request, context=ctx, timeout=self.cfg['contentTimeout'])
+        res = urllib.request.urlopen(request, context=ctx, timeout=self.cfg['contentTimeout'])
         break
-      except urllib2.HTTPError as e:
+      except urllib.error.HTTPError as e:
         if self.cfg['contentErrors'].value == self.cfg['maxContentErrors']:
           log.warning("ContentProcessor: pullFiles(): Maximum allowable errors reached whilst pulling content for session " + str(sessionId) + ".  Try either increasing the Query Delay setting or increasing the Max. Content Errors setting.  Exiting with code 1")
           sys.exit(1)
         self.cfg['contentErrors'].value += 1
         log.warning("ContentProcessor: pullFiles(): HTTP error pulling content for session " + str(sessionId) + ".  Retrying")
         continue
-      except urllib2.URLError as e:
+      except urllib.error.URLError as e:
         if self.cfg['contentErrors'].value == self.cfg['maxContentErrors']:
           log.warning("ContentProcessor: pullFiles(): Maximum retries reached whilst pulling content for session " + str(sessionId) + ".  Try either increasing the Query Delay setting or increasing the Max. Content Errors setting.  Exiting with code 1")
           sys.exit(1)
@@ -113,7 +113,7 @@ class ContentProcessor:
     #check file for dimensions and only write if minimum
     if x >= int(self.cfg['minX']) and y >= int(self.cfg['minY']):
       log.debug("ContentProcessor: processImage(): Keeping image " + contentObj.contentFile + " of resolution " + str(x) + ' x ' + str(y) )
-      fp = open(os.path.join(self.cfg['outputDir'], contentObj.contentFile.decode('utf8')), 'wb')
+      fp = open(os.path.join(self.cfg['outputDir'], contentObj.contentFile), 'wb')
       fp.write(output.getvalue())
       fp.close()
 
@@ -188,7 +188,7 @@ class ContentProcessor:
     if exit_code != 0:
       #soffice exited with a non-zero exit code, and thus was unsuccessful
       log.warning("ContentProcessor: processOfficeDoc(): Session " + str(contentObj.session) + ". soffice exited abnormally for file " + contentObj.contentFile + " with exit code " + str(exit_code) )
-      log.warning("ContentProcessor: processOfficeDoc(): Session " + str(contentObj.session) + ". The 'soffice' command output was: " + output)
+      log.warning("ContentProcessor: processOfficeDoc(): Session " + str(contentObj.session) + ". The 'soffice' command output was: " + output.decode('utf-8'))
       return False
     log.debug('ContentProcessor: processOfficeDoc(): returned from soffice')
     contentObj.proxyContentFile = pdfOutName
@@ -407,22 +407,22 @@ class ContentProcessor:
 
       if exit_code == 0:
         #extracted successfully, get output
-        joinedText = output.replace('\n', ' ').replace('\r', '')
+        joinedText = output.decode('utf-8').replace('\n', ' ').replace('\r', '')
 
         if contentObj.distillationEnabled:
           for term in self.cfg['distillationTerms']:
             #log.debug( "ContentProcessor: getPdfText(): Text search term: " + term)
-            if term.decode('utf-8').lower() in joinedText.decode('utf-8').lower():
+            if term.lower() in joinedText.lower():
               textTermsMatched.append(term)
               log.debug("ContentProcessor: getPdfText(): Session " + str(contentObj.session) + ". Matched text search term " + term)
         
         if contentObj.regexDistillationEnabled:
           for t in self.cfg['regexDistillationTerms']:
-            origTerm =  t.decode('utf-8')
-            term = '(' + t.decode('utf-8') + ')'
+            origTerm =  t
+            term = '(' + t + ')'
             #log.debug( "ContentProcessor: getPdfText(): Regex search term: " + term)
             compiledTerm = re.compile(term)
-            res = compiledTerm.search(joinedText.decode('utf-8')) #MatchObject
+            res = compiledTerm.search(joinedText) #MatchObject
             if res != None:
               regexTermsMatched.append(origTerm)
               log.debug("ContentProcessor: getPdfText(): Session " + str(contentObj.session) + ". Matched regex search term " + term)
@@ -452,7 +452,7 @@ class ContentProcessor:
         
     except Exception as e:
       log.exception("ContentProcessor: getPdfText(): Session " + str(contentObj.session) + ". Unhandled exception in getPdfText()")
-      #print "Error Message:", str(e)
+      #print("Error Message:", str(e))
       #continue
       #if searchForText:
       #if len(searchForText) != 0:
@@ -476,7 +476,7 @@ class ContentProcessor:
 
 
   def genHash(self, contentObj): #must specify either part or stringFile
-    #print "genHash()"
+    #print("genHash()")
     contentObj.contentType = 'hash'
     log.debug("ContentProcessor: genHash(): Session " + str(contentObj.session) + ". Generating " + contentObj.hashType + " hash for " + contentObj.contentFile)
 
@@ -488,26 +488,26 @@ class ContentProcessor:
       hashTypes = self.feedManager.getTypes()
       log.debug('ContentProcessor: genHash(): types: ' + pformat(hashTypes))
       
-      if hashTypes['md5']:
+      if 'md5' in hashTypes:
         hasher = hashlib.md5()
         hashRes = hasher.update(fileContent)
-        calcHash = hasher.hexdigest().decode('utf-8').lower()
+        calcHash = hasher.hexdigest().lower()
         contentObj.hashType = 'md5'
         self.feedManager.submit(calcHash, 'md5', contentObj.getCopy() )
         log.debug("ContentProcessor: genHash(): Session " + str(contentObj.session) + ". MD5 hash for " + contentObj.contentFile + " is " + calcHash)
       
-      if hashTypes['sha1']:
+      if 'sha1' in hashTypes:
         hasher = hashlib.sha1()
         hashRes = hasher.update(fileContent)
-        calcHash = hasher.hexdigest().decode('utf-8').lower()
+        calcHash = hasher.hexdigest().lower()
         contentObj.hashType = 'sha1'
         log.debug("ContentProcessor: genHash(): Session " + str(contentObj.session) + ". SHA1 hash for " + contentObj.contentFile + " is " + calcHash)
         self.feedManager.submit(calcHash, 'sha1', contentObj.getCopy())
       
-      if hashTypes['sha256']:
+      if 'sha256' in hashTypes:
         hasher = hashlib.sha256()
         hashRes = hasher.update(fileContent)
-        calcHash = hasher.hexdigest().decode('utf-8').lower()
+        calcHash = hasher.hexdigest().lower()
         contentObj.hashType = 'sha256'
         log.debug("ContentProcessor: genHash(): Session " + str(contentObj.session) + ". SHA256 hash for " + contentObj.contentFile + " is " + calcHash)
         self.feedManager.submit(calcHash, 'sha256', contentObj.getCopy())
@@ -533,19 +533,19 @@ class ContentProcessor:
       if contentObj.hashType == 'md5':
         hasher = hashlib.md5()
         hashRes = hasher.update(contentFileObj.getvalue())
-        calcHash = hasher.hexdigest().decode('utf-8').lower()
+        calcHash = hasher.hexdigest().lower()
         log.debug("ContentProcessor: genHash(): Session " + str(contentObj.session) + ". " + contentObj.hashType + " hash for " + contentObj.contentFile + " is " + calcHash)
         hashFinder(calcHash, self.cfg['md5Hashes'], contentObj)
       if contentObj.hashType == 'sha1':
         hasher = hashlib.sha1()
         hashRes = hasher.update(contentFileObj.getvalue())
-        calcHash = hasher.hexdigest().decode('utf-8').lower()
+        calcHash = hasher.hexdigest().lower()
         log.debug("ContentProcessor: genHash(): Session " + str(contentObj.session) + ". " + contentObj.hashType + " hash for " + contentObj.contentFile + " is " + calcHash)
         hashFinder(calcHash, self.cfg['sha1Hashes'], contentObj)
       if contentObj.hashType == 'sha256':
         hasher = hashlib.sha256()
         hashRes = hasher.update(contentFileObj.getvalue())
-        calcHash = hasher.hexdigest().decode('utf-8').lower()
+        calcHash = hasher.hexdigest().lower()
         log.debug("ContentProcessor: genHash(): Session " + str(contentObj.session) + ". " + contentObj.hashType + " hash for " + contentObj.contentFile + " is " + calcHash)
         hashFinder(calcHash, self.cfg['sha256Hashes'], contentObj)
 
@@ -582,7 +582,7 @@ class ContentProcessor:
         if self.cfg['serviceType'] == 'nw':
           res = self.extractFilesFromMultipart(sessionId, payload)
         elif self.cfg['serviceType'] == 'sa':
-          cPayload = cStringIO.StringIO()
+          cPayload = BytesIO()
           cPayload.write(payload)
           cPayload.seek(0)
           res = self.processInboundFile(sessionId, filename, cPayload )
@@ -594,7 +594,7 @@ class ContentProcessor:
         if self.cfg['serviceType'] == 'nw':
           return self.extractFilesFromMultipart(sessionId, payload)
         elif self.cfg['serviceType'] == 'sa':
-          cPayload = cStringIO.StringIO()
+          cPayload = BytesIO()
           cPayload.write(payload)
           cPayload.seek(0)
           return self.processInboundFile(sessionId, filename, cPayload )
@@ -617,7 +617,7 @@ class ContentProcessor:
     #log.debug('ContentProcessor: extractFilesFromMultiPart(): My Process Identifier: ' + str(self.processId))
     #log.debug( 'ContentProcessor: extractFilesFromMultiPart(): ' + current_process().name )
     #print("extractFilesFromMultipart(): Extracting files of session ID " + str(sessionId) )
-    msg = email.message_from_string(payload)
+    msg = email.parser.BytesParser().parsebytes(payload)
     counter = 1
 
     for part in msg.walk():
@@ -631,11 +631,11 @@ class ContentProcessor:
       #log.debug("ContentProcessor: extractFilesFromMultiPart(): maintype: " + maintype)
       #log.debug("ContentProcessor: extractFilesFromMultiPart(): subtype: " + subtype)
 
-      payload = cStringIO.StringIO()
+      payload = BytesIO()
       payload.write(part.get_payload(decode=True))
       contentType = None
 
-      filename = part.get_filename().decode('utf-8')
+      filename = part.get_filename()
       (base, ext) = os.path.splitext(filename)
       filename = base
       
@@ -683,7 +683,7 @@ class ContentProcessor:
   
   def processInboundFile(self, sessionId, filename, payload, contentType=None):
     # this method processes a file once it's been extracted from whatever its source is, be it a NW multipart message or a solera zip
-    # payload is a cStringIO object
+    # payload is a BytesIO object
 
     self.poolId = current_process().name
 
@@ -815,7 +815,7 @@ class ContentProcessor:
           contentObj.contentFile = archivedFilename
           contentObj.archiveFilename = filename
           is_encrypted = zinfo.flag_bits & 0x1
-          #print "DEBUG: zip compression type is",str(zinfo.compress_type)
+          #print("DEBUG: zip compression type is",str(zinfo.compress_type))
           unsupported_compression = zinfo.compress_type == 99
 
           if not self.dodgyArchivesAllowed and (is_encrypted or unsupported_compression):
@@ -840,7 +840,7 @@ class ContentProcessor:
             break
           
           else: #identify archived file and save it permanently if a supported file type
-            extractedFileObj = cStringIO.StringIO() #we will write the extracted file to this buffer
+            extractedFileObj = BytesIO() #we will write the extracted file to this buffer
 
             #extract the file to buffer
             try:
@@ -947,10 +947,10 @@ class ContentProcessor:
           log.debug("ContentProcessor: processInboundFile(): processInboundFile(): Exiting with code 1") #we only exit if in dev mode, so we can deal with the problem afterwards
           sys.exit(1)
 
-      #print rarFileHandle.needs_password()
-      #print rarFileHandle.namelist()
+      #print(rarFileHandle.needs_password())
+      #print(rarFileHandle.namelist())
       #rarFileHandle.printdir()
-      #print rarFileHandle.testrar()
+      #print(rarFileHandle.testrar())
 
       #we need something here for if the entire rar file table is encrypted
       table_len = len(rarFileHandle.namelist())
@@ -995,7 +995,7 @@ class ContentProcessor:
           continue
 
         else: # file isn't encrypted.  identify archived file and process it if a supported file type
-          extractedFileObj = cStringIO.StringIO() #we will write the extracted file to this buffer
+          extractedFileObj = BytesIO() #we will write the extracted file to this buffer
 
           #extract the file to buffer
           compressedFileHandle = rarFileHandle.open(archivedFilename) #compressedFileHandle is a handle to the file while it's still in the rar file.  we will extract from this object
@@ -1083,6 +1083,6 @@ class ContentProcessor:
           self.genHash(contentObj)
 
   def convertPartToStringIO(self, part):
-    output = cStringIO.StringIO()
+    output = BytesIO()
     output.write(part.get_payload(decode=True))
     return output        

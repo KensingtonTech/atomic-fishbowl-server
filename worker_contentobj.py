@@ -1,6 +1,6 @@
 import logging
 import email
-import cStringIO
+from io import BytesIO
 from uuid import uuid4
 
 log = logging.getLogger(__name__)
@@ -82,10 +82,11 @@ class ContentObj:
         return o
 
     def setPartContent(self, content): # takes an email part object
-        self.fileContent = cStringIO.StringIO()
+        #self.fileContent = cStringIO.StringIO()
+        self.fileContent = BytesIO()
         self.fileContent.write(content.get_payload(decode=True))
 
-    def setStringIOContent(self, content): #takes a cStringIO object
+    def setStringIOContent(self, content): #takes a BytesIO object
         self.fileContent = content
 
 

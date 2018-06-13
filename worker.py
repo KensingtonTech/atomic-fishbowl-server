@@ -1,20 +1,20 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 
 import os
 import sys
 import socket
 import json
-import urllib
+import urllib.request, urllib.parse, urllib.error
 import time
 import calendar
 import asyncore
-from worker_fetcher import NwFetcher, SaFetcher
-from worker_communicator import Communicator
 from pprint import pprint, pformat
 import logging
 import signal
 from Crypto.PublicKey import RSA
 from base64 import b64decode
+from worker_fetcher import NwFetcher, SaFetcher
+from worker_communicator import Communicator
 
 fetcher = None
 
@@ -94,9 +94,9 @@ def sigIntHandler(signal, frame):
 
 
 def pkcs1_unpad(text):
-  if len(text) > 0 and text[0] == '\x02':
-    # Find end of padding marked by nul
-    pos = text.find('\x00')
+  if len(text) > 0 and text[0] == 2:
+    # Find end of padding marked by null byte
+    pos = text.find(0)
     if pos > 0:
       return text[pos+1:]
   return None
@@ -118,7 +118,7 @@ def configReceived(cfgObj):
       privateKeyFile = cfg['privateKeyFile']
       rsaKey = RSA.importKey(open(privateKeyFile, "rb").read())
       rawCipherData = b64decode(ePassword)
-      cfg['dpassword'] = pkcs1_unpad(rsaKey.decrypt(rawCipherData)) # write decrypted password back to config
+      cfg['dpassword'] = str(pkcs1_unpad(rsaKey.decrypt(rawCipherData)), 'utf-8') # write decrypted password back to config
 
       # Leave these
       collectionId = cfg['collectionId']
@@ -139,7 +139,7 @@ def configReceived(cfgObj):
         log.debug("timeClause: " + timeClause)
 
         query = 'select * where (%s) && (%s)' % (timeClause, cfg['query'])
-        cfg['queryEnc'] = urllib.quote_plus(query)
+        cfg['queryEnc'] = urllib.parse.quote_plus(query)
         log.info("Query: " + query)
         #log.debug("queryEnc: " + cfg['queryEnc'])
       
@@ -251,7 +251,7 @@ def exitWithException(message):
 
 def main():
   if len(sys.argv) == 1:
-    print "Argument must be a path to a UNIX socket"
+    print("Argument must be a path to a UNIX socket")
     sys.exit(1)
   try:
     #Set up logging

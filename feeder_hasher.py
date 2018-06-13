@@ -23,7 +23,7 @@ class Hasher():
     log.debug('updateFeedFile(): id: ' + id)
     feed = self.feedConfig[id]
     with open(self.feedsDir + '/' + id + '.feed', 'r', -1 ) as feedFile:
-      crc = adler32( feedFile.read() ) #calculate CRC file (faster than hashing, in theory, and is good enough for us)
+      crc = adler32( bytes(feedFile.read(), 'utf-8') ) #calculate CRC file (faster than hashing, in theory, and is good enough for us)
       if id in self.feedCRCs and self.feedCRCs[id] != crc:
         # this feed content has been updated
         self.feedCRCs[id] = crc
@@ -138,7 +138,7 @@ class Hasher():
         #pprint(feedFile.readlines())
         self.feedData[id] = { 'md5': {}, 'sha1': {}, 'sha256': {} }
         
-        crc = adler32( feedFile.read() ) #calculate CRC file (faster than hashing, in theory, and is good enough for us)
+        crc = adler32( bytes(feedFile.read(), 'utf-8') ) #calculate CRC file (faster than hashing, in theory, and is good enough for us)
         self.feedCRCs[id] = crc
         
         #pprint(self.feedData)

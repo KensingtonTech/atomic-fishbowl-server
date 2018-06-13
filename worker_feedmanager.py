@@ -18,7 +18,7 @@ class FeedManager():
     self.endCallback = endCallback
     self.hashTypes = {}
     # preemptively get hash types
-    self.communicator.send( json.dumps( { 'getTypes' : True, 'feedId': self.feedId } ) + '\n' )
+    self.communicator.write_data( json.dumps( { 'getTypes' : True, 'feedId': self.feedId } ) + '\n' )
 
 
 
@@ -32,7 +32,7 @@ class FeedManager():
     self.counter += 1
     req = { 'id': self.counter, 'hash': hashValue, 'type': hashType, 'feedId': self.feedId }
     self.requests[self.counter] = contentObj
-    self.communicator.send( json.dumps(req) + '\n')
+    self.communicator.write_data( json.dumps(req) + '\n')
 
 
 

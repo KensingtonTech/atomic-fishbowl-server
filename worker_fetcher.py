@@ -1,34 +1,34 @@
 import logging
 import os
 import sys
-import urllib, urllib2, urlparse
+import urllib.request, urllib.parse, urllib.error
 import ssl
 import base64
 import json
 from pprint import pprint, pformat
-import cStringIO
+from io import BytesIO
 import time
 import zipfile
 from multiprocessing import Pool, Manager, Value, current_process, cpu_count
 import socket
-from httplib import BadStatusLine
-
+from http.client import BadStatusLine
+from threading import Timer, Thread, Event
+from requests_futures.sessions import FuturesSession
+import concurrent.futures.thread
 import requests
 #requests.packages.urllib3.disable_warnings()
 from requests.packages.urllib3.exceptions import InsecureRequestWarning
 requests.packages.urllib3.disable_warnings(InsecureRequestWarning)
 
 from worker_contentprocessor import ContentProcessor
-from threading import Timer, Thread, Event
-from requests_futures.sessions import FuturesSession
-import concurrent.futures.thread
+
 
 #logging.getLogger("requests").setLevel(logging.WARNING)
 logging.getLogger("urllib3").setLevel(logging.WARNING)
 log = logging.getLogger(__name__)
 
 def unwrapExtractFilesFromMultipart(*arg, **kwarg):
-  #print "unwrapExtractFilesFromMultipart()"
+  #print("unwrapExtractFilesFromMultipart()")
   return ContentProcessor.extractFilesFromMultipart(*arg, **kwarg)
 
 
@@ -40,7 +40,7 @@ def unwrapGo(*arg, **kwarg):
 
 
 def unwrapPullFiles(*arg, **kwarg):
-  #print "unwrapExtractFilesFromMultipart()"
+  #print("unwrapExtractFilesFromMultipart()")
   return ContentProcessor.pullFiles(*arg, **kwarg)
 
 
@@ -151,7 +151,7 @@ class Fetcher:
       # this is an exception from the ContentProcessor which must be printed
       #log.error('Fetcher: sendResult(): Caught error in worker:\n' + str(res))
       for l in res:
-        print l.rstrip()
+        print((l.rstrip()))
     elif res and len(res['images']) != 0:
       #log.debug("Fetcher: sendResult(): Worker sending update")
       if self.saMonitoring and not self.sentCollectionState:
@@ -260,7 +260,7 @@ class SaFetcher(Fetcher): # For Solera
       while state != 'complete':
         self.communicator.write_data(json.dumps( { 'workerProgress': 'In Progress', 'label': 'Querying' } ) + '\n')
         response = requests.post( self.queryDef['url'], auth=self.queryDef['auth'], data=self.queryDef['data'], verify=self.queryDef['verify'], stream=self.queryDef['stream'] )
-        #print response.text
+        #print(response.text)
         if response.status_code >= 400:
           self.exitWithError('Received HTTP error code on query response: ' + str(response.status_code))
         res = response.json()
@@ -299,7 +299,7 @@ class SaFetcher(Fetcher): # For Solera
         self.numQueryTasks = numTasks
         log.debug('The remaining number of query pages is ' + str(numTasks))
         futures = []
-        for i in xrange(numTasks):
+        for i in range(numTasks):
           # Pull remaining report results
           data['page'] += 1
           future = session.post(self.queryDef['url'], auth=self.queryDef['auth'], data=self.convertToPostBody(data, 'GET'), verify=self.queryDef['verify'], stream=self.queryDef['stream'], background_callback=self.checkForQueryResult )
@@ -422,7 +422,7 @@ class SaFetcher(Fetcher): # For Solera
       raise ApiUnsuccessful( [ "API call returned an error" ] )
     if state != 'complete':
       log.debug('SaFetcher: checkForQueryResult(): trying to launch another session')
-      parsedBody = urlparse.parse_qs(request.body)
+      parsedBody = urllib.parse.parse_qs(request.body)
       page = int(parsedBody['page'][0])
       data = self.queryDef['data']
       data['page'] = page
@@ -541,12 +541,12 @@ vlan_id"""
 
     self.metaExtractionFutures = []
 
-    for i in xrange(numTasks):
+    for i in range(numTasks):
       idsToPull = []
-      #print "numtasks: " + str(numTasks)
-      #print "!!!i: " + str(i)
-      for n in xrange(limit):
-        #print "!!!n: " + str(n)
+      #print("numtasks: " + str(numTasks))
+      #print("!!!i: " + str(i))
+      for n in range(limit):
+        #print("!!!n: " + str(n))
         if i == numTasks - 1 and n == remainder: # remainder - 1
           break
         idsToPull.append(sessionIds.pop())
@@ -587,7 +587,7 @@ vlan_id"""
     self.communicator.write_data(json.dumps( { 'workerProgress': str(self.metaTasksComplete) + ' / ' + str(self.numMetaTasks), 'label': 'Meta Extraction' } ) + '\n')
 
     res = result.text
-    #print res
+    #print(res)
     csvLines = res.split('\n')
     keys = []
     keyPositions = {}
@@ -599,15 +599,15 @@ vlan_id"""
       log.warning('SaFetcher: onMetaReceived(): Only a single line received! :\n' + result.text )
 
     for line in csvLines:
-      #print "line: " + line
+      #print("line: " + line)
       if len(line) in [ 0, 1 ] :
-        #print "continuing from line: " + line
+        #print("continuing from line: " + line)
         continue
       
       if count == 0:
         #header line
         keys = line.split('\t')
-        for i in xrange(len(keys)):
+        for i in range(len(keys)):
           key = keys[i]
           keyPositions[i] = key
           if key == 'flow_id':
@@ -616,24 +616,24 @@ vlan_id"""
         values = line.split('\t')
         flowid = int(values[flowidPos])
         thisSession = { 'images': [], 'session': { 'id': flowid, 'meta': {} } }
-        for i in xrange(len(values)):
+        for i in range(len(values)):
           metaKey = keyPositions[i]
           metaValue = values[i]
           if len(metaValue) > 0:
             #decodedValue = urllib2.unquote(metaValue).decode('utf8')
             #valueList = decodedValue.split(',')
-            utfValue = urllib2.unquote(metaValue).encode('utf8')
+            utfValue = urllib.parse.unquote(metaValue).encode('utf8')
             valueList = utfValue.split(',')
-            #print 'valueList: ' + str(valueList)
+            #print('valueList: ' + str(valueList))
             if metaKey == 'aggregate_user_agent_hooks':
               newValueList = []
-              for x in xrange(len(valueList)):
+              for x in range(len(valueList)):
                 if valueList[x].startswith(' like '):
                   newValue = valueList[x - 1] + valueList[x]
                   newValueList.append(newValue)
               valueList = newValueList
             #pprint(valueList)
-            #print 'valueList: ' + str(valueList)
+            #print('valueList: ' + str(valueList))
             #if len(valueList) > 1:
             thisSession['session']['meta'][metaKey] = valueList
             #elif len(valueList) == 1:
@@ -720,7 +720,7 @@ vlan_id"""
 
         
 
-        for i in xrange(numTasks):
+        for i in range(numTasks):
           self.extractPostData['page'] += 1 #increment the page count by 1
           log.debug( "onFileExtractionResults(): obtaining page " + str(self.extractPostData['page']) + " of file extraction results")
           extractPostData = self.extractPostData
@@ -750,7 +750,7 @@ vlan_id"""
       log.debug('SaFetcher: fetchMeta(): starting download of artifact zip file')
       self.communicator.write_data(json.dumps( { 'workerProgress': 'Downloading', 'label': 'Extracted Artifacts' } ) + '\n')
       future = session.post(self.cfg['url'] + '/api/v6/artifacts/download', auth=self.queryDef['auth'], data=self.convertToPostBody(data, 'GET'), verify=False, stream=True, background_callback=self.onExtractedFileDownload )
-      #print "Appending future"
+      #print("Appending future")
       self.extractFutures.append(future)
       
 
@@ -791,7 +791,7 @@ vlan_id"""
       self.exitWithError('Received HTTP error code on file extraction download response: ' + str(result.status_code))
 
     if result.headers['content-type'] == 'application/zip':
-      zipFile = cStringIO.StringIO()
+      zipFile = BytesIO()
       zipFile.write(result.content)
       self.zipFileHandle = zipfile.ZipFile(zipFile)
     
@@ -809,7 +809,7 @@ vlan_id"""
     poolResults = []
     for zinfo in zipHandle.infolist():
 
-      #print ("contentCount:", self.cfg['contentCount'].value)
+      #print("contentCount:", self.cfg['contentCount'].value)
 
       if not self.cfg['contentCount'].value >= self.cfg['contentLimit']:
         archivedFilename = zinfo.filename
@@ -847,9 +847,9 @@ vlan_id"""
   def convertToPostBody(self, data, method):
     post = {}
     if len(data) != 0:
-      for k,v in data.items():
+      for k,v in list(data.items()):
         try:
-          isStr = isinstance(v, basestring)
+          isStr = isinstance(v, str)
         except NameError as e:
           isStr = isinstance(v, str)
         else:
@@ -895,12 +895,12 @@ vlan_id"""
     this function because it is programmed to be pretty 
     printed and may differ from the actual request.
     """
-    print('{}\n{}\n{}\n\n{}'.format(
+    print(('{}\n{}\n{}\n\n{}'.format(
         '-----------START-----------',
         req.method + ' ' + req.url,
-        '\n'.join('{}: {}'.format(k, v) for k, v in req.headers.items()),
+        '\n'.join('{}: {}'.format(k, v) for k, v in list(req.headers.items())),
         req.body,
-    ))
+    )))
 
 
 
@@ -928,15 +928,16 @@ class NwFetcher(Fetcher):
     ctx = ssl.create_default_context()
     ctx.check_hostname = False
     ctx.verify_mode = ssl.CERT_NONE
-    request = urllib2.Request(reqStr)
-    base64string = base64.b64encode('%s:%s' % (self.cfg['user'], self.cfg['dpassword']))
-    request.add_header("Authorization", "Basic %s" % base64string)
+    request = urllib.request.Request(reqStr)
+    base64string = base64.b64encode( bytes(self.cfg['user'] + ':' + self.cfg['dpassword'], 'utf-8') )
+    request.add_header("Authorization", "Basic " + base64string.decode('utf-8'))
     request.add_header('Content-type', 'application/json')
     request.add_header('Accept', 'application/json')
     try:
-      rawQueryRes = json.load(urllib2.urlopen(request, context=ctx, timeout=self.cfg['queryTimeout']))
+      rawQueryRes = json.load(urllib.request.urlopen(request, context=ctx, timeout=self.cfg['queryTimeout']))
+
       #pprint(rawQueryRes)
-      #print "length of rawQueryRes", len(rawQueryRes)
+      #print("length of rawQueryRes", len(rawQueryRes))
       log.debug('NwFetcher: runQuery(): Parsing query results')
       for field in rawQueryRes:
         if 'results' in field and isinstance(field, dict):
@@ -964,9 +965,9 @@ class NwFetcher(Fetcher):
       # Now trim the results down to our session limit
       newSessionsList = []
       newSessions = {}
-      if len(self.sessions.keys()) > self.cfg['sessionLimit']:
+      if len(list(self.sessions.keys())) > self.cfg['sessionLimit']:
         count = 0
-        for key in sorted(self.sessions.iterkeys()):
+        for key in sorted(self.sessions.keys()):
           count += 1
           if count > self.cfg['sessionLimit']:
             break
@@ -980,13 +981,13 @@ class NwFetcher(Fetcher):
     except BadStatusLine as e:
       error = "Bad status raised whilst executing query.  This might be an SSL setting mismatch.  Run a Connection Test against your NetWitness server to check"
       self.exitWithError(error)
-    except urllib2.HTTPError as e:
+    except urllib.error.HTTPError as e:
       error = "HTTP Error whilst running query.  Exiting with code 1: " + str(e)
       self.exitWithError(error)
     except socket.timeout as e:
       error = "Query to NetWitness service timed out after " + str(self.cfg['queryTimeout']) + " seconds"
       self.exitWithError(error)
-    except urllib2.URLError as e:
+    except urllib.error.URLError as e:
       if 'Connection refused' in str(e):
         error = "Connection refused whilst trying to query NetWitness service"
       elif 'timed out' in str(e):
@@ -1026,20 +1027,20 @@ class NwFetcher(Fetcher):
         ctx.check_hostname = False
         ctx.verify_mode = ssl.CERT_NONE
         uri = '/sdk/content?render=107&session=' + str(sessionId)
-        request = urllib2.Request(self.cfg['url'] + uri )
-        base64string = base64.b64encode('%s:%s' % (self.cfg['user'], self.cfg['dpassword']))
-        request.add_header("Authorization", "Basic %s" % base64string)
+        request = urllib.request.Request(self.cfg['url'] + uri )
+        base64string = base64.b64encode( bytes(self.cfg['user'] + ':' + self.cfg['dpassword'], 'utf-8' ) )
+        request.add_header("Authorization", "Basic " + base64string.decode('utf-8') )
         request.add_header('Content-type', 'application/json')
         request.add_header('Accept', 'application/json')
         try:
-          res = urllib2.urlopen(request, context=ctx, timeout=self.cfg['contentTimeout'])
+          res = urllib.request.urlopen(request, context=ctx, timeout=self.cfg['contentTimeout'])
           #break
-        except urllib2.HTTPError as e:
+        except urllib.error.HTTPError as e:
           self.cfg['contentErrors'].value += 1
           error = "HTTP exception pulling content for session " + str(sessionId) + ".  URI was '" + uri + "'.  The HTTP status code was " + str(e.code)
           log.warning("NwFetcher: pullFiles(): " + error )
           continue
-        except urllib2.URLError as e:
+        except urllib.error.URLError as e:
           self.cfg['contentErrors'].value += 1
           error = "URL error pulling content for session " + str(sessionId) + ".  The reason was " + e.reason
           log.warning("NwFetcher: pullFiles(): " + error)
@@ -1050,10 +1051,11 @@ class NwFetcher(Fetcher):
           log.warning("NwFetcher: pullFiles(): " + error)
           continue
 
-        if 'res' in locals() and res.info().getheader('Content-Type').startswith('multipart/mixed'):
-          contentType = res.info().getheader('Content-Type')
-          mimeVersion = res.info().getheader('Mime-Version')
-          payload = 'Content-Type: ' + contentType + '\n' + 'Mime-Version: ' + mimeVersion + '\n' + res.read()
+        #print(res.info())
+        if 'res' in locals() and res.info().get('Content-Type').startswith('multipart/mixed'):
+          contentType = res.info().get('Content-Type')
+          mimeVersion = res.info().get('Mime-Version')
+          payload = bytes('Content-Type: ' + contentType + '\n' + 'Mime-Version: ' + mimeVersion + '\n', 'utf-8') + res.read()
           
           ##############EXTRACT FILES AND DO THE WORK##############
           log.debug('NwFetcher: pullFiles(): Launching extractor from pool')
