@@ -33,17 +33,15 @@ echo 172.16.0.57 kentechrepo >> /etc/hosts \
 && rpm --import http://kentechrepo/yumrepo/afb_1.0.0_signed/afb-1.x.key \
 && rpm --import http://kentechrepo/yumrepo/afb_1.0.0_signed/NODESOURCE-GPG-SIGNING-KEY-EL \
 && curl http://kentechrepo/yumrepo/afb_1.0.0_signed/afb-1.0.0-signed.repo > /etc/yum.repos.d/afb-1.0.0-signed.repo \
-&& yum install -y --disableplugin=fastestmirror nodejs ghostscript poppler-utils libjpeg-turbo openjpeg unzip unrar libreoffice \
 && yum install -y https://dl.fedoraproject.org/pub/epel/epel-release-latest-7.noarch.rpm \
-&& yum install -y --disableplugin=fastestmirror python34 python34-pip python34-requests python34-crypto python34-setuptools \
-&& pip3.4 install --upgrade pip \
-#&& pip3.4 install requests \
-&& pip3.4 install requests-futures \
-&& pip3.4 install Pillow \
-&& pip3.4 install rarfile \
-&& pip3.4 install python-magic \
-&& pip3.4 uninstall -y pip \
-&& yum erase -y epel-release python34-pip \
+&& yum install -y --disableplugin=fastestmirror nodejs ghostscript poppler-utils libjpeg-turbo openjpeg unzip unrar libreoffice python36 \
+&& curl -L https://bootstrap.pypa.io/get-pip.py > /root/get-pip.py \
+&& python36 /root/get-pip.py \
+&& rm -f /root/get-pip.py \
+&& pip3 install --upgrade pip \
+&& pip3 install requests requests-futures crypto Pillow rarfile python-magic \
+&& pip3 uninstall -y pip \
+&& yum erase -y epel-release \
 && rm -f /etc/yum.repos.d/afb-1.0.0-signed.repo \
 && yum clean all \
 && rm -rf /var/cache/yum \

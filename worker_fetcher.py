@@ -579,7 +579,6 @@ vlan_id"""
 
   def onMetaReceived(self, session, result):
     log.debug('SaFetcher: onMetaReceived()')
-    #request = result.request
     if result.status_code >= 400:
       self.exitWithError('Received error on response')
 
@@ -587,7 +586,6 @@ vlan_id"""
     self.communicator.write_data(json.dumps( { 'workerProgress': str(self.metaTasksComplete) + ' / ' + str(self.numMetaTasks), 'label': 'Meta Extraction' } ) + '\n')
 
     res = result.text
-    #print(res)
     csvLines = res.split('\n')
     keys = []
     keyPositions = {}
@@ -599,9 +597,7 @@ vlan_id"""
       log.warning('SaFetcher: onMetaReceived(): Only a single line received! :\n' + result.text )
 
     for line in csvLines:
-      #print("line: " + line)
       if len(line) in [ 0, 1 ] :
-        #print("continuing from line: " + line)
         continue
       
       if count == 0:
@@ -620,11 +616,8 @@ vlan_id"""
           metaKey = keyPositions[i]
           metaValue = values[i]
           if len(metaValue) > 0:
-            #decodedValue = urllib2.unquote(metaValue).decode('utf8')
-            #valueList = decodedValue.split(',')
-            utfValue = urllib.parse.unquote(metaValue).encode('utf8')
+            utfValue = urllib.parse.unquote(metaValue)
             valueList = utfValue.split(',')
-            #print('valueList: ' + str(valueList))
             if metaKey == 'aggregate_user_agent_hooks':
               newValueList = []
               for x in range(len(valueList)):
@@ -632,12 +625,7 @@ vlan_id"""
                   newValue = valueList[x - 1] + valueList[x]
                   newValueList.append(newValue)
               valueList = newValueList
-            #pprint(valueList)
-            #print('valueList: ' + str(valueList))
-            #if len(valueList) > 1:
             thisSession['session']['meta'][metaKey] = valueList
-            #elif len(valueList) == 1:
-            #  thisSession['session']['meta'][metaKey] = valueList.pop()
         self.sessions[flowid] = thisSession
       count += 1
 
@@ -934,7 +922,8 @@ class NwFetcher(Fetcher):
     request.add_header('Content-type', 'application/json')
     request.add_header('Accept', 'application/json')
     try:
-      rawQueryRes = json.loads( urllib.request.urlopen(request, context=ctx, timeout=self.cfg['queryTimeout']).readall().decode('utf-8') )
+      #rawQueryRes = json.loads( urllib.request.urlopen(request, context=ctx, timeout=self.cfg['queryTimeout']).readall().decode('utf-8') ) #9.4
+      rawQueryRes = json.load(urllib.request.urlopen(request, context=ctx, timeout=self.cfg['queryTimeout'])) #9.6
 
       #pprint(rawQueryRes)
       #print("length of rawQueryRes", len(rawQueryRes))
