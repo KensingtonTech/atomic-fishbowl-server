@@ -43,7 +43,7 @@ echo 172.16.0.57 kentechrepo >> /etc/hosts \
 && pip3 install --upgrade pip \
 && pip3 install requests requests-futures crypto pycrypto Pillow rarfile python-magic \
 && pip3 uninstall -y pip \
-&& yum grouperase -y 'Development Tools' \
+&& yum grouperase -y Development\\ Tools \
 && yum erase -y epel-release python36-devel \
 && rm -f /etc/yum.repos.d/afb-1.0.0-signed.repo \
 && yum clean all \
