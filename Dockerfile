@@ -36,7 +36,8 @@ echo 172.16.0.57 kentechrepo >> /etc/hosts \
 && yum install -y https://dl.fedoraproject.org/pub/epel/epel-release-latest-7.noarch.rpm \
 && yum install -y --disableplugin=fastestmirror nodejs ghostscript poppler-utils libjpeg-turbo openjpeg unzip unrar libreoffice python36 \
 && curl -L https://bootstrap.pypa.io/get-pip.py > /root/get-pip.py \
-&& python36 /root/get-pip.py \
+&& ln -s python3.6 /usr/bin/python3 \
+&& python3 /root/get-pip.py \
 && rm -f /root/get-pip.py \
 && pip3 install --upgrade pip \
 && pip3 install requests requests-futures crypto Pillow rarfile python-magic \
