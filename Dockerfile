@@ -35,7 +35,7 @@ echo 172.16.0.57 kentechrepo >> /etc/hosts \
 && curl http://kentechrepo/yumrepo/afb_1.0.0_signed/afb-1.0.0-signed.repo > /etc/yum.repos.d/afb-1.0.0-signed.repo \
 && yum install -y https://dl.fedoraproject.org/pub/epel/epel-release-latest-7.noarch.rpm \
 && yum install -y --disableplugin=fastestmirror nodejs ghostscript poppler-utils libjpeg-turbo openjpeg unzip unrar libreoffice python36 python36-devel \
-&& yum groupinstall -y --disableplugin=fastestmirror 'Development Tools' \
+&& yum groupinstall -y --disableplugin=fastestmirror Development\\ Tools \
 && curl -L https://bootstrap.pypa.io/get-pip.py > /root/get-pip.py \
 && ln -s python3.6 /usr/bin/python3 \
 && python3 /root/get-pip.py \
