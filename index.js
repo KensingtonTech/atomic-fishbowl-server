@@ -281,7 +281,7 @@ var defaultPreferences = {
   defaultContentLimit: 1000,
   defaultRollingHours: 1,
   debugLogging: false,
-  serviceTypes: { nw: false, sa: false },
+  serviceTypes: { nw: true, sa: false },
   tokenExpirationHours: 24,
 
   nw: {
