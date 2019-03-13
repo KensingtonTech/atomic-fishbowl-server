@@ -663,12 +663,15 @@ class RollingCollectionManager {
       // Play back search text
       socket.emit('searches', this.search);
 
+      winston.debug(`Current number of observers: ${this.observers}`);
+
       if (this.observers == 1) {
         // If all clients have disconnected, and then one reconnects, the worker should start immediately
         this.resumed = true;
         // clearInterval(this.workInterval);
         // this.workInterval = null;
         // if (!this.workerProcess) {
+        winston.debug(`workerProcess.length: ${this.workerProcess.length}`);
         if (this.workerProcess.length === 0) {
           this.run();
         }
@@ -1099,9 +1102,10 @@ class RollingCollectionManager {
   onWorkerExit(code, signal, pid) {
     // This is where we handle the exiting of the worker process
     // this.workerProcess = null;
+    winston.debug(`onWorkerExit(): pid: ${pid}`)
     for (let i = 0; i < this.workerProcess.length; i++) {
-      if (this.workerProcess.pid == pid) {
-        winston.debug(`onWorkerExit(): matched process with pid ${pid}`);
+      if (this.workerProcess[i].pid == pid) {
+        winston.debug(`onWorkerExit(): matched process with pid ${pid},  Removing process from workerProcess table`);
         this.workerProcess.splice(i, 1);
         break;
       }
@@ -1242,7 +1246,7 @@ class RollingCollectionManager {
   
       // Calculate the maximum age a given session is allowed to be before purging it
       let maxTime = this.lastEnd - this.collection.lastHours * 60 * 60;
-      if (purgeHack) { maxTime = this.lastRun - 60 * 5; } // 5 minute setting used for testing
+      if (purgeHack) { maxTime = this.lastRun - 60 * purgeHackMinutes; } // 5 minute setting used for testing
   
       for (let i = 0; i < this.sessions.length; i++) {
         // Look at each session and determine whether it is older than maxtime
@@ -1521,7 +1525,7 @@ class RollingCollectionManager {
       if (tempName === this.workerSocket[i].server._pipeName) {
         winston.debug('onWorkerDisconnected: found workerSocket.  Deleting it');
         fs.unlink(tempName, () => {} ); // Delete the temporary UNIX socket file
-        this.workerProcess.splice(i, 1);
+        this.workerSocket.splice(i, 1);
         break;
       }
     }
