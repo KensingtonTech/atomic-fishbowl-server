@@ -3,14 +3,38 @@
 // Load dependencies
 require('source-map-support').install();
 const Subject = require('rxjs/Subject').Subject;
+
+// command line arguments
+const args = require('yargs').argv;
+// console.log(args);
+
+// passport and JWT
+const passport = require('passport');
+const LocalStrategy = require('passport-local').Strategy;
+const jwt = require('jsonwebtoken');
+const JwtStrategy = require('passport-jwt').Strategy;
+const ExtractJwt = require('passport-jwt').ExtractJwt;
+const mongoose = require('mongoose');
+mongoose.Promise = Promise;
+// passport auth gets set up in mongooseInit(), after we've successfully connected to mongo
+
+// express
 const app = require('express')();
-const server = require('http').createServer(app);  
-const io = require('socket.io')(server);
-const ioCookieParser = require('socket.io-cookie');
+const server = require('http').createServer(app);
+const cookieParser = require('cookie-parser');
 const multer  = require('multer');
-const session = require('express-session');
 const bodyParser = require('body-parser');
 const listenPort = 3002;
+// const session = require('express-session');
+app.use(cookieParser());
+app.use(bodyParser.json());
+app.use(bodyParser.urlencoded({ extended: true }));
+app.use(passport.initialize());
+
+// mongo
+const mongo = require('mongodb').MongoClient;
+
+// misc
 global.uuidV4 = require('uuid/v4');
 global.fs = require('fs');
 global.net = require('net'); //for unix sockets
@@ -19,18 +43,9 @@ global.spawn = require('child_process').spawn;
 const exec = require('child_process').exec;
 global.temp = require('temp');
 global.moment = require('moment');
-const passport = require('passport');
-const LocalStrategy = require('passport-local').Strategy;
-const cookieParser = require('cookie-parser');
 const util = require('util');
 const sprintf = require('sprintf-js').sprintf;
 global.winston = require('winston');
-const mongoose = require('mongoose');
-mongoose.Promise = Promise;
-const jwt = require('jsonwebtoken');
-const JwtStrategy = require('passport-jwt').Strategy;
-const ExtractJwt = require('passport-jwt').ExtractJwt;
-const mongo = require('mongodb').MongoClient;
 const NodeRSA = require('node-rsa');
 const sleep = require('sleep');
 const restClient = require('node-rest-client').Client;
@@ -39,36 +54,30 @@ const path = require('path');
 const nodeCleanup = require('node-cleanup');
 const isDocker = require('is-docker');
 
+// versioning
 const buildProperties = require('./build-properties');
 const version = `${buildProperties.major}.${buildProperties.minor}.${buildProperties.patch}.${buildProperties.build}-${buildProperties.level}`;
 
-var feedScheduler;
-try {
-  feedScheduler = FeedScheduler;
-}
-catch (e) {
-  feedScheduler = require('./feed-scheduler.js');
-}
 
-var rollingCollectionHandler;
-try {
-  rollingCollectionHandler = RollingCollectionHandler;
-}
-catch (e) {
-  rollingCollectionHandler = require('./rolling-collections');
-}
+// project file imports.  Handles native and minified cases
+const feedScheduler = this.feedScheduler || require('./feed-scheduler');
+const rollingCollectionHandler = this.RollingCollectionHandler || require('./rolling-collections');
+const fixedCollectionHandler = this.FixedCollectionHandler || require('./fixed-collections');
 
-var fixedCollectionHandler;
-try {
-  fixedCollectionHandler = FixedCollectionHandler;
+// dev mode?
+var development = process.env.NODE_ENV !== 'production';
+
+// get type of service
+var serviceTypes;
+if ('service' in args && development) {
+  serviceTypes = args.service === 'sa' ? { nw: false, sa: true } : { nw: true, sa: false };
 }
-catch(e) {
-  fixedCollectionHandler = require('./fixed-collections');
+else {
+ serviceTypes = this.serviceType || require('./servicetype');
 }
 
 // export NODE_ENV='production'
 // export NODE_ENV='development'
-var development = process.env.NODE_ENV !== 'production';
 var debug = 'AFBDEBUG' in process.env && process.env['AFBDEBUG'] > 0;
 global.purgeHack = false; // causes sessions older than 5 minutes to be purged, if set to true.  Useful for testing purging without having to wait an hour
 var gsPath = '/usr/bin/gs';
@@ -86,10 +95,7 @@ if (development) {
 ////////////////////////////////////////////////////////////////EXPRESS////////////////////////////////////////////////////////////////
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
-app.use(cookieParser());
-app.use(bodyParser.json());
-app.use(bodyParser.urlencoded({ extended: true }));
-app.use(passport.initialize());
+
 
 
 
@@ -244,11 +250,13 @@ winston.debug(configCopy);
 // Set up encryption
 const internalPublicKey = fs.readFileSync(internalPublicKeyFile, 'utf8');
 const internalPrivateKey = fs.readFileSync(internalPrivateKeyFile, 'utf8');
+const kentechCert = this.KentechCert || require('./kentech-public-key');
 const decryptor = new NodeRSA( internalPrivateKey );
 decryptor.setOptions({encryptionScheme: 'pkcs1'});
 
-// Set up feed scheduler
-var scheduler = new feedScheduler(feedsDir, decryptor, (id) => schedulerUpdatedCallback(id), io);
+
+
+
 
 
 // Create LibreOffice profiles dir
@@ -275,196 +283,19 @@ if ( !fs.existsSync(tempDir) ) {
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
 // Set default preferences
-var defaultPreferences = {
-  minX: 255,
-  minY: 255,  
-  defaultContentLimit: 1000,
-  defaultRollingHours: 1,
-  debugLogging: false,
-  serviceTypes: { nw: true, sa: false },
-  tokenExpirationHours: 24,
-
-  nw: {
-    url: '',
-    summaryTimeout: 5,
-    sessionLimit: 2000,
-    queryTimeout: 5,
-    contentTimeout: 5,
-    queryDelayMinutes: 1,
-    maxContentErrors: 10,
-    presetQuery: "filetype = 'jpg','gif','png','pdf','zip','rar','windows executable','x86 pe','windows dll','x64pe','apple executable (pef)','apple executable (mach-o)'",
-    defaultQuerySelection : "All Supported File Types",
-    displayedKeys : [ 
-      "size", 
-      "service", 
-      "ip.src", 
-      "ip.dst", 
-      "alias.host", 
-      "city.dst", 
-      "country.dst", 
-      "action", 
-      "content", 
-      "ad.username.src", 
-      "ad.computer.src", 
-      "filename", 
-      "client"
-    ],
-    masonryKeys : [
-      {
-        key : "alias.host",
-        friendly : "Hostname"
-      }, 
-      {
-        key : "ad.username.src",
-        friendly : "AD User"
-      }, 
-      {
-        key : "ad.computer.src",
-        friendly : "AD Computer"
-      }, 
-      {
-        key : "ad.domain.src",
-        friendly : "AD Domain"
-      }
-    ]
-  },
-
-  sa: { // solera
-    url: '',
-    presetQuery: '[ { "any" : [ "file_type=PDF", "file_extension=\"pdf\"", "mime_type=\"application/pdf\"", "file_type=ZIP", "file_extension=\"docx\"", "mime_type=\"application/vnd.openxmlformats-officedocument.wordprocessingml.document\"", "file_extension=\"xlsx\"", "mime_type=\"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet\"", "file_extension=\"pptx\"",  "mime_type=\"application/vnd.openxmlformats-officedocument.presentationml.presentation\"" ] } ]',
-    defaultQuerySelection : "All Supported File Types",
-    sessionLimit: 2000,
-    queryTimeout: 5,
-    contentTimeout: 5,
-    queryDelayMinutes: 1,
-    maxContentErrors: 10,
-    displayedKeys : [ 
-      "total_bytes", 
-      "protocol_family", 
-      "initiator_ip", 
-      "responder_ip", 
-      "aggregate_http_server_hooks", 
-      "responder_country", 
-      "aggregate_http_method_hooks", 
-      "aggregate_file_type_hooks", 
-      // "filename", 
-      "aggregate_user_agent_hooks"
-    ],
-    masonryKeys : [
-      {
-        key : "aggregate_http_server_hooks",
-        friendly : "Hostname"
-      }, 
-      {
-        key : "responder_country",
-        friendly : "Responder Country"
-      }, 
-      /*{
-        key : "aggregate_http_uri_hooks",
-        friendly : "URL"
-      },*/ 
-      {
-        key : "protocol_family",
-        friendly : "Protocol Family"
-      }
-    ]
-  }
-};
-
+const defaultPreferences = this.defaultPreferences || require('./defaultpreferences');
+if (serviceTypes.nw) {
+  defaultPreferences['nw'] = this.nwDefaultPreferences || require('./defaultnwpreferences');
+}
+else {
+  defaultPreferences['sa'] = this.saDefaultPreferences || require('./defaultsapreferences');
+}
 
 
 // Set use-cases
 // A use-case consists of a name (mandatory), a friendly name (mandatory), a query (mandatory), its allowed content types[] (mandatory), distillation terms (optional), regex distillation terms (optional), and a description (mandatory)
 // { name: '', friendlyName: '', query: "", contentTypes: [], description: '', distillationTerms: [], regexTerms: [] }
-var useCases = [
-
-  {
-    name: 'outboundDocuments',
-    friendlyName: 'Outbound Documents',
-    nwquery: "direction = 'outbound' && filetype = 'pdf','office 2007 document'",
-    saquery: '[ { "any" : [ "ipv4_initiator=172.16.0.0/12", "ipv4_initiator=192.168.0.0/16", "ipv4_initiator=192.168.0.0/16" ] }, { "all" : [ "ipv4_responder!=172.16.0.0/12", "ipv4_responder!=192.168.0.0/16", "ipv4_responder!=192.168.0.0/16" ] }, { "any" : [ "file_type=PDF", "file_extension=\\"pdf\\"", "mime_type=\\"application/pdf\\"", "file_type=ZIP", "file_extension=\\"docx\\"", "mime_type=\\"application/vnd.openxmlformats-officedocument.wordprocessingml.document\\"", "file_extension=\\"xlsx\\"", "mime_type=\\"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet\\"", "file_extension=\\"pptx\\"", "mime_type=\\"application/vnd.openxmlformats-officedocument.presentationml.presentation\\"" ] } ]',
-    contentTypes: [ 'pdfs', 'officedocs' ],
-    description: 'Displays documents which are being transferred outbound',
-    onlyContentFromArchives: false
-  },
-  
-  {
-    name: 'ssns',
-    friendlyName: 'Social Security Numbers',
-    nwquery: "filetype = 'pdf','office 2007 document','zip','rar'",
-    saquery: '[ { "any" : [ "file_type=PDF", "file_extension=\\"pdf\\"", "mime_type=\\"application/pdf\\"", "file_type=ZIP", "file_extension=\\"zip\\"", "mime_type=\\"application/zip\\"", "file_type=RAR", "file_extension=\\"rar\\"", "mime_type=\\"application/x-rar-compressed\\"", "file_extension=\\"docx\\"", "mime_type=\\"application/vnd.openxmlformats-officedocument.wordprocessingml.document\\"", "file_extension=\\"xlsx\\"", "mime_type=\\"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet\\"", "file_extension=\\"pptx\\"", "mime_type=\\"application/vnd.openxmlformats-officedocument.presentationml.presentation\\"" ] } ]',
-    contentTypes: [ 'pdfs', 'officedocs' ],
-    description: 'Displays documents which contain social security numbers.  It will look inside ZIP and RAR archives, as well',
-    regexTerms: [ '\\d\\d\\d-\\d\\d-\\d\\d\\d\\d' ],
-    onlyContentFromArchives: false
-  },
-
-  {
-    name: 'dob',
-    friendlyName: 'Date of Birth',
-    nwquery: "filetype = 'pdf','office 2007 document','zip','rar'",
-    saquery: '[ { "any" : [ "file_type=PDF", "file_extension=\\"pdf\\"", "mime_type=\\"application/pdf\\"", "file_type=ZIP", "file_extension=\\"zip\\"", "mime_type=\\"application/zip\\"", "file_type=RAR", "file_extension=\\"rar\\"", "mime_type=\\"application/x-rar-compressed\\"", "file_extension=\\"docx\\"", "mime_type=\\"application/vnd.openxmlformats-officedocument.wordprocessingml.document\\"", "file_extension=\\"xlsx\\"", "mime_type=\\"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet\\"", "file_extension=\\"pptx\\"", "mime_type=\\"application/vnd.openxmlformats-officedocument.presentationml.presentation\\"" ] } ]',
-    contentTypes: [ 'pdfs', 'officedocs' ],
-    description: 'Displays documents which contain dates of birth', 
-    regexTerms: [ 
-      '(?i)(dob|date of birth|birth date|birthdate|birthday|birth day).*\\d\\d?[-/]\\d\\d?[-/]\\d{2}(?:\\d{2})?\\W',
-      '(?i)(dob|date of birth|birth date|birthdate|birthday|birth day).*\\d\\d? \\w+,? \\d{2}(?:\\d{2})?\\W',
-      '(?i)(dob|date of birth|birth date|birthdate|birthday|birth day).*\\w+ \\d\\d?,? \\d{2}(?:\\d{2})?\\W'
-    ],
-    onlyContentFromArchives: false
-  },
-
-  {
-    name: 'contentinarchives',
-    friendlyName: 'All Content Contained in Archives',
-    nwquery: "filetype = 'zip','rar'",
-    saquery: '[ { "any" : [ "file_type=ZIP", "file_extension=\\"zip\\"", "mime_type=\\"application/zip\\"", "file_type=RAR", "file_extension=\\"rar\\"", "mime_type=\\"application/x-rar-compressed\\"" ] } ]',
-    contentTypes: [ 'images', 'pdfs', 'officedocs' ],
-    description: 'Displays any content type contained within a ZIP or RAR archive.  It does not display dodgy archives',
-    onlyContentFromArchives: true
-  },
-  
-  {
-    name: 'contentinarchivesdodgy',
-    friendlyName: 'All Content Contained in Archives (with Dodgy Archives)',
-    nwquery: "filetype = 'zip','rar'",
-    saquery: '[ { "any" : [ "file_type=ZIP", "file_extension=\\"zip\\"", "mime_type=\\"application/zip\\"", "file_type=RAR", "file_extension=\\"rar\\"", "mime_type=\\"application/x-rar-compressed\\"" ] } ]',
-    contentTypes: [ 'images', 'pdfs', 'officedocs', 'dodgyarchives' ],
-    description: 'Displays any content type contained within a ZIP or RAR archive.  It also displays dodgy archives',
-    onlyContentFromArchives: true
-  },
-
-  {
-    name: 'suspiciousdestcountries',
-    friendlyName: 'Documents to Suspicious Destination Countries',
-    nwquery: `country.dst = 'russian federation','china','romania','belarus','iran, islamic republic of',"korea, democratic people's republic of",'ukraine','syrian arab republic','yemen' && filetype = 'zip','rar','pdf','office 2007 document'`,
-    saquery: '[ { "any" : [ "responder_country=\\"russian federation\\"", "responder_country=\\"china\\"", "responder_country=\\"romania\\"", "responder_country=\\"belarus\\"", "responder_country=\\"iran, islamic republic of\\"", "responder_country=\\"korea, democratic people\'s republic of\\"", "responder_country=\\"ukraine\\"", "responder_country=\\"syrian arab republic\\"", "responder_country=\\"yemen\\"" ] }, { "any" : [ "file_type=ZIP", "file_extension=\\"zip\\"", "mime_type=\\"application/zip\\"", "file_type=RAR", "file_extension=\\"rar\\"", "mime_type=\\"application/x-rar-compressed\\"", "file_extension=\\"docx\\"", "mime_type=\\"application/vnd.openxmlformats-officedocument.wordprocessingml.document\\"", "file_extension=\\"xlsx\\"", "mime_type=\\"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet\\"", "file_extension=\\"pptx\\"", "mime_type=\\"application/vnd.openxmlformats-officedocument.presentationml.presentation\\"" ] } ]',
-    contentTypes: [ 'pdfs', 'officedocs', 'dodgyarchives' ],
-    description: 'Displays documents and dodgy archives transferred to suspicious destination countries: Russia, China, Romania, Belarus, Iran, North Korea, Ukraine, Syra, or Yemen',
-    onlyContentFromArchives: false
-  },
-
-  {
-    name: 'dodgyarchives',
-    friendlyName: 'Dodgy Archives',
-    nwquery: "filetype = 'zip','rar'",
-    saquery: '[ { "any" : [ "file_type=ZIP", "file_extension=\\"zip\\"", "mime_type=\\"application/zip\\"", "file_type=RAR", "file_extension=\\"rar\\"", "mime_type=\\"application/x-rar-compressed\\"" ] } ]',
-    contentTypes: [ 'dodgyarchives' ],
-    description: 'Displays ZIP and RAR Archives which are encrypted or which contain some encrypted files',
-    onlyContentFromArchives: false
-  },
-
-  {
-    name: 'outboundwebmonitoring',
-    friendlyName: 'Outbound Web Usage Monitoring',
-    nwquery: "direction = 'outbound' && service = 80 && filetype = 'jpg','gif','png'",
-    saquery: '[ { "any" : [ "ipv4_initiator=172.16.0.0/12", "ipv4_initiator=192.168.0.0/16", "ipv4_initiator=192.168.0.0/16" ] }, { "all" : [ "ipv4_responder!=172.16.0.0/12", "ipv4_responder!=192.168.0.0/16", "ipv4_responder!=192.168.0.0/16" ] }, { "any" : [ "file_type~GIF", "file_extension=\\"gif\\"", "mime_type=\\"image/gif\\"", "file_type=PNG", "file_extension=\\"png\\"", "mime_type=\\"image/png\\"", "file_type=JPEG", "file_extension=\\"jpg\\"", "file_extension=\\"jpeg\\"", "mime_type=\\"image/jpeg\\"", "mime_type=\\"image/jpg\\"", "mime_type=\\"image/pjpeg\\"", "mime_type=\\"image/jp2\\"" ] } ]',
-    contentTypes: [ 'images' ],
-    description: 'Displays images from outbound web usage.  Recommended for use in a Monitoring Collection',
-    onlyContentFromArchives: false
-  }
-
-];
+const useCases = this.useCases || require('./usecases');
 var useCasesObj = {};
 // Populate an object with our use cases so we can later reference them by use case name
 for (let i = 0; i < useCases.length; i++) {
@@ -494,7 +325,27 @@ catch(e) {
   process.exit(1);
 }
 
+
+///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////CONNECT TO MONGO///////////////////////////////////////////////////////////////////////
+///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
 connectToDB(); // this must come before mongoose user connection so that we know whether to create the default admin account
+
+
+
+///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////START FEED SERVER//////////////////////////////////////////////////////////////////////
+///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+try {
+  startFeeder();
+}
+catch(err) {
+  winston.error("Caught error whilst starting feed server:", err);
+  winston.error(err);
+  process.exit(1);
+}
+
 
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -510,7 +361,7 @@ app.post('/api/login', passport.authenticate('local'), (req,res) => {
     if (err) {
       winston.info("Error looking up user " + req.body.username + ': ' + err);
     }
-    if (!user) { //we likely will never enter this block as  the validation is really already done by passport
+    if (!user) { // we likely will never enter this block as the validation is really already done by passport
       winston.info('Login failed for user ' + req.body.username + '.  User either not found or not enabled');
       res.json({ success: false, message: 'Authentication failed' });
     }
@@ -2233,10 +2084,15 @@ app.post('/api/preferences', passport.authenticate('jwt', { session: false } ), 
       }
     }
 
+    if ('serviceTypes' in prefs) {
+      // we don't want to save the serviceType to the DB
+      delete prefs.serviceType;
+    }
     
     db.collection('preferences').updateOne( {}, prefs, (err, result) => {
       if (err) throw err;
       winston.info(`User '${req.user.username}' has updated the global preferences`);
+      prefs['serviceTypes'] = serviceTypes; // re-add the service types
       preferences = prefs;
       tokenExpirationSeconds = 60 * 60 * preferences.tokenExpirationHours
       io.emit('preferences', preferences);
@@ -2397,8 +2253,12 @@ function redactApiServerPasswords(apiservers) {
 
 
 
-function writePreferences() {
-  db.collection('preferences').updateOne( {}, preferences, (err, res) => {
+function writePreferences(prefs) {
+  if ('serviceTypes' in prefs) {
+    delete prefs.serviceType;
+  }
+
+  db.collection('preferences').updateOne( {}, prefs, (err, res) => {
     if (err) throw err;
   });
 }
@@ -2457,24 +2317,24 @@ function extraJwtTokenValidation(jwt_payload, done) {
 
 function onMongooseConnected() {
   // Create the default user account, if we think the app was just installed and if the count of users is 0
-  User.count( {}, (err, count) => {
-    if (err) {
-      winston.error("Error getting user count:", err);
-    }
-    else if (justInstalled && ( count == 0 || !count ) ) {
-        // we only create the default user on first run because we 
-        winston.info("Adding default user 'admin'");
-        createDefaultUser();
-        justInstalled = false;
-    }
-  });
+  return User.count( {} )
+            .then( (count) => {
+              if (justInstalled && ( count == 0 || !count ) ) {
+                  // we only create the default user on first run because we 
+                  winston.info("Adding default user 'admin'");
+                  createDefaultUser();
+                  justInstalled = false;
+              }
+            })
+            .catch( err => winston.error("Error getting user count:", err) );
+
 }
 
 
 
 var User = null;
 
-function mongooseInit() {
+async function mongooseInit() {
   // Initialise Mongoose.  This gets called from within connectToDB(), after mongoClient has connected to Mongo
   winston.debug('Initializing mongoose');
 
@@ -2510,80 +2370,54 @@ function mongooseInit() {
   };
   let jwtStrategy = new JwtStrategy(jwtOpts, (jwt_payload, done) => extraJwtTokenValidation(jwt_payload, done) );
   passport.use(jwtStrategy);
-  
 
-  
-
-  // Connect to Mongoose
-  mongoose.connect(mongooseUrl, mongooseOptions )
-          .then( () => onMongooseConnected() )
-          .then( () => startFeeder() )
-          .catch( (err) => {
-            winston.error('Mongoose error whilst connecting to mongo.  Exiting with code 1.');
-            winston.error(err);
-            process.exit(1);
-          } );
+  try {
+    await mongoose.connect(mongooseUrl, mongooseOptions);
+    await onMongooseConnected();
+  }
+  catch(err) {
+    winston.error('Mongoose error whilst connecting to mongo.  Exiting with code 1.');
+    winston.error(err);
+    process.exit(1);
+  }
 
 }
 
 
 
-function processMongoCollections() {
+async function processMongoCollections() {
   winston.debug('processMongoCollections()');
   
-  return db.collection('preferences').findOne().then( (res) => {
-    winston.debug("Reading preferences");
+  // load preferences
+  let writeDefaultPrefs = false;
+  try {
+    let res = await db.collection('preferences').findOne();
+    preferences = processPreferences(res);
+  }
+  catch {
+    writeDefaultPrefs = true;
+  }
 
-    let rewritePrefs = false; 
-    preferences = res;
-    // merge in default preferences which aren't in our loaded preferences (like for upgrades)
-    for (let pref in defaultPreferences) {
-      if (defaultPreferences.hasOwnProperty(pref)) {
-        if (!preferences.hasOwnProperty(pref)) {
-          winston.info(`Adding new default preference for ${pref}`);
-          preferences[pref] = defaultPreferences[pref];
-          rewritePrefs = true;
-        }
-      }
+  if (writeDefaultPrefs) {
+    try {
+      winston.info("Creating default preferences");
+      preferences = defaultPreferences;
+      await db.collection('preferences').insertOne(preferences)
+      preferences['serviceTypes'] = serviceTypes;
     }
-    for (let pref in defaultPreferences.nw) {
-      if (defaultPreferences.nw.hasOwnProperty(pref)) {
-        if (!preferences.nw.hasOwnProperty(pref)) {
-          winston.info(`Adding new default NetWitness preference for ${pref}`);
-          preferences.nw[pref] = defaultPreferences.nw[pref];
-          rewritePrefs = true;
-        }
-      }
+    catch(err) {
+      winston.error('Caught error writing default preferences to DB.  Exiting with code 1');
+      winston.error(err);
+      process.exit(1);
     }
-    for (let pref in defaultPreferences.sa) {
-      if (defaultPreferences.sa.hasOwnProperty(pref)) {
-        if (!preferences.sa.hasOwnProperty(pref)) {
-          winston.info(`Adding new default Security Analytics preference for ${pref}`);
-          preferences.sa[pref] = defaultPreferences.sa[pref];
-          rewritePrefs = true;
-        }
-      }
-    }
-    tokenExpirationSeconds = 60 * 60 * preferences.tokenExpirationHours; // 24 hours is default
-    justInstalled = false;
-    if (rewritePrefs) {
-      writePreferences();
-    }
-    // winston.debug('preferences:', preferences);
-  })
-  .catch( () => {
-    winston.info("Creating default preferences");
-    preferences = defaultPreferences;
-    db.collection('preferences').insertOne( preferences, (err, res) => {
-      if (err) throw err;
-    });
-  } )
-  
-  
-  .then( () => {
-    return db.collection('nwservers').find({}).toArray().then( (res) => {
+  }
+
+  // load nw servers
+  if (serviceTypes.nw) {
+    try {
+      let res = await db.collection('nwservers').find({}).toArray();
       if (Object.keys(res).length === 0) {
-        return Promise.reject();
+        throw "No NW servers were defined";
       }
       winston.debug("Reading nwservers");
       for (let x=0; x < res.length; x++) {
@@ -2591,14 +2425,18 @@ function processMongoCollections() {
         nwservers[id] = res[x];
       }
       // winston.debug('nwservers:', nwservers);
-    } );
-  } )
-  .catch( () => { winston.info('Collection nwservers was not previously defined')} )
-
-  .then( () => {
-    return db.collection('saservers').find({}).toArray().then( (res) => {
+    }
+    catch {
+      winston.info('Collection nwservers was not previously defined');
+    }
+  }
+  
+  // load sa servers
+  if (serviceTypes.sa) {
+    try {
+      let res = await db.collection('saservers').find({}).toArray();
       if (Object.keys(res).length === 0) {
-        return Promise.reject();
+        throw "No SA servers were defined";
       }
       winston.debug("Reading saservers");
       for (let x = 0; x < res.length; x++) {
@@ -2606,31 +2444,35 @@ function processMongoCollections() {
         saservers[id] = res[x];
       }
       // winston.debug('saservers:', saservers);
-    } );
-  } )
-  .catch( () => { winston.info('Collection saservers was not previously defined')} )
+    }
+    catch {
+      winston.info('Collection saservers was not previously defined');
+    }
+  }
 
-  .then( () => {
-    return db.collection('feeds').find({}).toArray().then( (res) => {
-      if (Object.keys(res).length === 0) {
-        return Promise.reject();
-      }
-      winston.debug("Reading feeds");
-      for (let x = 0; x < res.length; x++) {
-        let id = res[x].id;
-        feeds[id] = res[x];
-      }
-      scheduler.updateSchedule(feeds);
-      // winston.debug('feeds:', feeds);
+  // load feeds
+  try {
+    let res = await db.collection('feeds').find({}).toArray();
+    if (Object.keys(res).length === 0) {
+      throw "No feeds were found";
+    }
+    winston.debug("Reading feeds");
+    for (let x = 0; x < res.length; x++) {
+      let id = res[x].id;
+      feeds[id] = res[x];
+    }
+    scheduler.updateSchedule(feeds);
+    // winston.debug('feeds:', feeds);
+  }
+  catch {
+    winston.info('Collection feeds was not previously defined');
+  }
 
-    } );
-  } )
-  .catch( () => { winston.info('Collection feeds was not previously defined')} )
 
-
-  .then( () => {
-    return db.collection('blacklist').find({}).toArray().then( (res) => {
-      winston.debug("Reading blacklist");
+  // blacklist
+  try {
+    let res = await db.collection('blacklist').find({}).toArray();
+    winston.debug("Reading blacklist");
       for (let x = 0; x < res.length; x++) {
         let id = res[x].id;
         let timestamp = res[x].timestamp;
@@ -2639,49 +2481,46 @@ function processMongoCollections() {
       // winston.debug('tokenBlacklist:', tokenBlacklist);
       setInterval( () => cleanBlackList(), 1000 * 60); // run every minute
       cleanBlackList();
-    } );
-  } )
+  }
+  catch {}
 
-
-  .then( () => {
-    return db.collection('collections').find({}).toArray().then( (res) => {
-      if (Object.keys(res).length === 0) {
-        return Promise.reject();
+  // collections
+  try {
+    let res = await db.collection('collections').find({}).toArray();
+    if (Object.keys(res).length === 0) {
+      throw "No feeds were found";
+    }
+    winston.debug("Reading collections");
+    for (let x = 0; x < res.length; x++) {
+      let collection = res[x];
+      if (collection.type == 'monitoring' || collection.type == 'rolling') {
+        collection.state = 'stopped';
       }
-      winston.debug("Reading collections");
-      for (let x = 0; x < res.length; x++) {
-        let collection = res[x];
-        if (collection.type == 'monitoring' || collection.type == 'rolling') {
-          collection.state = 'stopped';
-        }
-        collections[collection.id] = collection;
-       }
-       cleanCollectionDirs();
-       // winston.debug('collections:', collections);
-    } );
-  } )
-  .catch( () => {
-    winston.info('Collection \'collections\' was not previously defined')
-  } )
+      collections[collection.id] = collection;
+     }
+     cleanCollectionDirs();
+     // winston.debug('collections:', collections);
+  }
+  catch {
+    winston.info('Collection \'collections\' was not previously defined');
+  }
 
-  .then( () => {
-    return db.collection('collectionsData').find({}).toArray().then( (res) => {
-      if (Object.keys(res).length === 0) {
-        return Promise.reject();
-      }
-      winston.debug("Reading collectionsData");
-      for (let x = 0; x < res.length; x++) {
-        let id = res[x].id;
-        collectionsData[id] = JSON.parse(res[x].data);
-      }
-    } );
-  } )
-  .catch( () => {
-    winston.info('Collection \'collectionsData\' was not previously defined')
-  } )
-
-
-
+  // collectionsData
+  try {
+    let res = await db.collection('collectionsData').find({}).toArray();
+    if (Object.keys(res).length === 0) {
+      throw "No feeds were found";
+    }
+    winston.debug("Reading collectionsData");
+    for (let x = 0; x < res.length; x++) {
+      let id = res[x].id;
+      collectionsData[id] = JSON.parse(res[x].data);
+    }
+  }
+  catch {
+    winston.info('Collection \'collectionsData\' was not previously defined');
+  }
+  
 }
 
 
@@ -2693,44 +2532,87 @@ var db = null;
 function onMongoConnected(database) {
   winston.debug('onMongoConnected()');
   db = database;
-  return Promise.resolve();
 }
 
 
 
-function connectToDB() {
+async function connectToDB() {
   winston.debug('Initializing mongo db and reading settings');
-
   
   // We use mongoose for auth, and MongoClient for everything else.  This is because Passport-Local Mongoose required it, and it is ill-suited to the free-formish objects which we want to use.
   let mongoUrl = `mongodb://${config['dbConfig']['host']}:${config['dbConfig']['port']}/afb`;
   if (config.dbConfig.authentication.enabled) {
     mongoUrl = `mongodb://${config.dbConfig.authentication.user}:${config.dbConfig.authentication.password}@${config['dbConfig']['host']}:${config['dbConfig']['port']}/afb?authSource=admin`;
   }
-  
-  let connectionAttempts = 1;
-  let connectorFunc = () => {
-    mongo.connect(mongoUrl)
-    .then( (database) => onMongoConnected(database) )
-    .then( () => processMongoCollections() )
-    .then( () => mongooseInit() )
-    .catch( (err) => {
+
+  for (let connectionAttempts = 0; connectionAttempts <= 3; connectionAttempts++ ) {
+    try {
+      let database = await mongo.connect(mongoUrl);
+      onMongoConnected(database);
+      await processMongoCollections();
+      await mongooseInit();
+      break;
+    }
+    catch (err) {
       // winston.error(err);
       if (connectionAttempts == 3) {
-        winston.error('Maximum retries reached whilst connecting to mongo.  Exiting with code 1');
+        winston.error('Maximum retries reached whilst connecting to MongoDB.  Exiting with code 1');
         winston.error(err.message);
         process.exit(1);
       }
-      winston.warn('Could not connect to Mongo DB');
-      connectionAttempts++;
-      if (connectionAttempts <= 3) {
-        winston.warn('Retrying mongo connection in 3 seconds');
-      }
+      winston.warn('Could not connect to MongoDB.  Retrying in 3 seconds');
       sleep.sleep(3);
-      connectorFunc();
-    });
-  };
-  connectorFunc();
+    }
+  }
+}
+
+
+
+function processPreferences(prefs) {
+  winston.debug("Reading preferences");
+
+  let rewritePrefs = false; 
+
+  // merge in default preferences which aren't in our loaded preferences (like for upgrades)
+  for (let pref in defaultPreferences) {
+    if (defaultPreferences.hasOwnProperty(pref)) {
+      if (!prefs.hasOwnProperty(pref)) {
+        winston.info(`Adding new default preference for ${pref}`);
+        prefs[pref] = defaultPreferences[pref];
+        rewritePrefs = true;
+      }
+    }
+  }
+  if (serviceTypes.nw) {
+    for (let pref in defaultPreferences.nw) {
+      if (defaultPreferences.nw.hasOwnProperty(pref)) {
+        if (!prefs.nw.hasOwnProperty(pref)) {
+          winston.info(`Adding new default NetWitness preference for ${pref}`);
+          prefs.nw[pref] = defaultPreferences.nw[pref];
+          rewritePrefs = true;
+        }
+      }
+    }
+  }
+  if (serviceTypes.sa) {
+    for (let pref in defaultPreferences.sa) {
+      if (defaultPreferences.sa.hasOwnProperty(pref)) {
+        if (!prefs.sa.hasOwnProperty(pref)) {
+          winston.info(`Adding new default Security Analytics preference for ${pref}`);
+          prefs.sa[pref] = defaultPreferences.sa[pref];
+          rewritePrefs = true;
+        }
+      }
+    }
+  }
+  tokenExpirationSeconds = 60 * 60 * prefs.tokenExpirationHours; // 24 hours is default
+  justInstalled = false;
+  if (rewritePrefs) {
+    writePreferences(prefs);
+  }
+  prefs['serviceTypes'] = serviceTypes;
+  // winston.debug('preferences:', prefs);
+  return prefs;
 }
 
 
@@ -2775,7 +2657,7 @@ function cleanCollectionDirs() {
 
 
 function createDefaultUser() {
-  User.register(new User({ id: uuidV4(), username : 'admin', fullname: 'System Administrator', email: 'noreply@knowledgekta.com', enabled: true }), 'kentech0', (err, user) => {
+  return User.register(new User({ id: uuidV4(), username : 'admin', fullname: 'System Administrator', email: 'noreply@knowledgekta.com', enabled: true }), 'kentech0', (err, user) => {
     if (err) {
       winston.error("adding default user 'admin':", err);
     }
@@ -2942,29 +2824,24 @@ var feederSrvProcess = null;
 function startFeeder() {
   winston.debug('startFeeder(): starting feeder_srv');
 
-  try {
-    // get a temporary file to use as our domain socket
-    let tempName = temp.path({suffix: '.socket'});
+  // get a temporary file to use as our domain socket
+  let tempName = temp.path({suffix: '.socket'});
+  
+  // open UNIX domain socket to talk to server script, and set the socket handler to onConnectionFromFeederSrv
+  let socketServer = net.createServer( (socket) => onConnectionFromFeederSrv(socket, tempName) );
+
+  // start the feeder_srv
+  socketServer.listen(tempName, () => {
     
-    // open UNIX domain socket to talk to server script, and set the socket handler to onConnectionFromFeederSrv
-    let socketServer = net.createServer( (socket) => onConnectionFromFeederSrv(socket, tempName) );
+    winston.debug('Waiting for Feeder connection');
+    winston.debug("Launching feeder_srv with socket file " + tempName);
 
-    // start the feeder_srv
-    socketServer.listen(tempName, () => {
-      
-      winston.debug('Waiting for Feeder connection');
-      winston.debug("Launching feeder_srv with socket file " + tempName);
-
-      // spawn the feeder process
-      feederSrvProcess = spawn('./feeder_stub.py', [tempName], { shell: false, stdio: 'inherit' });
-      
-      // wait for the feeder to exit (ideally it shouldn't until we shutdown)
-      feederSrvProcess.on('exit', onFeederExit );
-    });
-  }
-  catch(e) {
-    winston.error("startFeeder(): Caught error:", e);
-  }
+    // spawn the feeder process
+    feederSrvProcess = spawn('./feeder_stub.py', [tempName], { shell: false, stdio: 'inherit' });
+    
+    // wait for the feeder to exit (ideally it shouldn't until we shutdown)
+    feederSrvProcess.on('exit', onFeederExit );
+  });
 }
 
 
@@ -3044,8 +2921,6 @@ var fixedHandler = null;
 //////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
 
-var ioSocket = null;
-
 function extraIoJwtTokenValidation(jwt_payload, done) {
   // After automatically verifying that JWT was signed by us, perform extra validation with this function
   // winston.debug("jwt validator jwt_payload:", jwt_payload);
@@ -3075,7 +2950,7 @@ function extraIoJwtTokenValidation(jwt_payload, done) {
     }
     else {
       socket.disconnect(true);
-      return done(new Errror());
+      return done(new Error());
       // or you could create a new account
     }
   });
@@ -3110,8 +2985,6 @@ function ioAuthenticator(socket, done) {
       // winston.debug('auth error:', err);
 
       // winston.debug('jwt:', decoded);
-      socket.conn['user'] = decoded; // write our token info to the socket so it can be accessed later
-      
       
       if (err) {
         // authentication failed
@@ -3120,22 +2993,29 @@ function ioAuthenticator(socket, done) {
         return done(new Error());
       }
 
+      socket.conn['user'] = decoded; // write our token info to the socket so it can be accessed later
       tokensToIoSockets[decoded.jti] = socket;
       extraIoJwtTokenValidation(decoded, done);
       
     } );
   }
-  
 }
 
-io.use(ioCookieParser);
-io.use(ioAuthenticator);
 
-var collectionsChannel = null;
-collectionsChannel = io.of('/collections');
+
+const postAuthenticate = socket => {
+  socket.emit('preferences', preferences);
+  socket.emit('collections', collections);
+  socket.emit('publicKey', internalPublicKey);
+  socket.emit('nwservers', redactApiServerPasswords(nwservers));
+  socket.emit('saservers', redactApiServerPasswords(saservers));
+  socket.emit('feeds', feeds);
+  socket.emit('feedStatus', scheduler.status() );
+  emitUsers(socket);
+  socket.emit('useCases', useCases);
+}
 
 function onSocketIoConnect(socket) {
-  ioSocket = socket;
   winston.debug('A socket client connected');
   socket.on('disconnect', () => onSocketIoDisconnect() );
 
@@ -3154,11 +3034,34 @@ function onSocketIoConnect(socket) {
 
 
 
+function onSocketIoConnectNew(socket) {
+  winston.debug('A socket client connected');
+  socket.on('disconnect', () => onSocketIoDisconnect() );
+  // socket.on('authenticate', () = > {} );
+
+  // immediately send configuration to client
+  socket.emit('serverVersion', version);
+}
+
+
+
 function onSocketIoDisconnect(socket) {
   // winston.debug('A socket client disconnected');
 }
 
 
+
+const io = require('socket.io')(server);
+const ioCookieParser = require('socket.io-cookie');
+io.use(ioCookieParser);
+io.use(ioAuthenticator);
+const collectionsChannel = io.of('/collections'); // create /collections namespace
+const licenseChannel = io.of('/license'); // create /license namespace
+
+
+
+// Set up feed scheduler
+const scheduler = new feedScheduler(feedsDir, decryptor, (id) => schedulerUpdatedCallback(id), io);
 
 
 
