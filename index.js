@@ -80,6 +80,7 @@ else {
 // export NODE_ENV='development'
 var debug = 'AFBDEBUG' in process.env && process.env['AFBDEBUG'] > 0;
 global.purgeHack = false; // causes sessions older than 5 minutes to be purged, if set to true.  Useful for testing purging without having to wait an hour
+global.purgeHackMinutes = 5;
 var gsPath = '/usr/bin/gs';
 var sofficePath = '/usr/bin/soffice';
 var pdftotextPath = '/usr/bin/pdftotext';
