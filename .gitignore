@@ -8,3 +8,4 @@ SPECS
 rpmbuild
 server.js
 server.js.map
+test1.js

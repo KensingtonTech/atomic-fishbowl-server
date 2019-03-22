@@ -48,12 +48,21 @@ class RollingCollectionHandler {
     // sessionId should be null if a standard rolling collection
     winston.debug('RollingCollectionHandler: onJoinCollection()');
     // winston.debug('RollingCollectionHandler: onJoinCollection(): socket', socket);
-    
+
     let collectionId = data['collectionId'];
     let collection = this.cfg.collections[collectionId];
 
     let rollingId = collectionId;
     let sessionId = data['sessionId'];
+
+    winston.debug('RollingCollectionHandler: onJoinCollection(): collectionId:', collectionId);
+    winston.debug('RollingCollectionHandler: onJoinCollection(): rollingId:', rollingId);
+    winston.info(`User '${socket.conn.user.username}' has connected to ${collection.type} collection '${collection.name}'`);
+
+    if (!license.valid) {
+      winston.info(`License is invalid.  Aborting attempt to connect to rolling or monitoring collection '${collection.name}'`);
+      return;
+    }
 
     if (collection.type === 'monitoring') {
       rollingId = collectionId + '_' + sessionId;
@@ -62,10 +71,6 @@ class RollingCollectionHandler {
     socket['collectionId'] = collectionId;
     socket['collectionName'] = collection.name;
     socket['collectionType'] = collection.type;
-
-    winston.debug('RollingCollectionHandler: onJoinCollection(): collectionId:', collectionId);
-    winston.debug('RollingCollectionHandler: onJoinCollection(): rollingId:', rollingId);
-    winston.info(`User '${socket.conn.user.username}' has connected to ${collection.type} collection '${collection.name}'`);
 
     socket.join(rollingId); // this joins a room for rollingId
 
@@ -765,7 +770,9 @@ class RollingCollectionManager {
   abort() {
     winston.debug('RollingCollectionManager: abort()');
 
-    // we only get here if the program is exiting, either gracefully or due to an error
+    // we only get here in these cases:
+    //   1. the program is exiting, either gracefully or due to an error
+    //   2. license expired
 
     // stop the work loop
     if (this.workInterval) {
@@ -787,11 +794,17 @@ class RollingCollectionManager {
       clearTimeout(this.destroyTimeout);
       this.destroyTimeout = null;
     }
+
+    let state = 'stopped';
+    this.collection['state'] = state;
+    this.sendToChannel('state', state);
+    this.sendToChannel('clear', true);
+    this.dbUpdateCallback(this.collectionId);
+
     
-    // this.sendToChannel('clear', true);
     // this.sendToHttpClients( { collectionDeleted: this.collectionId } ); // don't think this belongs here
-    this.endAllClients();
     // this.removalCallback(this.collectionId);
+    this.endAllClients();
   }
 
 
@@ -962,6 +975,7 @@ class RollingCollectionManager {
 
 
   sendToChannel(type, data) {
+    // sends data to all connected socket.io clients
     if (this.channel) {
       this.channel.to(this.rollingId).emit( type, data );
     }
@@ -1298,19 +1312,38 @@ class RollingCollectionManager {
       onlyContentFromArchives: this.collection.onlyContentFromArchives || false
     };
   
-    if (this.collection.serviceType == 'nw') {
-      cfg['summaryTimeout'] = this.cfg.preferences.nw.summaryTimeout;
-      cfg['queryTimeout'] = this.cfg.preferences.nw.queryTimeout;
-      cfg['contentTimeout'] = this.cfg.preferences.nw.contentTimeout;
-      cfg['maxContentErrors'] = this.cfg.preferences.nw.maxContentErrors;
-      cfg['sessionLimit'] = this.cfg.preferences.nw.sessionLimit;
+    try {
+      if (this.collection.serviceType === 'nw') {
+        cfg['summaryTimeout'] = this.cfg.preferences.nw.summaryTimeout;
+        cfg['queryTimeout'] = this.cfg.preferences.nw.queryTimeout;
+        cfg['contentTimeout'] = this.cfg.preferences.nw.contentTimeout;
+        cfg['maxContentErrors'] = this.cfg.preferences.nw.maxContentErrors;
+        cfg['sessionLimit'] = this.cfg.preferences.nw.sessionLimit;
+      }
+    
+      if (this.collection.serviceType === 'sa') {
+        cfg['queryTimeout'] = this.cfg.preferences.sa.queryTimeout;
+        cfg['contentTimeout'] = this.cfg.preferences.sa.contentTimeout;
+        cfg['maxContentErrors'] = this.cfg.preferences.sa.maxContentErrors;
+        cfg['sessionLimit'] = this.cfg.preferences.sa.sessionLimit;
+      }
     }
-  
-    if (this.collection.serviceType == 'sa') {
-      cfg['queryTimeout'] = this.cfg.preferences.sa.queryTimeout;
-      cfg['contentTimeout'] = this.cfg.preferences.sa.contentTimeout;
-      cfg['maxContentErrors'] = this.cfg.preferences.sa.maxContentErrors;
-      cfg['sessionLimit'] = this.cfg.preferences.sa.sessionLimit;
+    catch(error) {
+      /*
+      On 3/21/19, the server crashed with this when connecting to a NW rolling collection.  Could not reproduce:
+      2019-03-21 10:01:27,691 afb_server    DEBUG      RollingCollectionManager: onConnectionFromWorker()
+      2019-03-21 10:01:27,691 afb_server    DEBUG      onConnectionFromWorker(): Connection received from worker to build rolling or monitoring collection ad3a7b05-801e-4220-fca4-1d631dbc0f52
+      TypeError: Cannot read property 'summaryTimeout' of undefined
+          at RollingCollectionManager.onConnectionFromWorker (/Users/tunderhay/src/afb-server/rolling-collections.js:1302:55)
+          at Server.net.createServer (/Users/tunderhay/src/afb-server/rolling-collections.js:1072:14)
+          at Server.emit (events.js:197:13)
+          at Pipe.onconnection (net.js:1501:8)
+      2019-03-21 10:01:27,694 afb_server    DEBUG      onCleanup(): exitCode: 1
+      2019-03-21 10:01:27,695 afb_server    DEBUG      onCleanup(): signal:
+      2019-03-21 10:01:27,704 afb_worker    INFO       Exiting afb_worker with code 0
+      */
+      winston.error('Caught error trying to read preferences.  Exiting with code 1.  cfg is:', this.cfg);
+      process.exit(1);
     }
   
     if (this.collection.bound) {

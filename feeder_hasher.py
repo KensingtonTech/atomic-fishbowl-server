@@ -74,7 +74,7 @@ class Hasher():
     id = feed['id']
     self.feedConfig[id] = feed
     with open(self.feedsDir + '/' + id + '.feed', 'r', -1 ) as feedFile:
-      crc = adler32( feedFile.read() ) #calculate CRC file (faster than hashing, in theory, and is good enough for us)
+      crc = adler32( feedFile.read().encode('utf-8') ) #calculate CRC file (faster than hashing, in theory, and is good enough for us)
       self.feedCRCs[id] = crc
       feedData = { 'md5': {}, 'sha1': {}, 'sha256': {} }
       delimiter = feed['delimiter']

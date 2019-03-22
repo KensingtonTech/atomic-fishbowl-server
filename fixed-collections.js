@@ -62,6 +62,11 @@ class FixedCollectionHandler {
       // build the collection or join the building collection
       
       // winston.debug('FixedCollectionHandler: onJoinCollection(): this socket is in rooms:', socket.rooms);
+
+      if (!license.valid && !this.cfg.collections[collectionId]['state'] == 'building') {
+        winston.info(`License is invalid.  Aborting attempt to build fixed collection '${collection.name}'`);
+        return;
+      }
   
       let fixedCollectionManager = null;
       if ( !(collectionId in this.collectionManagers)) {

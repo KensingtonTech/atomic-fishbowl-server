@@ -53,6 +53,7 @@ global.request = require('request');
 const path = require('path');
 const nodeCleanup = require('node-cleanup');
 const isDocker = require('is-docker');
+const schedule = require('node-schedule');
 
 // versioning
 const buildProperties = require('./build-properties');
@@ -181,6 +182,13 @@ var collectionsData = {}; // holds content data and session data
 var feeds = {}; // holds definitions for hash data CSV's
 var exiting = false;
 
+const testLicensing = false; // will cause the license to expire in testLicensingMins minutes
+const testLicensingMins = null; // null will disable override of minutes
+global.license = {
+  valid: false,
+  expiryTime: 0
+};
+
 const cfgDir = '/etc/kentech/afb';
 const certDir = cfgDir + '/certificates';
 const cfgFile = cfgDir + '/afb-server.conf';
@@ -199,6 +207,8 @@ var feederSocket = null;
 var feederSocketFile = null;
 var feederInitialized = false;
 var apiInitialized = false;
+
+var licenseExpiryJob = null; // placeholder for cron-like job to expire the license
 
 // var tokenExpirationSeconds = 60 * 60 * 24; // 24 hours
 // var tokenExpirationSeconds = 60 * 60 * preferences.tokenExpirationHours; // 24 hours is default
@@ -2166,7 +2176,7 @@ app.get('/api/collection/fixed/:id', passport.authenticate('jwt', { session: fal
   }
   else {
     // couldn't find the collection
-    winston.warn(`User '${req.user.username}' has requested a non-existant fixed collection with id '${collectionId}'`);
+    winston.info(`User '${req.user.username}' has requested a non-existant fixed collection with id '${collectionId}'`);
     res.status(500).send( JSON.stringify( { success: false, error: e.message || e } ) );
   }
 
@@ -2394,8 +2404,10 @@ async function processMongoCollections() {
   try {
     let res = await db.collection('preferences').findOne();
     preferences = processPreferences(res);
+    // winston.debug('preferences:', preferences);
   }
   catch {
+    // if we get here, then justInstalled will still be true, as processPreferences() will not have run
     writeDefaultPrefs = true;
   }
 
@@ -2403,6 +2415,8 @@ async function processMongoCollections() {
     try {
       winston.info("Creating default preferences");
       preferences = defaultPreferences;
+      // insert first run timestamp into preference
+      preferences['firstRun'] = Math.floor(Date.now() / 1000);
       await db.collection('preferences').insertOne(preferences)
       preferences['serviceTypes'] = serviceTypes;
     }
@@ -2412,6 +2426,10 @@ async function processMongoCollections() {
       process.exit(1);
     }
   }
+
+  // validate the license
+  checkLicense();
+
 
   // load nw servers
   if (serviceTypes.nw) {
@@ -2561,7 +2579,7 @@ async function connectToDB() {
         winston.error(err.message);
         process.exit(1);
       }
-      winston.warn('Could not connect to MongoDB.  Retrying in 3 seconds');
+      winston.info('Could not connect to MongoDB.  Retrying in 3 seconds');
       sleep.sleep(3);
     }
   }
@@ -2575,6 +2593,7 @@ function processPreferences(prefs) {
   let rewritePrefs = false; 
 
   // merge in default preferences which aren't in our loaded preferences (like for upgrades)
+  // this block isn't used in the justInstalled case
   for (let pref in defaultPreferences) {
     if (defaultPreferences.hasOwnProperty(pref)) {
       if (!prefs.hasOwnProperty(pref)) {
@@ -2583,6 +2602,10 @@ function processPreferences(prefs) {
         rewritePrefs = true;
       }
     }
+  }
+  if (!('firstRun' in prefs)) {
+    prefs['firstRun'] = Math.floor(Date.now() / 1000);
+    rewritePrefs = true;
   }
   if (serviceTypes.nw) {
     for (let pref in defaultPreferences.nw) {
@@ -2614,6 +2637,61 @@ function processPreferences(prefs) {
   prefs['serviceTypes'] = serviceTypes;
   // winston.debug('preferences:', prefs);
   return prefs;
+}
+
+
+
+function checkLicense() {
+  winston.info('Checking license validity');
+  // check license validity
+  if (!development || testLicensing) {
+    let firstRun = preferences.firstRun;
+    winston.debug('firstRun:', firstRun);
+    let currentTime = Math.floor(Date.now() / 1000);
+    winston.debug('currentTime', currentTime);
+    let expiryTime = firstRun + 3600 * 24 * 60; // expire in 60 days from firstRun
+    if (testLicensing && testLicensingMins) {
+      winston.debug(`'testLicensing' is set to true.  License will expire ${testLicensingMins} minutes from now`);
+      expiryTime = currentTime + testLicensingMins * 60;
+    }
+    winston.debug('expiryTime', expiryTime);
+    let expiryDate = new Date(expiryTime * 1000);
+    license.expiryTime = expiryTime;
+    license.valid = currentTime < expiryTime;
+
+    if (license.valid) {
+      // run a cron-like job to expire the license at the specified time (60 days from firstRun)
+      winston.debug('License is valid.  Starting scheduler')
+      licenseExpiryJob = schedule.scheduleJob(expiryDate,  onLicenseExpired);
+    }
+  }
+  else {
+    // don't expire if in development mode
+    license.valid = true;
+    license.expiryTime = 0;
+  }
+  winston.debug('license:', license);
+  if (license.valid) {
+    winston.info('License is valid and will expire on ' + new Date(license.expiryTime * 1000).toUTCString());
+  }
+  else {
+    winston.info('License has expired.  Only existing fixed collections will be viewable');
+  }
+}
+
+
+
+function onLicenseExpired() {
+  winston.info('License has expired.  Rolling and monitoring collections will not function, and fixed collections will not build. ');
+  license.valid = false;
+
+  // kill all rolling collections (we'll let any building fixed collections finish building)
+  rollingHandler.killall();
+  
+  // tell all clients that the license is invalid
+  io.emit('license', license);
+  
+
 }
 
 
@@ -3014,7 +3092,10 @@ const postAuthenticate = socket => {
   socket.emit('feedStatus', scheduler.status() );
   emitUsers(socket);
   socket.emit('useCases', useCases);
+  socket.emit('license', license);
 }
+
+
 
 function onSocketIoConnect(socket) {
   winston.debug('A socket client connected');
@@ -3031,6 +3112,7 @@ function onSocketIoConnect(socket) {
   socket.emit('feedStatus', scheduler.status() );
   emitUsers(socket);
   socket.emit('useCases', useCases);
+  socket.emit('license', license);
 }
 
 
@@ -3047,7 +3129,7 @@ function onSocketIoConnectNew(socket) {
 
 
 function onSocketIoDisconnect(socket) {
-  // winston.debug('A socket client disconnected');
+  winston.debug('A socket client disconnected');
 }
 
 
@@ -3057,7 +3139,6 @@ const ioCookieParser = require('socket.io-cookie');
 io.use(ioCookieParser);
 io.use(ioAuthenticator);
 const collectionsChannel = io.of('/collections'); // create /collections namespace
-const licenseChannel = io.of('/license'); // create /license namespace
 
 
 
