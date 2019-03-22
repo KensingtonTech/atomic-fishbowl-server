@@ -24,7 +24,7 @@ VER="$MAJOR.$MINOR.$PATCH.$BUILD_NUMBER-$LEVEL"
 REPONAME="kentechrepo:5000"
 
 cat > build-properties.js << EOF
-let buildProperties = {
+let BuildProperties = {
   major: $MAJOR,
   minor: $MINOR,
   patch: $PATCH,
@@ -41,7 +41,7 @@ build:
   5: final release
 */
 
-module.exports = buildProperties;
+module.exports = BuildProperties;
 EOF
 
 # Install js modules
@@ -59,8 +59,9 @@ fi
 if [ "$LEVEL" -ne 1 ]; then
   AFBDEBUG=0
   # uglify the JS if not a dev build
-  uglifyjs servicetype.js defaultpreferences.js $DEFAULTSERVICEPREF usecases.js user.js feed-scheduler.js fixed-collections.js rolling-collections.js index.js --toplevel --compress --mangle --ecma 6 -o server.js --source-map url="server.js.map"
-  rm -f servicetype*.js default*preferences.js usecases.js user.js feed-scheduler.js fixed-collections.js rolling-collections.js index.js
+  uglifyjs build-properties.js servicetype.js defaultpreferences.js kentech-public-key.js $DEFAULTSERVICEPREF usecases.js user.js feed-scheduler.js fixed-collections.js rolling-collections.js index.js --toplevel --compress --mangle --ecma 6 -o server.out --source-map url="server.js.map"
+  rm -f *.js
+  mv server.out server.js
   
   # Compile python if not a dev build
   PYCOMPILE='worker worker_fetcher worker_contentobj worker_communicator worker_contentprocessor worker_feedmanager feeder_srv feeder_hasher feeder_communicator'

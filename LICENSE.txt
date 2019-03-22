@@ -20,7 +20,7 @@ Atomic Fishbowl - End User License Agreement
     4.1.3 Licensee was in breach of any of this license's terms and conditions and such breach was not cured, immediately upon notification; or
     4.1.4 Licensee in breach of any of the terms of clause 2 to this license; or
     4.1.5 Licensee otherwise entered into any arrangement which caused Licensor to be unable to enforce his rights under this License.
-  4.2 This license expires 90 days from the date of installation, at 12:01am Eastern Standard Time. This license shall be considered to be terminated at this date and time, and all rights, privileges, and entitlements assigned by this license shall be null and void.
+  4.2 This license expires 60 days from the time of installation. This license shall be considered to be terminated at this date and time, and all rights, privileges, and entitlements assigned by this license shall be null and void.
 
 5. Payment: In consideration of the temporary License granted under clause 2, Licensee may not pay Licensor a fee.
 

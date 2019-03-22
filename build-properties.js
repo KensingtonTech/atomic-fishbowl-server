@@ -1,4 +1,4 @@
-let buildProperties = {
+let BuildProperties = {
   major: 1,
   minor: 0,
   patch: 0,
@@ -16,4 +16,4 @@ build:
   5: final release
 */
 
-module.exports = buildProperties;
+module.exports = BuildProperties;

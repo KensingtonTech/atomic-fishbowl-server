@@ -56,7 +56,7 @@ const isDocker = require('is-docker');
 const schedule = require('node-schedule');
 
 // versioning
-const buildProperties = require('./build-properties');
+const buildProperties = this.BuildProperties || require('./build-properties');
 const version = `${buildProperties.major}.${buildProperties.minor}.${buildProperties.patch}.${buildProperties.build}-${buildProperties.level}`;
 
 
