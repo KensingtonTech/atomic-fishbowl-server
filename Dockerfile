@@ -27,6 +27,7 @@ RUN \
 echo 172.16.0.57 kentechrepo >> /etc/hosts \
 && cp /etc/yum.repos.d/CentOS-Base.repo /etc/yum.repos.d/CentOS-Base.repo.orig \
 && yum groupinstall -y Development\ Tools \
+&& yum install -y which \
 && /bin/sed -i'' 's/mirrorlist=/#mirrorlist=/g' /etc/yum.repos.d/CentOS-Base.repo \
 && /bin/sed -i'' 's/#baseurl=http:\/\/mirror.centos.org/baseurl=http:\/\/kentechrepo/g' /etc/yum.repos.d/CentOS-Base.repo \
 && yum clean all \
@@ -34,6 +35,7 @@ echo 172.16.0.57 kentechrepo >> /etc/hosts \
 && rpm --import http://kentechrepo/yumrepo/afb_1.0.0_signed/afb-1.x.key \
 && rpm --import http://kentechrepo/yumrepo/afb_1.0.0_signed/NODESOURCE-GPG-SIGNING-KEY-EL \
 && curl http://kentechrepo/yumrepo/afb_1.0.0_signed/afb-1.0.0-signed.repo > /etc/yum.repos.d/afb-1.0.0-signed.repo \
+&& curl -sL https://rpm.nodesource.com/setup_10.x | bash - \
 && yum install -y https://dl.fedoraproject.org/pub/epel/epel-release-latest-7.noarch.rpm \
 && yum install -y --disableplugin=fastestmirror nodejs ghostscript poppler-utils libjpeg-turbo openjpeg unzip unrar libreoffice python36 python36-devel \
 && curl -L https://bootstrap.pypa.io/get-pip.py > /root/get-pip.py \
@@ -46,7 +48,7 @@ echo 172.16.0.57 kentechrepo >> /etc/hosts \
 && yum erase -y epel-release python36-devel \
 && rm -f /etc/yum.repos.d/afb-1.0.0-signed.repo \
 && mv -f /etc/yum.repos.d/CentOS-Base.repo.orig /etc/yum.repos.d/CentOS-Base.repo \
-&& yum grouperase -y Development\ Tools \
+&& yum groupremove -y Development\ Tools \
 && yum clean all \
 && rm -rf /var/cache/yum \
 && H=`grep -v kentechrepo /etc/hosts` \
