@@ -1,7 +1,17 @@
 'use strict';
-
 // Load dependencies
 require('source-map-support').install();
+
+const falseRequire = function(lib) {
+  try {
+    let func = require(lib);
+    return func; 
+  }
+  catch(err) {
+    return false;
+  }
+}
+
 const Subject = require('rxjs/Subject').Subject;
 
 // command line arguments
@@ -16,8 +26,8 @@ const JwtStrategy = require('passport-jwt').Strategy;
 const ExtractJwt = require('passport-jwt').ExtractJwt;
 const mongoose = require('mongoose');
 mongoose.Promise = Promise;
-const User = this.MongooseModel || require('./user');
-global.Model = null;
+const User =  this.MongooseModel || falseRequire('./user') || MongooseModel;
+// global.Model = null;
 // passport auth gets set up in mongooseInit(), after we've successfully connected to mongo
 
 // express
@@ -58,14 +68,14 @@ const isDocker = require('is-docker');
 const schedule = require('node-schedule');
 
 // versioning
-const buildProperties = this.BuildProperties || require('./build-properties');
+const buildProperties = this.BuildProperties || falseRequire('./build-properties') || BuildProperties;
 const version = `${buildProperties.major}.${buildProperties.minor}.${buildProperties.patch}.${buildProperties.build}-${buildProperties.level}`;
 
 
 // project file imports.  Handles native and minified cases
-const feedScheduler = this.feedScheduler || require('./feed-scheduler');
-const rollingCollectionHandler = this.RollingCollectionHandler || require('./rolling-collections');
-const fixedCollectionHandler = this.FixedCollectionHandler || require('./fixed-collections');
+const feedScheduler = this.FeedScheduler || falseRequire('./feed-scheduler') || FeedScheduler;
+const rollingCollectionHandler = this.RollingCollectionHandler || falseRequire('./rolling-collections') || RollingCollectionHandler;
+const fixedCollectionHandler = this.FixedCollectionHandler || falseRequire('./fixed-collections') || FixedCollectionHandler;
 
 // dev mode?
 var development = process.env.NODE_ENV !== 'production';
@@ -76,7 +86,7 @@ if ('service' in args && development) {
   serviceTypes = args.service === 'sa' ? { nw: false, sa: true } : { nw: true, sa: false };
 }
 else {
- serviceTypes = this.ServiceTypes || require('./servicetype');
+ serviceTypes = this.ServiceTypes || falseRequire('./servicetype') || ServiceTypes;
 }
 
 // export NODE_ENV='production'
@@ -263,7 +273,7 @@ winston.debug(configCopy);
 // Set up encryption
 const internalPublicKey = fs.readFileSync(internalPublicKeyFile, 'utf8');
 const internalPrivateKey = fs.readFileSync(internalPrivateKeyFile, 'utf8');
-const kentechCert = this.KentechCert || require('./kentech-public-key');
+const kentechCert = this.KentechCert || falseRequire('./kentech-public-key') || KentechCert;
 const decryptor = new NodeRSA( internalPrivateKey );
 decryptor.setOptions({encryptionScheme: 'pkcs1'});
 
@@ -296,19 +306,19 @@ if ( !fs.existsSync(tempDir) ) {
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
 // Set default preferences
-const defaultPreferences = this.DefaultPreferences || require('./defaultpreferences');
+const defaultPreferences = this.DefaultPreferences || falseRequire('./defaultpreferences') || DefaultPreferences;
 if (serviceTypes.nw) {
-  defaultPreferences['nw'] = this.nwDefaultPreferences || require('./defaultnwpreferences');
+  defaultPreferences['nw'] = this.nwDefaultPreferences || falseRequire('./defaultnwpreferences') || nwDefaultPreferences;
 }
 else {
-  defaultPreferences['sa'] = this.saDefaultPreferences || require('./defaultsapreferences');
+  defaultPreferences['sa'] = this.saDefaultPreferences || falseRequire('./defaultsapreferences') || saDefaultPreferences;
 }
 
 
 // Set use-cases
 // A use-case consists of a name (mandatory), a friendly name (mandatory), a query (mandatory), its allowed content types[] (mandatory), distillation terms (optional), regex distillation terms (optional), and a description (mandatory)
 // { name: '', friendlyName: '', query: "", contentTypes: [], description: '', distillationTerms: [], regexTerms: [] }
-const useCases = this.UseCases || require('./usecases');
+const useCases = this.UseCases || falseRequire('./usecases') || UseCases;
 var useCasesObj = {};
 // Populate an object with our use cases so we can later reference them by use case name
 for (let i = 0; i < useCases.length; i++) {

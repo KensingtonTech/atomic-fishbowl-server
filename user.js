@@ -4,7 +4,7 @@ const MongooseModel = (function() {
 
   let mongooseSchema = mongoose.Schema;
 
-  var UserSchema = new mongooseSchema(
+  let UserSchema = new mongooseSchema(
     {
       id: String,
       username: String,

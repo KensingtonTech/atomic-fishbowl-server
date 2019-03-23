@@ -59,7 +59,7 @@ fi
 if [ "$LEVEL" -ne 1 ]; then
   AFBDEBUG=0
   # uglify the JS if not a dev build
-  uglifyjs user.js build-properties.js servicetype.js defaultpreferences.js kentech-public-key.js $DEFAULTSERVICEPREF usecases.js feed-scheduler.js fixed-collections.js rolling-collections.js index.js --toplevel --compress --mangle --ecma 6 -o server.out --source-map url="server.js.map"
+  uglifyjs build-properties.js servicetype.js defaultpreferences.js kentech-public-key.js $DEFAULTSERVICEPREF usecases.js feed-scheduler.js fixed-collections.js rolling-collections.js user.js index.js --toplevel --compress --mangle --ecma 6 -o server.out --source-map url="server.js.map"
   rm -f *.js
   mv server.out server.js
   
