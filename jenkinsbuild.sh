@@ -48,7 +48,7 @@ EOF
 npm install
 AFBDEBUG=1
 
-if [ "$serverType" -eq "sa" ]; then
+if [ "$serverType" == "sa" ]; then
   cp -f servicetype-sa.js servicetype.js
   DEFAULTSERVICEPREF="defaultsapreferences.js"
 else
