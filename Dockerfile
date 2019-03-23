@@ -47,9 +47,10 @@ set -x \
 && pip3 install requests requests-futures crypto pycrypto Pillow rarfile python-magic \
 && pip3 uninstall -y pip \
 && yum erase -y epel-release python36-devel \
-&& yum groupremove -y Development\ Tools \
+&& yum groupremove -y --disableplugin=fastestmirror Development\ Tools \
 && rm -f /etc/yum.repos.d/afb-1.0.0-signed.repo \
 && mv -f /etc/yum.repos.d/CentOS-Base.repo.orig /etc/yum.repos.d/CentOS-Base.repo \
+&& yum erase -y nodesource-release \
 && yum clean all \
 && rm -rf /var/cache/yum \
 && H=`grep -v kentechrepo /etc/hosts` \
