@@ -14,9 +14,9 @@ const LocalStrategy = require('passport-local').Strategy;
 const jwt = require('jsonwebtoken');
 const JwtStrategy = require('passport-jwt').Strategy;
 const ExtractJwt = require('passport-jwt').ExtractJwt;
-global.mongoose = require('mongoose');
+const mongoose = require('mongoose');
 mongoose.Promise = Promise;
-const User = this.MongooseModel || require('./user');;
+const User = this.MongooseModel || require('./user');
 global.Model = null;
 // passport auth gets set up in mongooseInit(), after we've successfully connected to mongo
 

@@ -1,6 +1,6 @@
-// mongoose is loaded through a global
+let Mongoose = require('mongoose');
 
-let mongooseSchema = mongoose.Schema;
+let mongooseSchema = Mongoose.Schema;
 
 var UserSchema = new mongooseSchema(
   {
@@ -22,6 +22,6 @@ var UserSchema = new mongooseSchema(
 UserSchema.plugin( require('passport-local-mongoose') );
 
 // model contains authenticate(), serializeUser(), and deserializeUser() methods
-const MongooseModel = mongoose.model('User', UserSchema);
+const MongooseModel = Mongoose.model('User', UserSchema);
 
 module.exports = MongooseModel;
