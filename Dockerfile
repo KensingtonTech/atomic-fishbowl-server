@@ -24,7 +24,8 @@ COPY afb-server.conf.default *.js *.js.map *.py *.so LICENSE.txt /opt/kentech/af
 #install our rpm dependencies
 ARG CACHE_DATE=2016-01-01
 RUN \
-echo 172.16.0.57 kentechrepo >> /etc/hosts \
+set -x \
+&& echo 172.16.0.57 kentechrepo >> /etc/hosts \
 && cp /etc/yum.repos.d/CentOS-Base.repo /etc/yum.repos.d/CentOS-Base.repo.orig \
 && yum groupinstall -y Development\ Tools \
 && yum install -y which \
