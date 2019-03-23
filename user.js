@@ -1,27 +1,30 @@
-let Mongoose = require('mongoose');
+const MongooseModel = (function() {
 
-let mongooseSchema = Mongoose.Schema;
+  let mongoose = require('mongoose');
 
-var UserSchema = new mongooseSchema(
-  {
-    id: String,
-    username: String,
-    fullname: String,
-    password: String,
-    email: String,
-    enabled: Boolean
-  }, 
-  { 
-    toObject: {
-      versionKey: false,
-      transform: (doc, ret, options) => { delete ret._id; return ret; }
+  let mongooseSchema = mongoose.Schema;
+
+  var UserSchema = new mongooseSchema(
+    {
+      id: String,
+      username: String,
+      fullname: String,
+      password: String,
+      email: String,
+      enabled: Boolean
+    }, 
+    { 
+      toObject: {
+        versionKey: false,
+        transform: (doc, ret, options) => { delete ret._id; return ret; }
+      }
     }
-  }
-);
+  );
 
-UserSchema.plugin( require('passport-local-mongoose') );
+  UserSchema.plugin( require('passport-local-mongoose') );
 
-// model contains authenticate(), serializeUser(), and deserializeUser() methods
-const MongooseModel = Mongoose.model('User', UserSchema);
+  // model contains authenticate(), serializeUser(), and deserializeUser() methods
+  return mongoose.model('User', UserSchema);
+})();
 
 module.exports = MongooseModel;
