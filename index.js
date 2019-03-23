@@ -76,7 +76,7 @@ if ('service' in args && development) {
   serviceTypes = args.service === 'sa' ? { nw: false, sa: true } : { nw: true, sa: false };
 }
 else {
- serviceTypes = this.serviceType || require('./servicetype');
+ serviceTypes = this.ServiceTypes || require('./servicetype');
 }
 
 // export NODE_ENV='production'

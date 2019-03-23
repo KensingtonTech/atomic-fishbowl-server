@@ -1,2 +1,2 @@
-const serviceTypes = { nw: false, sa: true };
-module.exports = serviceTypes;
+const ServiceTypes = { nw: false, sa: true };
+module.exports = ServiceTypes;
