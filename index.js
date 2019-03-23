@@ -14,7 +14,7 @@ const LocalStrategy = require('passport-local').Strategy;
 const jwt = require('jsonwebtoken');
 const JwtStrategy = require('passport-jwt').Strategy;
 const ExtractJwt = require('passport-jwt').ExtractJwt;
-const mongoose = require('mongoose');
+var mongoose = require('mongoose'); // uglify throws a fit if this isn't var
 mongoose.Promise = Promise;
 // passport auth gets set up in mongooseInit(), after we've successfully connected to mongo
 
