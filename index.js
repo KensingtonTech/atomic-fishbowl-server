@@ -2406,7 +2406,7 @@ async function processMongoCollections() {
     preferences = processPreferences(res);
     // winston.debug('preferences:', preferences);
   }
-  catch {
+  catch (err) {
     // if we get here, then justInstalled will still be true, as processPreferences() will not have run
     writeDefaultPrefs = true;
   }
@@ -2445,7 +2445,7 @@ async function processMongoCollections() {
       }
       // winston.debug('nwservers:', nwservers);
     }
-    catch {
+    catch (err) {
       winston.info('Collection nwservers was not previously defined');
     }
   }
@@ -2464,7 +2464,7 @@ async function processMongoCollections() {
       }
       // winston.debug('saservers:', saservers);
     }
-    catch {
+    catch (err) {
       winston.info('Collection saservers was not previously defined');
     }
   }
@@ -2483,7 +2483,7 @@ async function processMongoCollections() {
     scheduler.updateSchedule(feeds);
     // winston.debug('feeds:', feeds);
   }
-  catch {
+  catch (err) {
     winston.info('Collection feeds was not previously defined');
   }
 
@@ -2501,7 +2501,7 @@ async function processMongoCollections() {
       setInterval( () => cleanBlackList(), 1000 * 60); // run every minute
       cleanBlackList();
   }
-  catch {}
+  catch (err) {}
 
   // collections
   try {
@@ -2520,7 +2520,7 @@ async function processMongoCollections() {
      cleanCollectionDirs();
      // winston.debug('collections:', collections);
   }
-  catch {
+  catch (err) {
     winston.info('Collection \'collections\' was not previously defined');
   }
 
@@ -2536,7 +2536,7 @@ async function processMongoCollections() {
       collectionsData[id] = JSON.parse(res[x].data);
     }
   }
-  catch {
+  catch (err) {
     winston.info('Collection \'collectionsData\' was not previously defined');
   }
   
