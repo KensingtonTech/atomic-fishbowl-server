@@ -296,7 +296,7 @@ if ( !fs.existsSync(tempDir) ) {
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
 // Set default preferences
-const defaultPreferences = this.defaultPreferences || require('./defaultpreferences');
+const defaultPreferences = this.DefaultPreferences || require('./defaultpreferences');
 if (serviceTypes.nw) {
   defaultPreferences['nw'] = this.nwDefaultPreferences || require('./defaultnwpreferences');
 }

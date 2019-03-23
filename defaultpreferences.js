@@ -1,4 +1,4 @@
-var defaultPreferences = {
+var DefaultPreferences = {
   minX: 255,
   minY: 255,  
   defaultContentLimit: 1000,
@@ -8,4 +8,4 @@ var defaultPreferences = {
   tokenExpirationHours: 24
 };
 
-module.exports = defaultPreferences;
+module.exports = DefaultPreferences;
