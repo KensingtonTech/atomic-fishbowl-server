@@ -51,7 +51,7 @@ set -x \
 && mv -f /etc/yum.repos.d/CentOS-Base.repo.orig /etc/yum.repos.d/CentOS-Base.repo \
 && yum erase -y nodesource-release \
 && yum clean all \
-&& rm -rf /var/cache/yum \
 && yum groupremove -y Development\ Tools \
+&& rm -rf /var/cache/yum \
 && H=`grep -v kentechrepo /etc/hosts` \
 && echo -n $H > /etc/hosts;
