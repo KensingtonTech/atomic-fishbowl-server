@@ -52,6 +52,7 @@ set -x \
 && yum erase -y nodesource-release \
 && yum clean all \
 && yum groupremove -y Development\ Tools \
-&& rm -rf /var/cache/yum \
+&& yum clean all \
+&& rm -rf /var/cache/yum/* \
 && H=`grep -v kentechrepo /etc/hosts` \
 && echo -n $H > /etc/hosts;
