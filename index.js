@@ -308,7 +308,7 @@ else {
 // Set use-cases
 // A use-case consists of a name (mandatory), a friendly name (mandatory), a query (mandatory), its allowed content types[] (mandatory), distillation terms (optional), regex distillation terms (optional), and a description (mandatory)
 // { name: '', friendlyName: '', query: "", contentTypes: [], description: '', distillationTerms: [], regexTerms: [] }
-const useCases = this.useCases || require('./usecases');
+const useCases = this.UseCases || require('./usecases');
 var useCasesObj = {};
 // Populate an object with our use cases so we can later reference them by use case name
 for (let i = 0; i < useCases.length; i++) {

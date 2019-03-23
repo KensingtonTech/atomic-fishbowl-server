@@ -1,7 +1,7 @@
 // A use-case consists of a name (mandatory), a friendly name (mandatory), a query (mandatory), its allowed content types[] (mandatory), distillation terms (optional), regex distillation terms (optional), and a description (mandatory)
 // { name: '', friendlyName: '', query: "", contentTypes: [], description: '', distillationTerms: [], regexTerms: [] }
 
-const useCases = [
+const UseCases = [
 
   {
     name: 'outboundDocuments',
@@ -91,4 +91,4 @@ const useCases = [
 
 ];
 
-module.exports = useCases;
+module.exports = UseCases;
