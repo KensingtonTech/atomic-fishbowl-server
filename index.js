@@ -14,8 +14,10 @@ const LocalStrategy = require('passport-local').Strategy;
 const jwt = require('jsonwebtoken');
 const JwtStrategy = require('passport-jwt').Strategy;
 const ExtractJwt = require('passport-jwt').ExtractJwt;
-var mongoose = require('mongoose'); // uglify throws a fit if this isn't var
+global.mongoose = require('mongoose');
 mongoose.Promise = Promise;
+const User = this.MongooseModel || require('./user');;
+global.Model = null;
 // passport auth gets set up in mongooseInit(), after we've successfully connected to mongo
 
 // express
@@ -2343,7 +2345,7 @@ function onMongooseConnected() {
 
 
 
-var User = null;
+
 
 async function mongooseInit() {
   // Initialise Mongoose.  This gets called from within connectToDB(), after mongoClient has connected to Mongo
@@ -2360,12 +2362,6 @@ async function mongooseInit() {
   // This creates local authentication passport strategy
   // This authenticates a user against the account stored in MongoDB
   // This is only used by /api/login
-  try {
-    User = model;
-  }
-  catch(e) {
-    User = require('./user');
-  }
   let mongooseStrategy = new LocalStrategy( User.authenticate() );
   passport.use(mongooseStrategy);
   passport.serializeUser( User.serializeUser() );
