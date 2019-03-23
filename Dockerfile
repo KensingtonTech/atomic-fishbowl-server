@@ -50,8 +50,8 @@ set -x \
 && rm -f /etc/yum.repos.d/afb-1.0.0-signed.repo \
 && mv -f /etc/yum.repos.d/CentOS-Base.repo.orig /etc/yum.repos.d/CentOS-Base.repo \
 && yum erase -y nodesource-release \
-&& yum groupremove -y Development\ Tools \
 && yum clean all \
 && rm -rf /var/cache/yum \
+&& yum groupremove -y Development\ Tools \
 && H=`grep -v kentechrepo /etc/hosts` \
 && echo -n $H > /etc/hosts;
