@@ -90,12 +90,12 @@ class ConfigurationManager {
 
 
     // Set default preferences
-    this._defaultPreferences = falseRequire('./defaultpreferences') || DefaultPreferences;
+    this._defaultPreferences = falseRequire('./default-afb-preferences') || DefaultAfbPreferences;
     if (this.serviceTypes.nw) {
-      this._defaultPreferences['nw'] = falseRequire('./defaultnwpreferences') || nwDefaultPreferences;
+      this._defaultPreferences['nw'] = falseRequire('./default-nw-preferences') || DefaultNwPreferences;
     }
     else {
-      this._defaultPreferences['sa'] = falseRequire('./defaultsapreferences') || saDefaultPreferences;
+      this._defaultPreferences['sa'] = falseRequire('./default-sa-preferences') || DefaultSaPreferences;
     }
 
     // set up SSL decryptor

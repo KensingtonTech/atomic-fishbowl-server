@@ -1,4 +1,4 @@
-var DefaultPreferences = {
+var DefaultAfbPreferences = {
   minX: 255,
   minY: 255,  
   defaultContentLimit: 1000,
@@ -8,4 +8,4 @@ var DefaultPreferences = {
   tokenExpirationHours: 24
 };
 
-module.exports = DefaultPreferences;
+module.exports = DefaultAfbPreferences;

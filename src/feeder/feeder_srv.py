@@ -153,7 +153,6 @@ def configReceived(cfg):
       configCommunicator.write_data( json.dumps( { 'initialized': False } ) + '\n' )
 
   except KeyError as e:
-    raise
     error = 'ERROR: Missing critical configuration data: ' + str(e)
     exitWithError(error)
 

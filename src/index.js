@@ -152,7 +152,7 @@ var apiInitialized = false;
 var licenseExpiryJob = null; // placeholder for cron-like job to expire the license
 
 // Load config
-const ConfigManager = (function() {return falseRequire('./configuration') || ConfigurationManager})();
+const ConfigManager = (function() {return falseRequire('./configuration-manager') || ConfigurationManager})();
 const afbconfig = new ConfigManager(args, io);
 
 // Multipart upload config

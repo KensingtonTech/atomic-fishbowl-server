@@ -54,63 +54,43 @@ EOF
 # Install js modules
 npm install
 AFBDEBUG=1
-if [ "$serverType" == "sa" ]; then
-  cp -f servicetype-sa.js servicetype.js
-  DEFAULTSERVICEPREF="defaultsapreferences.js"
-else
-  cp -f servicetype-nw.js servicetype.js
-  DEFAULTSERVICEPREF="defaultnwpreferences.js"
-fi
 
 if [ "$LEVEL" -ne 1 ]; then
-  AFBDEBUG=0
-  rm -rf $DISTDIR
-  mkdir -p $DISTDIR/$WORKERDIR $DISTDIR/$FEEDERDIR
-  # uglify the JS if not a dev build
-  cd $SRCDIR && uglifyjs build-properties.js logging.js database.js token-manager.js configuration.js servicetype.js defaultpreferences.js kentech-public-key.js $DEFAULTSERVICEPREF usecases.js feed-scheduler.js fixed-collections.js rolling-collections.js user.js index.js --toplevel --compress --mangle --ecma 6 -o $DISTDIR/server.js --source-map url="server.js.map"
+  # non-dev build
   
-  PYTHONINCLUDE="-I/usr/include/python3.6m"
-  LDFLAGS=""
-  if $(uname -a | grep -q ^Darwin); then 
-    PYTHONINCLUDE="-I/opt/local/Library/Frameworks/Python.framework/Versions/3.6/include/python3.6m"
-    LDFLAGS="-L/opt/local/Library/Frameworks/Python.framework/Versions/3.6/lib/python3.6/config-3.6m-darwin -lpython3.6m"
+  DOCKERFILE='Dockerfile'
+  AFBDEBUG=0
+  
+  if [ "$serverType" == "nw" ]; then
+    npm run buildnw
+  elif [ "$serverType" == "sa" ]; then
+    npm run buildsa
   fi
-
-  # Compile python if not a dev build
-  WORKERSRC='worker worker_fetcher worker_communicator worker_contentobj worker_contentprocessor worker_feedmanager'
-  FEEDERSRC='feeder_srv feeder_hasher feeder_communicator'
-  cd $SRCDIR/$WORKERDIR
-  for f in $WORKERSRC; do
-    if $(cython -3 $f.py -o $f.c); then
-      gcc -shared -pthread -fPIC -fwrapv -O2 -Wall -fno-strict-aliasing $PYTHONINCLUDE $LDFLAGS -o $f.so $f.c && mv $f.so $DISTDIR/$WORKERDIR && rm -f $f.c
-    fi
-  done
-  cp $SRCDIR/$WORKERDIR/worker_stub.py $DISTDIR/$WORKERDIR
-
-  cd $SRCDIR/$FEEDERDIR
-  for f in $FEEDERSRC; do
-    if $(cython -3 $f.py -o $f.c); then
-      gcc -shared -pthread -fPIC -fwrapv -O2 -Wall -fno-strict-aliasing $PYTHONINCLUDE $LDFLAGS -o $f.so $f.c && mv $f.so $DISTDIR/$FEEDERDIR && rm -f $f.c
-    fi
-  done
-  cp $SRCDIR/$FEEDERDIR/feeder_stub.py $DISTDIR/$FEEDERDIR
   cd $BASEDIR
+
 else
+  # dev build
+
+  DOCKERFILE='Dockerfile-dev'
+  if [ "$serverType" == "sa" ]; then
+    cp -f $SRCDIR/servicetype-sa.js $SRCDIR/servicetype.js
+  else
+    cp -f $SRCDIR/servicetype-nw.js $SRCDIR/servicetype.js
+  fi
   # if a dev build, create server.js symlink
-  ln -s index.js server.js
+  ln -s $SRCDIR/index.js server.js
 fi
 
 #rm -f *.mustache
 #rm -f package.json package-lock.json
 
 
-#now build the docker container
-#docker build -t ${PKGNAME}:${VER} -t ${PKGNAME}:latest -t ${REPONAME}/${PKGNAME}:latest -t ${REPONAME}/${PKGNAME}:${VER} .
-docker build --build-arg AFBDEBUG=$AFBDEBUG --build-arg CACHE_DATE=$(date +%Y-%m-%d:%H:%M:%S) -t ${PKGNAME}:${VER} -t ${PKGNAME}:latest -t ${REPONAME}/${PKGNAME}:latest -t ${REPONAME}/${PKGNAME}:${VER} .
+# now build the docker container
+docker build -f $DOCKERFILE --build-arg AFBDEBUG=$AFBDEBUG --build-arg CACHE_DATE=$(date +%Y-%m-%d:%H:%M:%S) -t ${PKGNAME}:${VER} -t ${PKGNAME}:latest -t ${REPONAME}/${PKGNAME}:latest -t ${REPONAME}/${PKGNAME}:${VER} .
 
-#push our two tags to our private registry
+# push our two tags to our private registry
 docker push ${REPONAME}/${PKGNAME}:${VER}
 docker push ${REPONAME}/${PKGNAME}:latest
 
-#create artifact
+# create artifact
 docker save ${PKGNAME}:${VER} ${PKGNAME}:latest | gzip > ${ARTIFACTNAME}_${VER}.tgz

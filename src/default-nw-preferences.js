@@ -1,4 +1,4 @@
-const nwDefaultPreferences = {
+const DefaultNwPreferences = {
   url: '',
   summaryTimeout: 5,
   sessionLimit: 2000,
@@ -43,4 +43,4 @@ const nwDefaultPreferences = {
   ]
 };
 
-module.exports = nwDefaultPreferences;
+module.exports = DefaultNwPreferences;

@@ -1,4 +1,4 @@
-var saDefaultPreferences = { // solera
+var DefaultSaPreferences = { // solera
   url: '',
   presetQuery: '[ { "any" : [ "file_type=PDF", "file_extension=\"pdf\"", "mime_type=\"application/pdf\"", "file_type=ZIP", "file_extension=\"docx\"", "mime_type=\"application/vnd.openxmlformats-officedocument.wordprocessingml.document\"", "file_extension=\"xlsx\"", "mime_type=\"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet\"", "file_extension=\"pptx\"",  "mime_type=\"application/vnd.openxmlformats-officedocument.presentationml.presentation\"" ] } ]',
   defaultQuerySelection : "All Supported File Types",
@@ -39,4 +39,4 @@ var saDefaultPreferences = { // solera
   ]
 };
 
-module.exports = saDefaultPreferences;
+module.exports = DefaultSaPreferences;
