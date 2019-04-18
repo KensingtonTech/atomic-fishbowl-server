@@ -923,7 +923,8 @@ class NwFetcher(Fetcher):
     request.add_header('Accept', 'application/json')
     try:
       #rawQueryRes = json.loads( urllib.request.urlopen(request, context=ctx, timeout=self.cfg['queryTimeout']).readall().decode('utf-8') ) #9.4
-      rawQueryRes = json.load(urllib.request.urlopen(request, context=ctx, timeout=self.cfg['queryTimeout'])) #9.6
+      res = urllib.request.urlopen(request, context=ctx, timeout=self.cfg['queryTimeout']) #9.6
+      rawQueryRes = json.loads(res.read().decode('utf-8'))
 
       #pprint(rawQueryRes)
       #print("length of rawQueryRes", len(rawQueryRes))

@@ -2,12 +2,11 @@ class FeedScheduler {
 
   // the purpose of this class is to update feeds on a schedule
 
-  constructor(feedsDir, decryptor, callback, io) {
+  constructor(afbconfig, io, callback) {
+    this.afbconfig = afbconfig;
     this.scheduledFeeds = {};
     this.schedule = {};
     this.callback = callback;
-    this.feedsDir = feedsDir;
-    this.decryptor = decryptor;
     this.state = {};  // stores the state of jobs.  id : { 'message': string, 'time' : number }
     this.io = io; // socket.io
   }
@@ -109,7 +108,7 @@ class FeedScheduler {
     // now we need to fetch the file and write it to disk
     let options = { url: feed.url, method: 'GET', gzip: true };
     if (feed.authentication) {
-      options['auth'] = { user: feed.username, pass: this.decryptor.decrypt(feed.password, 'utf8'), sendImmediately: true };
+      options['auth'] = { user: feed.username, pass: this.afbconfig.decryptor.decrypt(feed.password, 'utf8'), sendImmediately: true };
     }
     
     // let tempName = path.basename(temp.path({suffix: '.scheduled'}));
@@ -144,7 +143,7 @@ class FeedScheduler {
       this.state[id] = { good : false, time: timestamp };
       this.io.emit('feedStatus', this.status() );
     })
-    .pipe(fs.createWriteStream(this.feedsDir + '/' + id + '.feed'));
+    .pipe(fs.createWriteStream(this.afbconfig.feedsDir + '/' + id + '.feed'));
   }
 
 

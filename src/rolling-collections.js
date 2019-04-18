@@ -2,31 +2,16 @@ class RollingCollectionHandler {
 
   // The purpose of this class is to manage connections to API requests for rolling collections
 
-  constructor(dbUpdateCallback, collections, collectionsDir, feeds, feederSocketFile, gsPath, pdftotextPath, sofficePath, sofficeProfilesDir, unrarPath, internalPrivateKeyFile, useCasesObj, preferences, nwservers, saservers, collectionsUrl, channel) {
+  constructor(afbconfig, feederSocketFile, channel) {
 
-    this.cfg = {
-      collections: collections,
-      collectionsDir: collectionsDir,
-      feeds: feeds,
-      feederSocketFile: feederSocketFile,
-      gsPath: gsPath,
-      pdftotextPath: pdftotextPath,
-      sofficePath: sofficePath,
-      sofficeProfilesDir: sofficeProfilesDir,
-      unrarPath: unrarPath,
-      internalPrivateKeyFile: internalPrivateKeyFile,
-      useCasesObj: useCasesObj,
-      preferences: preferences,
-      nwservers: nwservers,
-      saservers: saservers,
-      collectionsUrl: collectionsUrl
-    };
+    this.afbconfig = afbconfig;
+    this.feederSocketFile = feederSocketFile,
     this.rollingCollectionManagers = {};
-    this.dbUpdateCallback = dbUpdateCallback;
 
     // socket.io
     this.channel = channel;
-    this.channel.on('connection', (socket) => this.onChannelConnect(socket) );
+    this.channel.on('connection', (socket) => this.onChannelConnect(socket) ); // channel is the /collections socket.io namespace,  It gets further segmented into per-collection rooms.  For monitoring collections, each client connection gets its own room, so that it can be controlled independently of other users.
+    this.roomSockets = {}; // tracks which sockets are joined to which rooms
   }
 
 
@@ -34,7 +19,7 @@ class RollingCollectionHandler {
   onChannelConnect(socket) {
     winston.debug('RollingCollectionHandler: onChannelConnect()');
     socket.on('disconnect', () => this.onChannelDisconnect(socket) );
-    socket.on('join', (data) => this.onJoinCollection(socket, data) );
+    socket.on('join', (data) => this.onSocketJoinCollection(socket, data) );
     socket.on('leave', () => this.onLeaveCollection(socket) );
     socket.on('pause', () => this.onPauseCollection(socket) );
     socket.on('unpause', () => this.onUnpauseCollection(socket) );
@@ -42,22 +27,22 @@ class RollingCollectionHandler {
 
 
 
-  onJoinCollection(socket, data) {
+  onSocketJoinCollection(socket, data) {
     // this is the equivalent of onHttpConnection(), but for socket connections
     // data must contain properties collectionID and sessionId
     // sessionId should be null if a standard rolling collection
-    winston.debug('RollingCollectionHandler: onJoinCollection()');
-    // winston.debug('RollingCollectionHandler: onJoinCollection(): socket', socket);
+    winston.debug('RollingCollectionHandler: onSocketJoinCollection()');
+    // winston.debug('RollingCollectionHandler: onSocketJoinCollection(): socket', socket);
 
     let collectionId = data['collectionId'];
-    let collection = this.cfg.collections[collectionId];
+    let collection = this.afbconfig.collections[collectionId];
 
     let rollingId = collectionId;
     let sessionId = data['sessionId'];
 
-    winston.debug('RollingCollectionHandler: onJoinCollection(): collectionId:', collectionId);
-    winston.debug('RollingCollectionHandler: onJoinCollection(): rollingId:', rollingId);
-    winston.info(`User '${socket.conn.user.username}' has connected to ${collection.type} collection '${collection.name}'`);
+    winston.debug('RollingCollectionHandler: onSocketJoinCollection(): collectionId:', collectionId);
+    winston.debug('RollingCollectionHandler: onSocketJoinCollection(): rollingId:', rollingId);
+    winston.info(`User '${socket.conn.jwtuser.username}' has connected to ${collection.type} collection '${collection.name}'`);
 
     if (!license.valid) {
       winston.info(`License is invalid.  Aborting attempt to connect to rolling or monitoring collection '${collection.name}'`);
@@ -73,11 +58,17 @@ class RollingCollectionHandler {
     socket['collectionType'] = collection.type;
 
     socket.join(rollingId); // this joins a room for rollingId
+    if (!(rollingId in this.roomSockets)) {
+      this.roomSockets[rollingId] = [];
+    }
+    this.roomSockets[rollingId].push(socket);
+
+    // we leave out the licensing code here as it is handled by the client or when the collection is killed
 
     let rollingCollectionManager = null;
     if ( !(rollingId in this.rollingCollectionManagers) ) {
       // there is no RollingCollectionManager yet for the chosen collection.  So create one
-      rollingCollectionManager = new RollingCollectionManager(collection, collectionId, rollingId, (id) => this.rollingCollectionManagerRemovalCallback(id), this.dbUpdateCallback, this.cfg, this.channel);
+      rollingCollectionManager = new RollingCollectionManager(this, collection, collectionId, rollingId);
       this.rollingCollectionManagers[rollingId] = { collectionId: collectionId, manager: rollingCollectionManager };
     }
     else {
@@ -101,7 +92,7 @@ class RollingCollectionHandler {
     if ('rollingId' in socket) {
       let rollingId = socket['rollingId'];
       let collectionId = socket.collectionId;
-      winston.info(`User '${socket.conn.user.username}' has disconnected from ${socket.collectionType} collection '${socket.collectionName}'`)
+      winston.info(`User '${socket.conn.jwtuser.username}' has disconnected from ${socket.collectionType} collection '${socket.collectionName}'`)
       socket.leave(rollingId);
       delete socket['rollingId'];
       delete socket['collectionId'];
@@ -127,7 +118,12 @@ class RollingCollectionHandler {
       let rollingId = socket['rollingId'];
       let collectionId = socket.collectionId;
       winston.debug('RollingCollectionHandler: onChannelDisconnect(): matched collection id:', collectionId);
-      winston.info(`User '${socket.conn.user.username}' has disconnected from ${this.cfg.collections[collectionId].type} collection '${this.cfg.collections[collectionId].name}'`);
+      if (collectionId in this.afbconfig.collections) {
+        winston.info(`User '${socket.conn.jwtuser.username}' has disconnected from ${this.afbconfig.collections[collectionId].type} collection '${this.afbconfig.collections[collectionId].name}'`);
+      }
+      else {
+        winston.info(`User '${socket.conn.jwtuser.username}' has disconnected from rolling collections`);
+      }
       socket.leave(rollingId);
       delete socket['rollingId'];
       delete socket['collectionId'];
@@ -149,9 +145,9 @@ class RollingCollectionHandler {
     
     if ('rollingCollectionManager' in socket) {
       let rollingId = socket['rollingId'].substring(0,36);
-      winston.info(`User '${socket.conn.user.username}' has paused monitoring collection '${this.cfg.collections[rollingId].name}'`)
-      // winston.info(`User '${socket.conn.user.username}' has paused monitoring collection '${rollingId}'`)
-      // winston.info(`this.collections[rollingId]:`, this.cfg.collections)
+      winston.info(`User '${socket.conn.jwtuser.username}' has paused monitoring collection '${this.afbconfig.collections[rollingId].name}'`)
+      // winston.info(`User '${socket.conn.jwtuser.username}' has paused monitoring collection '${rollingId}'`)
+      // winston.info(`this.afbconfig.collections[rollingId]:`, this.afbconfig.collections)
       let manager = socket['rollingCollectionManager'];
       manager.pause();
     }
@@ -165,8 +161,8 @@ class RollingCollectionHandler {
 
     if ('rollingCollectionManager' in socket) {
       let rollingId = socket['rollingId'].substring(0,36);
-      winston.info(`User '${socket.conn.user.username}' has unpaused monitoring collection '${this.cfg.collections[rollingId].name}'`)
-      // winston.info(`User '${socket.conn.user.username}' has unpaused monitoring collection '${rollingId}'`)
+      winston.info(`User '${socket.conn.jwtuser.username}' has unpaused monitoring collection '${this.afbconfig.collections[rollingId].name}'`)
+      // winston.info(`User '${socket.conn.jwtuser.username}' has unpaused monitoring collection '${rollingId}'`)
       let manager = socket['rollingCollectionManager'];
       manager.unpause();
     }
@@ -182,15 +178,15 @@ class RollingCollectionHandler {
     let clientSessionId = req.headers['afbsessionid'];
     
     winston.debug('RollingCollectionHandler: onHttpConnection(): collectionId:', collectionId);
-    // winston.debug('preferences:', this.cfg.preferences);
+    // winston.debug('preferences:', this.afbconfig.preferences);
     
     let rollingId = collectionId;
     // rollingId is either the collectionId (for rolling collections), or the clientSessionId (for monitoring collections).
     // our classes will refer to this id when accessing the rollingCollections object
-    if ( this.cfg.collections[collectionId].type === 'monitoring' ) {
+    if ( this.afbconfig.collections[collectionId].type === 'monitoring' ) {
       rollingId = clientSessionId;
     }
-    let collection = this.cfg.collections[collectionId];
+    let collection = this.afbconfig.collections[collectionId];
 
     winston.debug('RollingCollectionHandler: onHttpConnection(): rollingId:', rollingId);
     winston.info(`User '${req.user.username}' has connected to ${collection.type} collection '${collection.name}'`);
@@ -200,7 +196,7 @@ class RollingCollectionHandler {
     // if not, create a new rolling collection manager
     // add new or existing rolling collection manager to the client connection handler
     
-    let clientConnection = new HttpConnection(req, res, collectionId, rollingId, this.cfg);
+    let clientConnection = new HttpConnection(this, collectionId, rollingId, req, res);
     if ( !clientConnection.onConnect(collection) ) {
       return;
     }
@@ -208,7 +204,7 @@ class RollingCollectionHandler {
     let rollingCollectionManager = null;
     if ( !(rollingId in this.rollingCollectionManagers)) {
       // there is no RollingCollectionManager yet for the chosen collection.  So create one
-      rollingCollectionManager = new RollingCollectionManager(collection, collectionId, rollingId, (id) => this.rollingCollectionManagerRemovalCallback(id), this.dbUpdateCallback, this.cfg, this.channel);
+      rollingCollectionManager = new RollingCollectionManager(this, collection, collectionId, rollingId);
       this.rollingCollectionManagers[rollingId] = { collectionId: collectionId, manager: rollingCollectionManager };
     }
     else {
@@ -226,7 +222,7 @@ class RollingCollectionHandler {
   pauseMonitoringCollectionHttp(req, res) {
     let clientSessionId = req.headers['afbsessionid'];
     winston.debug(`RollingCollectionHandler pauseMonitoringCollectionHttp(): Pausing monitoring collection ${clientSessionId}`);
-    // winston.info(`User '${req.user.username}' has paused monitoring collection '${this.cfg.collections[rollingId].name}'`)
+    // winston.info(`User '${req.user.username}' has paused monitoring collection '${this.afbconfig.collections[rollingId].name}'`)
     let manager = this.rollingCollectionManagers[clientSessionId]['manager'];
     manager.pause();
     res.status(202).send( JSON.stringify( { success: true } ) );
@@ -239,7 +235,7 @@ class RollingCollectionHandler {
     // Otherwise, the client will simply call /api/collection/rolling/:id again
     let clientSessionId = req.headers['afbsessionid'];
     winston.debug(`RollingCollectionHandler: unpauseMonitoringCollectionHttp(): Resuming monitoring collection ${clientSessionId}`);
-    // winston.info(`User '${req.user.username}' has unpaused monitoring collection '${this.cfg.collections[rollingId].name}'`)
+    // winston.info(`User '${req.user.username}' has unpaused monitoring collection '${this.afbconfig.collections[rollingId].name}'`)
     let manager = this.rollingCollectionManagers[clientSessionId]['manager'];
     manager.unpause();
     res.status(202).send( JSON.stringify( { success: true } ) );
@@ -251,12 +247,11 @@ class RollingCollectionHandler {
     winston.debug('RollingCollectionHandler: collectionEdited()');
     let managers = []
     if (collectionId in this.rollingCollectionManagers) {
-      // manager = { rollingId: { collectionId: collectionId, manager: manager } }
       let manager = this.rollingCollectionManagers[collectionId]['manager'];
       managers.push(manager);
     }
     else {
-      // didn't find the collectionId, but it could still be in there if it's a monitoring collection
+      // didn't find the collectionId yet, but it could still be in there if it's a monitoring collection
       for (let i in this.rollingCollectionManagers) {
         if (this.rollingCollectionManagers.hasOwnProperty(i) && this.rollingCollectionManagers[i]['collectionId'] == collectionId ) {
           let manager = this.rollingCollectionManagers[i]['manager'];
@@ -277,7 +272,6 @@ class RollingCollectionHandler {
     winston.debug('RollingCollectionHandler: collectionDeleted()');
     let managers = []
     if (collectionId in this.rollingCollectionManagers) {
-      // manager = { rollingId: { collectionId: collectionId, manager: manager } }
       let manager = this.rollingCollectionManagers[collectionId]['manager'];
       managers.push(manager);
     }
@@ -299,14 +293,32 @@ class RollingCollectionHandler {
 
 
   
-  rollingCollectionManagerRemovalCallback(id) {
-    winston.debug('RollingCollectionHandler: rollingCollectionManagerRemovalCallback()');
+  async removeRollingCollectionManager(id) { // id is rollingId
+    winston.debug('RollingCollectionHandler: removeRollingCollectionManager()');
     delete this.rollingCollectionManagers[id];
+    // disconnect all client sockets from this collection's room
+    if (!(id in this.roomSockets)) {
+      winston.error('No sockets could be found for fixed collection', id);
+    }
+    try {
+      winston.debug("Deleting output directory for collection", id);
+      await rmfr( this.afbconfig.collectionsDir + '/' + id ); // Delete output directory
+    }
+    catch(error) {
+      winston.error('ERROR deleting output directory ' + this.afbconfig.collectionsDir + '/' + id, error);
+      throw(error);
+    }
+    for (let i = 0; i < this.roomSockets[id].slice(0).length; i++) {
+      let socket = this.roomSockets[id][i];
+      this.onLeaveCollection(socket);
+    }
+    delete this.roomSockets[id];
   }
 
 
 
   killall() {
+    // we get here during server shutdown, and when the license expires
     winston.debug('RollingCollectionHandler: killall()');
     for (let rollingId in this.rollingCollectionManagers) {
       if (this.rollingCollectionManagers.hasOwnProperty(rollingId)) {
@@ -319,7 +331,7 @@ class RollingCollectionHandler {
 
 
   updateFeederSocketFile(filename) {
-    this.cfg.feederSocketFile = filename;
+    this.feederSocketFile = filename;
   }
 
 }
@@ -341,9 +353,10 @@ class RollingCollectionHandler {
 
 class HttpConnection {
 
-  constructor(req, res, collectionId, rollingId, cfg) {
+  constructor(handler, collectionId, rollingId, req, res) {
     winston.debug('HttpConnection: constructor()');
-    this.cfg = cfg;
+    this.handler = handler;
+    this.afbconfig = this.handler.afbconfig;
     this.id = uuidV4();
     this.req = req;
     this.res = res;
@@ -370,7 +383,7 @@ class HttpConnection {
       if (collection.bound && !( 'usecase' in collection )) {
         throw(`Bound collection ${this.collectionId} does not have a use case defined`);
       }
-      if (collection.bound && !(collection.usecase in this.cfg.useCasesObj) ) {
+      if (collection.bound && !(collection.usecase in this.afbconfig.useCases.useCasesObj) ) {
         throw(`Use case ${collection.usecase} in bound collection ${this.collectionId} is not a valid use case`);
       }
       if (collection.type === 'rolling' || collection.type === 'monitoring') {
@@ -406,7 +419,7 @@ class HttpConnection {
 
   onClientClosedConnection() {
     winston.debug('HttpConnection: onClientClosedConnection()');
-    winston.info(`User '${this.req.user.username}' has disconnected from ${this.cfg.collections[this.collectionId].type} collection '${this.cfg.collections[this.collectionId].name}'`);
+    winston.info(`User '${this.req.user.username}' has disconnected from ${this.afbconfig.collections[this.collectionId].type} collection '${this.afbconfig.collections[this.collectionId].name}'`);
     this.disconnected = true;
     // This block runs when the client disconnects from the session
     // But NOT when we terminate the session from the server
@@ -490,14 +503,11 @@ class HttpConnection {
 
 class RollingCollectionManager {
 
-  constructor(collection, collectionId, rollingId, removalCallback, dbUpdateCallback, cfg, channel = null) {
+  constructor(handler, collection, collectionId, rollingId) {
     winston.debug('RollingCollectionManager: constructor()');
-    this.cfg = cfg;
-    this.channel = channel; // a handle to our socket.io /collections namespace
-    
-    // callbacks
-    this.removalCallback = removalCallback;
-    this.dbUpdateCallback = dbUpdateCallback; // this callback will trigger a db update of the collection
+    this.handler = handler;
+    this.afbconfig = this.handler.afbconfig;
+    this.channel = this.handler.channel; // a handle to our socket.io /collections namespace
     
     // client-related
     this.observers = 0; // the number of clients that are currently connected to the collection, both http and socket.io
@@ -549,7 +559,7 @@ class RollingCollectionManager {
 
 
 
-  selfDestruct() {
+  async selfDestruct() {
     winston.debug('RollingCollectionManager: selfDestruct()');
     /*if (isDestroyed) {
       winston.debug('Not self-destructing as we\'re already being deleted');
@@ -567,14 +577,7 @@ class RollingCollectionManager {
       this.workInterval = null;
     }
     this.killWorker();
-    try {
-      winston.debug("RollingCollectionManager: selfDestruct(): Deleting output directory for rolling collection", this.rollingId);
-      rimraf( this.cfg.collectionsDir + '/' + this.rollingId, () => {} ); // Delete output directory
-    }
-    catch(exception) {
-      winston.error('RollingCollectionManager: selfDestruct(): ERROR deleting output directory ' + this.cfg.collectionsDir + '/' + this.rollingId, exception);
-    }
-    this.removalCallback(this.rollingId);
+    this.handler.removeRollingCollectionManager(this.rollingId);
   }
 
 
@@ -716,7 +719,7 @@ class RollingCollectionManager {
     this.lastRun = null;
     this.resumed = false;
 
-    this.sendToChannel('clear', true);
+    this.sendToRoom('clear', true); // this only triggers when a collection is edited.  no other time
     this.sendToHttpClients( { wholeCollection: { images: [], sessions: {}, search: [] } } );
     
 
@@ -727,7 +730,7 @@ class RollingCollectionManager {
 
 
 
-  onCollectionDeleted(user) {
+  async onCollectionDeleted(user) {
     winston.debug('RollingCollectionManager: onCollectionDeleted()');
     this.destroyed = true;
 
@@ -745,29 +748,15 @@ class RollingCollectionManager {
       this.destroyTimeout = null;
     }
 
-    if (this.monitoringCollection) {
-      // we only do this for monitoring collections as this helps us to...
-      // clean up after all the different client instances of a particular monitoring collection
-      // the collection delete handler will otherwise handle deletion
-      try {
-        winston.debug("Deleting output directory for collection", this.rollingId);
-        rimraf( this.cfg.collectionsDir + '/' + this.rollingId, () => {} ); // Delete output directory
-      }
-      catch(exception) {
-        winston.error('ERROR deleting output directory ' + this.cfg.collectionsDir + '/' + this.rollingId, exception);
-      }
-    }
-
-    this.sendToChannel('deleted', user);
     this.sendToHttpClients( { collectionDeleted: true, user: user } );
     this.endAllClients();
 
-    this.removalCallback(this.rollingId);
+    this.handler.removeRollingCollectionManager(this.rollingId);
   }
 
 
 
-  abort() {
+  async abort() {
     winston.debug('RollingCollectionManager: abort()');
 
     // we only get here in these cases:
@@ -781,14 +770,6 @@ class RollingCollectionManager {
     }
 
     this.killWorker();
-
-    try {
-      winston.debug("Deleting output directory for collection", this.collectionId);
-      rimraf.sync( this.cfg.collectionsDir + '/' + this.rollingId ); // Delete output directory
-    }
-    catch(exception) {
-      winston.error('ERROR deleting output directory ' + this.cfg.collectionsDir + '/' + this.collectionId, exception);
-    }
     
     if (this.destroyTimeout) {
       clearTimeout(this.destroyTimeout);
@@ -797,14 +778,12 @@ class RollingCollectionManager {
 
     let state = 'stopped';
     this.collection['state'] = state;
-    this.sendToChannel('state', state);
-    this.sendToChannel('clear', true);
-    this.dbUpdateCallback(this.collectionId);
-
+    this.sendToRoom('state', state);
+    this.endAllClients(); // disconnects socket and http clients
     
-    // this.sendToHttpClients( { collectionDeleted: this.collectionId } ); // don't think this belongs here
-    // this.removalCallback(this.collectionId);
-    this.endAllClients();
+    await this.afbconfig.updateRollingCollection(this.collectionId) // save collection state
+    
+    this.handler.removeRollingCollectionManager(this.collectionId);
   }
 
 
@@ -892,7 +871,7 @@ class RollingCollectionManager {
     winston.debug('RollingCollectionManager: pause()');
     this.paused = true;
     this.timeOfPause = moment().unix();
-    this.sendToChannel('paused', true);
+    this.sendToRoom('paused', true);
     /*if (this.workInterval) {
       // stop workLoop from running any more, but allow present worker to finish.
       clearInterval(this.workInterval);
@@ -937,7 +916,7 @@ class RollingCollectionManager {
 
     this.timeOfPause = 0;
 
-    this.sendToChannel('paused', false);
+    this.sendToRoom('paused', false);
 
   }
 
@@ -963,6 +942,7 @@ class RollingCollectionManager {
 
 
   sendToHttpClientsRaw(data) {
+    // sends RAW data to all connected HTTP clients
     winston.debug('RollingCollectionManager: sendToHttpClientsRaw()');
     for (let id in this.httpClients) {
       if (this.httpClients.hasOwnProperty(id)) {
@@ -974,7 +954,7 @@ class RollingCollectionManager {
 
 
 
-  sendToChannel(type, data) {
+  sendToRoom(type, data) {
     // sends data to all connected socket.io clients
     if (this.channel) {
       this.channel.to(this.rollingId).emit( type, data );
@@ -984,6 +964,7 @@ class RollingCollectionManager {
 
 
   endAllClients() {
+    // disconnects socket and http clients
     winston.debug('RollingCollectionManager: endAllClients()');
     for (let id in this.httpClients) {
       if (this.httpClients.hasOwnProperty(id)) {
@@ -991,7 +972,7 @@ class RollingCollectionManager {
         client.end();
       }
     }
-    this.sendToChannel('disconnect', true);
+    this.sendToRoom('disconnect', true);
   }
 
 
@@ -1049,19 +1030,19 @@ class RollingCollectionManager {
         for (let i = 0; i < wContent.length; i++) {
           let contentItem = wContent[i];
           if ('contentFile' in contentItem && contentItem.contentFile) {
-            fs.unlink(this.cfg.collectionsDir + '/' + contentItem.contentFile, () => {} );
+            fs.unlink(this.afbconfig.collectionsDir + '/' + contentItem.contentFile, () => {} );
           }
           if ('proxyContentFile' in contentItem && contentItem.proxyContentFile) {
-            fs.unlink(this.cfg.collectionsDir + '/' + contentItem.proxyContentFile, () => {} );
+            fs.unlink(this.afbconfig.collectionsDir + '/' + contentItem.proxyContentFile, () => {} );
           }
           if ('pdfImage' in contentItem && contentItem.pdfImage) {
-            fs.unlink(this.cfg.collectionsDir + '/' + contentItem.pdfImage, () => {} );
+            fs.unlink(this.afbconfig.collectionsDir + '/' + contentItem.pdfImage, () => {} );
           }
           if ('thumbnail' in contentItem && contentItem.thumbnail) {
-            fs.unlink(this.cfg.collectionsDir + '/' + contentItem.thumbnail, () => {} );
+            fs.unlink(this.afbconfig.collectionsDir + '/' + contentItem.thumbnail, () => {} );
           }
           if ('archiveFilename' in contentItem && contentItem.archiveFilename) {
-            fs.unlink(this.cfg.collectionsDir + '/' + contentItem.archiveFilename, () => {} );
+            fs.unlink(this.afbconfig.collectionsDir + '/' + contentItem.archiveFilename, () => {} );
           }
           wSocket.content = null;
           wProcess.workerSocket = null;
@@ -1098,9 +1079,9 @@ class RollingCollectionManager {
         
         // Start the worker process and assign a reference to it to 'worker'
         // Notice that we don't pass any configuration to the worker on the command line.  It's all done through the UNIX socket for security.
-        let workerProcess = spawn('./worker_stub.py', [tempName, '2>&1'], { shell: false, stdio: 'inherit'});
+        let workerProcess = spawn('./worker/worker_stub.py', [tempName, '2>&1'], { shell: false, stdio: 'inherit'});
         workerProcess['workerSocket'] = this.workerSocket;
-        workerProcess.on('exit', (code, signal) => this.onWorkerExit(code, signal, workerProcess.pid) );
+        workerProcess.on('exit', (code, signal) => this.onWorkerExit(code, signal, workerProcess.pid, tempName) );
         this.workerProcess.push(workerProcess);
       });
     }
@@ -1113,10 +1094,10 @@ class RollingCollectionManager {
 
 
 
-  onWorkerExit(code, signal, pid) {
+  onWorkerExit(code, signal, pid, tempName) {
     // This is where we handle the exiting of the worker process
     // this.workerProcess = null;
-    winston.debug(`onWorkerExit(): pid: ${pid}`)
+    winston.debug(`onWorkerExit(): Worker with PID ${pid} exited.  Rolling collection update cycle is complete`);
     for (let i = 0; i < this.workerProcess.length; i++) {
       if (this.workerProcess[i].pid == pid) {
         winston.debug(`onWorkerExit(): matched process with pid ${pid},  Removing process from workerProcess table`);
@@ -1125,11 +1106,20 @@ class RollingCollectionManager {
       }
     }
 
+    for (let i = 0; i < this.workerSocket.length; i++) {
+      if (tempName === this.workerSocket[i].server._pipeName) {
+        winston.debug('onWorkerExit(): matched workerSocket.  Deleting it');
+        fs.unlink(tempName, () => {} ); // Delete the temporary UNIX socket file
+        this.workerSocket.splice(i, 1);
+        break;
+      }
+    }
+
     if (signal) {
       winston.debug('onWorkerExit(): Worker process was terminated by signal', signal);
       // Tell client that we're resting
       this.collection['state'] = 'resting';
-      this.sendToChannel('state', 'resting');
+      this.sendToRoom('state', 'resting');
       this.sendToHttpClients( { collection: { id: this.collectionId, state: 'resting' } } );
     }
 
@@ -1138,7 +1128,7 @@ class RollingCollectionManager {
       winston.debug('workLoop(): listen(): onExit(): Worker process exited abnormally without an exit code');
 
       this.collection['state'] = 'error';
-      this.sendToChannel('state', 'error');
+      this.sendToRoom('state', 'error');
       this.sendToHttpClients( { collection: { id: this.collectionId, state: 'error' } } );
     }*/
 
@@ -1147,7 +1137,7 @@ class RollingCollectionManager {
       winston.debug('onWorkerExit(): Worker process exited normally with exit code 0');
       // Tell clients that we're resting
       this.collection['state'] = 'resting';
-      this.sendToChannel('state', 'resting');
+      this.sendToRoom('state', 'resting');
       this.sendToHttpClients( { collection: { id: this.collectionId, state: 'resting' } } );
     }
 
@@ -1155,7 +1145,7 @@ class RollingCollectionManager {
       // Handle worker exit with non-zero (error) exit code
       winston.debug('onWorkerExit(): Worker process exited in bad state with non-zero exit code', code );
       this.collection['state'] = 'error';
-      this.sendToChannel('state', 'error');
+      this.sendToRoom('state', 'error');
       this.sendToHttpClients( { collection: { id: this.collectionId, state: 'error' } } );
     }
 
@@ -1164,12 +1154,12 @@ class RollingCollectionManager {
       // Monitoring collection is paused
       // Now we end and delete this monitoring collection, except for its files (which still may be in use on the client)
       winston.debug('onWorkerExit(): Completing work for paused monitoring collection', this.rollingId);
-      this.dbUpdateCallback(this.collectionId);
+      this.afbconfig.updateRollingCollection(this.collectionId);
       return;
     }
 
     // Save the collection to the DB
-    this.dbUpdateCallback(this.collectionId);
+    this.afbconfig.updateRollingCollection(this.collectionId);
 
     if (this.restartWorkLoopOnExit && this.workerProcess.length === 0) {
       this.restartWorkLoopOnExit = false;
@@ -1179,7 +1169,7 @@ class RollingCollectionManager {
 
 
 
-  onConnectionFromWorker(tempName, workerSocket) {
+  async onConnectionFromWorker(tempName, workerSocket) {
     winston.debug('RollingCollectionManager: onConnectionFromWorker()');
     // For rolling and monitoring collections
     // Handles all dealings with the worker process after it has been spawned, including sending it its configuration, and sending data received from it to the onDataFromWorker() function
@@ -1191,7 +1181,7 @@ class RollingCollectionManager {
     
     if (this.monitoringCollection && !this.paused && this.collection.serviceType === 'nw') {
       // clean up nw monitoring collection files from last run
-      rimraf(this.cfg.collectionsDir + '/' + this.rollingId + '/*', () => {} );
+      await rmfr(this.afbconfig.collectionsDir + '/' + this.rollingId + '/*');
     }
 
     else if (this.monitoringCollection && !this.paused && this.collection.serviceType === 'sa') {
@@ -1209,19 +1199,19 @@ class RollingCollectionManager {
         for (let i = 0; i < content.length; i++) {
           let contentItem = content[i];
           if ('contentFile' in contentItem && contentItem.contentFile) {
-            fs.unlink(this.cfg.collectionsDir + '/' + contentItem.contentFile, () => {} );
+            fs.unlink(this.afbconfig.collectionsDir + '/' + contentItem.contentFile, () => {} );
           }
           if ('proxyContentFile' in contentItem && contentItem.proxyContentFile) {
-            fs.unlink(this.cfg.collectionsDir + '/' + contentItem.proxyContentFile, () => {} );
+            fs.unlink(this.afbconfig.collectionsDir + '/' + contentItem.proxyContentFile, () => {} );
           }
           if ('pdfImage' in contentItem && contentItem.pdfImage) {
-            fs.unlink(this.cfg.collectionsDir + '/' + contentItem.pdfImage, () => {} );
+            fs.unlink(this.afbconfig.collectionsDir + '/' + contentItem.pdfImage, () => {} );
           }
           if ('thumbnail' in contentItem && contentItem.thumbnail) {
-            fs.unlink(this.cfg.collectionsDir + '/' + contentItem.thumbnail, () => {} );
+            fs.unlink(this.afbconfig.collectionsDir + '/' + contentItem.thumbnail, () => {} );
           }
           if ('archiveFilename' in contentItem && contentItem.archiveFilename) {
-            fs.unlink(this.cfg.collectionsDir + '/' + contentItem.archiveFilename, () => {} );
+            fs.unlink(this.afbconfig.collectionsDir + '/' + contentItem.archiveFilename, () => {} );
           }
         }
         delete this.runContent[this.runs - 5];
@@ -1238,7 +1228,7 @@ class RollingCollectionManager {
     }
     this.collection['state'] = ourState;
     if ( !(this.collection.serviceType === 'sa' && this.monitoringCollection) ) { // we do not want the client to clear the screen if it is an SA monitoring collection as it takes a long time to build.  let the client send it instead when it has data to send
-      this.sendToChannel('state', ourState);
+      this.sendToRoom('state', ourState);
       this.sendToHttpClients( { collection: { id: this.collectionId, state: ourState}} );
     }
   
@@ -1281,7 +1271,7 @@ class RollingCollectionManager {
       // Notify the client of our purged sessions
       if (sessionsToPurge.length > 0) {
         let update = { collectionPurge: sessionsToPurge };
-        this.sendToChannel('purge', sessionsToPurge);
+        this.sendToRoom('purge', sessionsToPurge);
         this.sendToHttpClients(update);
       }
       
@@ -1292,20 +1282,19 @@ class RollingCollectionManager {
     //////////////////////////////////
   
     let cfg = {
-      // id: id,
       id: this.rollingId,
       collectionId: this.collectionId, // original collection ID
       state: ourState,
       contentLimit: this.collection.contentLimit,
       minX: this.collection.minX,
       minY: this.collection.minY,
-      gsPath: this.cfg.gsPath,
-      pdftotextPath: this.cfg.pdftotextPath,
-      sofficePath: this.cfg.sofficePath,
-      sofficeProfilesDir: this.cfg.sofficeProfilesDir,
-      unrarPath: this.cfg.unrarPath,
-      collectionsDir: this.cfg.collectionsDir,
-      privateKeyFile: this.cfg.internalPrivateKeyFile,
+      gsPath: this.afbconfig.gsPath,
+      pdftotextPath: this.afbconfig.pdftotextPath,
+      sofficePath: this.afbconfig.sofficePath,
+      sofficeProfilesDir: this.afbconfig.sofficeProfilesDir,
+      unrarPath: this.afbconfig.unrarPath,
+      collectionsDir: this.afbconfig.collectionsDir,
+      privateKeyFile: this.afbconfig.internalPrivateKeyFile,
       useHashFeed: this.collection.useHashFeed,
       serviceType: this.collection.serviceType,
       type: this.collection.type,
@@ -1314,18 +1303,18 @@ class RollingCollectionManager {
   
     try {
       if (this.collection.serviceType === 'nw') {
-        cfg['summaryTimeout'] = this.cfg.preferences.nw.summaryTimeout;
-        cfg['queryTimeout'] = this.cfg.preferences.nw.queryTimeout;
-        cfg['contentTimeout'] = this.cfg.preferences.nw.contentTimeout;
-        cfg['maxContentErrors'] = this.cfg.preferences.nw.maxContentErrors;
-        cfg['sessionLimit'] = this.cfg.preferences.nw.sessionLimit;
+        cfg['summaryTimeout'] = this.afbconfig.preferences.nw.summaryTimeout;
+        cfg['queryTimeout'] = this.afbconfig.preferences.nw.queryTimeout;
+        cfg['contentTimeout'] = this.afbconfig.preferences.nw.contentTimeout;
+        cfg['maxContentErrors'] = this.afbconfig.preferences.nw.maxContentErrors;
+        cfg['sessionLimit'] = this.afbconfig.preferences.nw.sessionLimit;
       }
     
       if (this.collection.serviceType === 'sa') {
-        cfg['queryTimeout'] = this.cfg.preferences.sa.queryTimeout;
-        cfg['contentTimeout'] = this.cfg.preferences.sa.contentTimeout;
-        cfg['maxContentErrors'] = this.cfg.preferences.sa.maxContentErrors;
-        cfg['sessionLimit'] = this.cfg.preferences.sa.sessionLimit;
+        cfg['queryTimeout'] = this.afbconfig.preferences.sa.queryTimeout;
+        cfg['contentTimeout'] = this.afbconfig.preferences.sa.contentTimeout;
+        cfg['maxContentErrors'] = this.afbconfig.preferences.sa.maxContentErrors;
+        cfg['sessionLimit'] = this.afbconfig.preferences.sa.sessionLimit;
       }
     }
     catch(error) {
@@ -1342,14 +1331,14 @@ class RollingCollectionManager {
       2019-03-21 10:01:27,695 afb_server    DEBUG      onCleanup(): signal:
       2019-03-21 10:01:27,704 afb_worker    INFO       Exiting afb_worker with code 0
       */
-      winston.error('Caught error trying to read preferences.  Exiting with code 1.  cfg is:', this.cfg);
+      winston.error('Caught error trying to read preferences.  Exiting with code 1.');
       process.exit(1);
     }
   
     if (this.collection.bound) {
       // This is an OOTB use case
       let useCaseName = this.collection.usecase;
-      let useCase = this.cfg.useCasesObj[useCaseName];
+      let useCase = this.afbconfig.useCases.useCasesObj[useCaseName];
 
       if (this.collection.serviceType == 'nw') {
         cfg['query'] = useCase.nwquery;
@@ -1393,8 +1382,8 @@ class RollingCollectionManager {
       }
       else {
         // we're using a hash feed
-        cfg['hashFeed'] = this.cfg.feeds[this.collection.hashFeed]; // pass the hash feed definition
-        cfg['hashFeederSocket'] = this.cfg.feederSocketFile;
+        cfg['hashFeed'] = this.afbconfig.feeds[this.collection.hashFeed]; // pass the hash feed definition
+        cfg['hashFeederSocket'] = this.handler.feederSocketFile;
       }
   
       cfg['query'] = this.collection.query;
@@ -1410,10 +1399,10 @@ class RollingCollectionManager {
   
     let queryDelaySeconds = null;
     if (this.collection.serviceType == 'nw') {
-      queryDelaySeconds = this.cfg.preferences.nw.queryDelayMinutes * 60;
+      queryDelaySeconds = this.afbconfig.preferences.nw.queryDelayMinutes * 60;
     }
     else if (this.collection.serviceType == 'sa') {
-      queryDelaySeconds = this.cfg.preferences.sa.queryDelayMinutes * 60;
+      queryDelaySeconds = this.afbconfig.preferences.sa.queryDelayMinutes * 60;
     }
     if (queryDelaySeconds < 60) {
       queryDelaySeconds = 60;
@@ -1506,7 +1495,7 @@ class RollingCollectionManager {
     }
   
     if (this.collection.serviceType == 'nw') {
-      let nwserver = this.cfg.nwservers[this.collection.nwserver];
+      let nwserver = this.afbconfig.nwservers[this.collection.nwserver];
       for (let k in nwserver) {
         if (nwserver.hasOwnProperty(k) && k != 'id' && k != '_id') {
           cfg[k] = nwserver[k];  // assign properties of nwserver to the collection cfg
@@ -1514,7 +1503,7 @@ class RollingCollectionManager {
       }
     }
     if (this.collection.serviceType == 'sa') {
-      let saserver = this.cfg.saservers[this.collection.saserver];
+      let saserver = this.afbconfig.saservers[this.collection.saserver];
       for (let k in saserver) {
         if (saserver.hasOwnProperty(k) && k != 'id' && k != '_id') {
           cfg[k] = saserver[k];  // assign properties of saserver to the collection cfg
@@ -1540,28 +1529,10 @@ class RollingCollectionManager {
     workerSocket.on('data', chunk => data = this.onDataFromWorker(data, chunk, runnum) );
     // this.onDataFromWorkerFunc = (chunk) => this.onDataFromWorker(data, chunk);
     // this.workerSocket.on('data', this.onDataFromWorkerFunc );
-                                
-                                
-    // Once the worker has exited, delete the socket temporary file
-    workerSocket.on('end', () => this.onWorkerDisconnected(tempName) );
     
     // Send configuration to worker.  This officially kicks off the work.  After this, we should start receiving data on the socket
     this.sendToWorker(outerCfg, workerSocket);
     
-  }
-
-  
-
-  onWorkerDisconnected(tempName) {
-    winston.debug('onWorkerDisconnected(): Worker disconnected.  Rolling collection update cycle complete');
-    for (let i = 0; i < this.workerSocket.length; i++) {
-      if (tempName === this.workerSocket[i].server._pipeName) {
-        winston.debug('onWorkerDisconnected: found workerSocket.  Deleting it');
-        fs.unlink(tempName, () => {} ); // Delete the temporary UNIX socket file
-        this.workerSocket.splice(i, 1);
-        break;
-      }
-    }
   }
 
 
@@ -1730,11 +1701,11 @@ class RollingCollectionManager {
       
       // winston.debug('update:', update);
       if ('state' in update) {
-        this.sendToChannel('state', update.state);
+        this.sendToRoom('state', update.state);
         this.sendToHttpClients( { collection: { id: this.collectionId, state: update.state } } );
       }
       else {
-        this.sendToChannel('update', update);
+        this.sendToRoom('update', update);
         this.sendToHttpClients(update);
       }
     }
