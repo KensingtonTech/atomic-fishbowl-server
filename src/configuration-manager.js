@@ -41,6 +41,8 @@ class ConfigurationManager {
     this._collections = {}; // holds the high-level definition of a collection but not its content data
     this._collectionsData = {}; // holds content data and session data
     this._feeds = {}; // holds definitions for hash data CSV's
+
+    this._rollingHandler = null;
     
 
     // this._tokenExpirationSeconds = 60 * 60 * 24; // 24 hours
@@ -399,6 +401,7 @@ class ConfigurationManager {
 
 
   async updatePreferences(prefs) {
+    let oldPreferences = deepCopy(this._preferences);
     let serviceTypes;
     // merge in default preferences which we haven't worked into our the UI preferences yet (like summaryTimeout) do we need this?  I think we do
     for (let pref in this._defaultPreferences) {
@@ -441,6 +444,12 @@ class ConfigurationManager {
     this._tokenExpirationSeconds = 60 * 60 * prefs.tokenExpirationHours;
     this._preferences = prefs;
     this.io.emit('preferences', this._preferences);
+    if ( (this.serviceTypes.nw && prefs.nw.queryDelayMinutes !== oldPreferences.nw.queryDelayMinutes) || (this.serviceTypes.sa && prefs.sa.queryDelayMinutes !== oldPreferences.sa.queryDelayMinutes) )  {
+      // we need to bounce any running rolling collections to use the new query delay setting
+      this._rollingHandler.restartRunningCollections();
+
+    }
+
   }
 
 
@@ -618,7 +627,7 @@ class ConfigurationManager {
     // receives a full collectionsData object, saves it here, and upserts it in the database
     let id = collectionData.id;
     this._collectionsData[id] = collectionData;
-    await this.dbMgr.insertOr('collectionsData', id, { id: id, data: JSON.stringify(collectionData) });
+    await this.dbMgr.insertOrUpdateRecord('collectionsData', id, { id: id, data: JSON.stringify(collectionData) });
   }
 
 
@@ -761,6 +770,12 @@ class ConfigurationManager {
 
   get internalPrivateKeyFile() {
     return this._internalPrivateKeyFile;
+  }
+
+
+
+  set rollingHandler(handler) {
+    this._rollingHandler = handler;
   }
 
 

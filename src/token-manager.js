@@ -5,8 +5,9 @@ class TokenManager {
     this.cfgMgr = cfgMgr;
     this.dbMgr = dbMgr;
     this._tokenBlacklist = {};
-    this._socketTokens = {}; // { [jti]: [socket1, socket2, socket3] }
+    this._socketTokens = {}; // { [jti]: [socket1, socket2, socket3] } // keeps track of which sockets are associated with a given token
     this._scheduledJobs = {}; // { [jti]: scheduleHandler }
+    this._authenticatedSockets = {}; // { [socketId]: socket } // is used only for communication to authenticated sockets
 
     /*
     The token blacklist exists to prevent tokens that have been revoked, due to logout, from being reused during their validity period.
@@ -22,29 +23,8 @@ class TokenManager {
 
 
 
-  onTokenExpired(jti) {
-    // callback to run when a token has expired
-    winston.debug('TokenManager: onTokenExpired(): jti:', jti);
-    delete this._scheduledJobs[jti];
-    // tell the client we're disconnecting and then disconnect the socket
-    this._socketTokens[jti].forEach( (socket) => {
-      // there could be more than one socket using the same token (multiple tabs in same browser)
-      socket.emit('logout'); // inform the client
-      socket.disconnect();
-    });
-    delete this._socketTokens[jti];
-    
-  }
-
-
-
-  get tokenBlacklist() {
-    return this._tokenBlacklist;
-  }
-
-
-
   addSocketToken(socket) {
+    this._authenticatedSockets[socket.id] = socket;
     let jti = socket.conn.jwtuser.jti;
     let expiryTime = socket.conn.jwtuser.exp;
     winston.debug('TokenManager: addSocketToken(): adding socket token for jti:', jti);
@@ -62,14 +42,27 @@ class TokenManager {
 
 
   removeSocketToken(socket, reason) {
+    // deletes the expiry job for a socket and removes it from _socketTokens, _authenticatedSockets, and removes the socket's 'jwtuser'
+    // called by onSocketIoDisconnect() and onTokenExpired()
+    // it must expect that a socket may be either authenticated or unauthenticated
+    // this can be determined by whether 'jwtuser' is in socket.conn
     winston.debug('TokenManager: removeSocketToken()');
-    // winston.debug('ConfigurationManager: removeSocketToken(): disconnect reason:', reason);
+    winston.debug('TokenManager: removeSocketToken(): disconnect reason:', reason);
     if (reason === 'server namespace disconnect') {
       // we only want to run this routine if we didn't call disconnect from the server
       // without this guard, we could crash here (and who knows?  we still might)
       return;
     }
+    if (!('jwtuser' in socket.conn)) {
+      winston.debug('TokenManager: removeSocketToken(): this socket is not authenticated - returning');
+      return;
+    }
     let jti = socket.conn.jwtuser.jti;
+    delete socket.conn['jwtuser'];
+
+    let socketId = socket.id;
+    delete this._authenticatedSockets[socketId]; // if this crashes, something is seriously wrong
+    
     if (this._socketTokens[jti].length === 1) {
       let job = this._scheduledJobs[jti];
       job.cancel();
@@ -97,13 +90,22 @@ class TokenManager {
   removeSocketTokensByJwt(jti) {
     winston.debug('TokenManager: removeSocketTokensByJwt()');
     // runs when a user logs out
-    // it disconnects any sockets associated with the token and kills the token's scheduled expiry job
+    // called only from /api/logout
+    // it kills the token's scheduled expiry job, and tells the clients to logout and downgrade their sockets
+    // it removes the sockeet from _authenticatedSockets amd _socketTokens
+    // it also removes socket.conn.jwtuser from all sockets associated with the token
+
     if (jti in this._socketTokens) {
-      let sockets = this._socketTokens[jti];
-      sockets.forEach( (socket) => {
+      let socketsOfToken = this._socketTokens[jti];
+      socketsOfToken.forEach( (socket) => {
+        let socketId = socket.id;
         winston.debug('TokenManager: removeSocketTokensByJwt(): disconnecting socket', socket.id);
-        socket.emit('logout');
-        socket.disconnect();
+        socket.emit('logout', 'user logout');
+        socket.emit('socketDowngrade');
+        if (socketId in this._authenticatedSockets) {
+          delete this._authenticatedSockets[socketId];
+        }
+        delete socket.conn['jwtuser']; // unauthenticate the socket
       })
       delete this._socketTokens[jti];
     }
@@ -133,6 +135,30 @@ class TokenManager {
 
 
 
+  get tokenBlacklist() {
+    return this._tokenBlacklist;
+  }
+
+
+
+  onTokenExpired(jti) {
+    // callback to run when a token has expired
+    winston.debug('TokenManager: onTokenExpired(): jti:', jti);
+    // delete this._scheduledJobs[jti]; // handled in removeSocketToken()
+    // tell the client we're disconnecting and then disconnect the socket
+    this._socketTokens[jti].forEach( (socket) => {
+      // there could be more than one socket using the same token (multiple tabs in same browser)
+      socket.emit('logout', 'token expired'); // inform the client
+      // socket.disconnect();
+      socket.emit('socketDowngrade');
+      this.removeSocketToken(socket, 'token expired');
+    });
+    // delete this._socketTokens[jti]; // handled in removeSocketToken()
+    
+  }
+
+
+
   async cleanBlackList() {
     // winston.debug('TokenManager: cleanBlackList()');
     let currentTime = new Date().getTime();
@@ -146,6 +172,19 @@ class TokenManager {
         }
       }
     }
+  }
+
+
+
+  authSocketsEmit (message, value = null) {
+    Object.values(this.authenticatedSockets).forEach( (socket) => {
+      if (value) {
+        socket.emit(message, value);
+      }
+      else {
+        socket.emit(message);
+      }
+    });
   }
 
 

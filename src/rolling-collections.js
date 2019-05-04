@@ -18,6 +18,11 @@ class RollingCollectionHandler {
 
   onChannelConnect(socket) {
     winston.debug('RollingCollectionHandler: onChannelConnect()');
+    if (!('jwtuser' in socket.conn)) {
+      // socket is not authenticated - disconnect it
+      socket.disconnect(false);
+      return;
+    }
     socket.on('disconnect', () => this.onChannelDisconnect(socket) );
     socket.on('join', (data) => this.onSocketJoinCollection(socket, data) );
     socket.on('leave', () => this.onLeaveCollection(socket) );
@@ -92,7 +97,7 @@ class RollingCollectionHandler {
     if ('rollingId' in socket) {
       let rollingId = socket['rollingId'];
       let collectionId = socket.collectionId;
-      winston.info(`User '${socket.conn.jwtuser.username}' has disconnected from ${socket.collectionType} collection '${socket.collectionName}'`)
+      winston.info(`A user has disconnected from ${socket.collectionType} collection '${socket.collectionName}'`)
       socket.leave(rollingId);
       delete socket['rollingId'];
       delete socket['collectionId'];
@@ -119,10 +124,10 @@ class RollingCollectionHandler {
       let collectionId = socket.collectionId;
       winston.debug('RollingCollectionHandler: onChannelDisconnect(): matched collection id:', collectionId);
       if (collectionId in this.afbconfig.collections) {
-        winston.info(`User '${socket.conn.jwtuser.username}' has disconnected from ${this.afbconfig.collections[collectionId].type} collection '${this.afbconfig.collections[collectionId].name}'`);
+        winston.info(`A user has disconnected from ${this.afbconfig.collections[collectionId].type} collection '${this.afbconfig.collections[collectionId].name}'`);
       }
       else {
-        winston.info(`User '${socket.conn.jwtuser.username}' has disconnected from rolling collections`);
+        winston.info(`A user has disconnected from rolling collections`);
       }
       socket.leave(rollingId);
       delete socket['rollingId'];
@@ -320,12 +325,19 @@ class RollingCollectionHandler {
   killall() {
     // we get here during server shutdown, and when the license expires
     winston.debug('RollingCollectionHandler: killall()');
-    for (let rollingId in this.rollingCollectionManagers) {
-      if (this.rollingCollectionManagers.hasOwnProperty(rollingId)) {
-        let manager = this.rollingCollectionManagers[rollingId].manager;
-        manager.abort();
-      }
-    }
+    Object.values(this.rollingCollectionManagers).forEach( manager => {
+      manager.manager.abort();
+    });
+  }
+
+
+
+  restartRunningCollections() {
+    // we get here during server shutdown, and when the license expires
+    winston.debug('RollingCollectionHandler: restartRunningCollections()');
+    Object.values(this.rollingCollectionManagers).forEach( manager => {
+      manager.manager.restart();
+    });
   }
 
 
@@ -521,7 +533,7 @@ class RollingCollectionManager {
     this.sessions = [];
     this.content = [];
     this.search = [];
-    this.lastEnd = null; // the end time of the last query to run
+    this.lastQueryEndTime = null; // the end time of the last query to run
     this.lastRun = null; // the last time that the worker actually ran
     if (this.collection.type === 'monitoring') {
       this.paused = false;
@@ -561,10 +573,6 @@ class RollingCollectionManager {
 
   async selfDestruct() {
     winston.debug('RollingCollectionManager: selfDestruct()');
-    /*if (isDestroyed) {
-      winston.debug('Not self-destructing as we\'re already being deleted');
-      return;
-    }*/
     this.collection['state'] = 'stopped';
     if (!this.monitoringCollection) {
       winston.debug("RollingCollectionManager: selfDestruct(): No clients have reconnected to rolling collection " + this.rollingId + " within " + this.destroyThreshold + " seconds. Self-destructing");
@@ -618,9 +626,6 @@ class RollingCollectionManager {
       if (this.observers == 1) {
         // If all clients have disconnected, and then one reconnects, the worker should start immediately
         this.resumed = true;
-        // clearInterval(this.workInterval);
-        // this.workInterval = null;
-        // if (!this.workerProcess) {
         if (this.workerProcess.length === 0) {
           this.run();
         }
@@ -671,14 +676,14 @@ class RollingCollectionManager {
       // Play back search text
       socket.emit('searches', this.search);
 
+      // Emit collection state
+      socket.emit('state', this.collection.state);
+
       winston.debug(`Current number of observers: ${this.observers}`);
 
       if (this.observers == 1) {
         // If all clients have disconnected, and then one reconnects, the worker should start immediately
         this.resumed = true;
-        // clearInterval(this.workInterval);
-        // this.workInterval = null;
-        // if (!this.workerProcess) {
         winston.debug(`workerProcess.length: ${this.workerProcess.length}`);
         if (this.workerProcess.length === 0) {
           this.run();
@@ -715,7 +720,7 @@ class RollingCollectionManager {
     this.content = [];
     this.search = [];
     this.runs = 0;
-    this.lastEnd = null;
+    this.lastQueryEndTime = null;
     this.lastRun = null;
     this.resumed = false;
 
@@ -723,8 +728,9 @@ class RollingCollectionManager {
     this.sendToHttpClients( { wholeCollection: { images: [], sessions: {}, search: [] } } );
     
 
-    // don't re-run.  The clients will cause this themselves when they reconnect.  Stick with this as it otherwise causes issues later on.
-    // this.run();
+    if (this.observers !== 0) {
+      this.run();
+    }
 
   }
 
@@ -784,6 +790,41 @@ class RollingCollectionManager {
     await this.afbconfig.updateRollingCollection(this.collectionId) // save collection state
     
     this.handler.removeRollingCollectionManager(this.collectionId);
+  }
+
+
+
+  async restart() {
+    winston.debug('RollingCollectionManager: restart()');
+
+    // we only get here in this case:
+    //   1. query delay minutes has been updated
+    
+    // stop the work loop
+    if (this.workInterval) {
+      clearInterval(this.workInterval);
+      this.workInterval = null;
+    }
+    
+    // stop any running workers
+    this.killWorker();
+    
+    this.sessions = [];
+    this.content = [];
+    this.search = [];
+    this.runs = 0;
+    this.lastQueryEndTime = null;
+    this.lastRun = null;
+    this.resumed = false;
+
+    this.sendToRoom('clear', true); // this only triggers when a collection is edited.  no other time
+    this.sendToHttpClients( { wholeCollection: { images: [], sessions: {}, search: [] } } );
+
+    if (this.observers !== 0) {
+      this.run();
+    }
+
+   
   }
 
 
@@ -872,16 +913,6 @@ class RollingCollectionManager {
     this.paused = true;
     this.timeOfPause = moment().unix();
     this.sendToRoom('paused', true);
-    /*if (this.workInterval) {
-      // stop workLoop from running any more, but allow present worker to finish.
-      clearInterval(this.workInterval);
-      this.workInterval = null;
-    }
-    if (this.pauseTimeout) {
-      clearTimeout(this.pauseTimeout);
-      this.pauseTimeout = null;
-    }*/
-
   }
 
 
@@ -893,19 +924,6 @@ class RollingCollectionManager {
     let timeOfResume = moment().unix();
     let difference = timeOfResume - this.timeOfPause;
     winston.debug('RollingCollectionManager: unpause(): difference:', difference);
-    
-    /*if (difference <= 60) {
-      // less than a minute has elapsed or exactly 1 minute has elapsed since the collection was paused
-      let resumeInXSeconds = 60 - difference;
-      winston.debug('RollingCollectionManager: unpause(): resumeInXSeconds:', resumeInXSeconds);
-
-      this.pauseTimeout = setTimeout( () => {
-        winston.debug('RollingCollectionManager: unpause(): resuming work');
-        this.pauseTimeout = null;
-        this.workInterval = setInterval( () => this.workLoop(), 60000);
-        this.workLoop();
-      }, resumeInXSeconds * 1000);
-    }*/
 
     if (difference >= 60) {
       // more than a minute has elapsed since pause. Resume immediately and restart loop
@@ -1008,6 +1026,13 @@ class RollingCollectionManager {
         winston.debug('workLoop(): First run of rolling collection is still running.  Delaying next run by 60 seconds');
         return;
       }
+
+      ///////////////////////////
+      //PURGE AGED-OUT SESSIONS//
+      ///////////////////////////
+      this.calculateSessionsToPurge();
+
+
       
       // if ( this.workerProcess && ( this.runs > 1 || this.monitoringCollection ) ) {
       if ( ( !this.monitoringCollection && this.workerProcess.length !== 0 && this.runs > 1 ) ||
@@ -1023,30 +1048,6 @@ class RollingCollectionManager {
         winston.debug('workLoop(): Timer expired for running worker 1.  Terminating worker');
         let wProcess = this.workerProcess.shift();
         wProcess.kill('SIGINT');
-        /*
-        let wSocket = wProcess.workerSocket;
-        let wContent = wSocket.content;
-        winston.debug('workLoop(): Deleting content of running worker 1');
-        for (let i = 0; i < wContent.length; i++) {
-          let contentItem = wContent[i];
-          if ('contentFile' in contentItem && contentItem.contentFile) {
-            fs.unlink(this.afbconfig.collectionsDir + '/' + contentItem.contentFile, () => {} );
-          }
-          if ('proxyContentFile' in contentItem && contentItem.proxyContentFile) {
-            fs.unlink(this.afbconfig.collectionsDir + '/' + contentItem.proxyContentFile, () => {} );
-          }
-          if ('pdfImage' in contentItem && contentItem.pdfImage) {
-            fs.unlink(this.afbconfig.collectionsDir + '/' + contentItem.pdfImage, () => {} );
-          }
-          if ('thumbnail' in contentItem && contentItem.thumbnail) {
-            fs.unlink(this.afbconfig.collectionsDir + '/' + contentItem.thumbnail, () => {} );
-          }
-          if ('archiveFilename' in contentItem && contentItem.archiveFilename) {
-            fs.unlink(this.afbconfig.collectionsDir + '/' + contentItem.archiveFilename, () => {} );
-          }
-          wSocket.content = null;
-          wProcess.workerSocket = null;
-        }*/
       }
 
 
@@ -1122,15 +1123,6 @@ class RollingCollectionManager {
       this.sendToRoom('state', 'resting');
       this.sendToHttpClients( { collection: { id: this.collectionId, state: 'resting' } } );
     }
-
-    /*else if (!code) {
-      // Handle really abnormal worker exit with no error code - maybe because we couldn't spawn it at all?  We likely won't ever enter this block
-      winston.debug('workLoop(): listen(): onExit(): Worker process exited abnormally without an exit code');
-
-      this.collection['state'] = 'error';
-      this.sendToRoom('state', 'error');
-      this.sendToHttpClients( { collection: { id: this.collectionId, state: 'error' } } );
-    }*/
 
     // Handle normal worker exit code 0
     else if (!code || code === 0) {
@@ -1233,49 +1225,6 @@ class RollingCollectionManager {
     }
   
   
-    ///////////////////////////
-    //PURGE AGED-OUT SESSIONS//
-    ///////////////////////////
-  
-    if (this.monitoringCollection) {
-      this.sessions = [];
-      this.content = [];
-      this.search = [];
-    }
-    else if (!this.monitoringCollection && this.runs > 1) {
-      // Purge events older than this.collection.lastHours
-  
-      winston.debug('Running purge routine');
-      let sessionsToPurge = [];
-  
-      // Calculate the maximum age a given session is allowed to be before purging it
-      let maxTime = this.lastEnd - this.collection.lastHours * 60 * 60;
-      if (purgeHack) { maxTime = this.lastRun - 60 * purgeHackMinutes; } // 5 minute setting used for testing
-  
-      for (let i = 0; i < this.sessions.length; i++) {
-        // Look at each session and determine whether it is older than maxtime
-        // If so, add it to purgedSessionPositions and sessionsToPurge
-        let session = this.sessions[i];
-        // winston.debug('session:', session);
-        let sid = session.id;
-        if ( this.collection.serviceType == 'nw' && session.meta.time < maxTime ) {
-          sessionsToPurge.push(sid);
-        }
-        else if ( this.collection.serviceType == 'sa' && this.convertSATime(session.meta.stop_time[0]) < maxTime ) {
-          sessionsToPurge.push(sid);
-        }
-      }
-  
-      this.purgeSessions(sessionsToPurge.slice());
-     
-      // Notify the client of our purged sessions
-      if (sessionsToPurge.length > 0) {
-        let update = { collectionPurge: sessionsToPurge };
-        this.sendToRoom('purge', sessionsToPurge);
-        this.sendToHttpClients(update);
-      }
-      
-    }
   
     //////////////////////////////////
     //Build the worker configuration//
@@ -1413,9 +1362,9 @@ class RollingCollectionManager {
       let mom = moment.utc(this.lastRun * 1000);
       winston.debug('The time of lastRun is:', mom.format('YYYY-MMMM-DD HH:mm:ss') );
     }
-    if (this.lastEnd) {
-      let mom = moment.utc(this.lastEnd * 1000);
-      winston.debug('The time of lastEnd is:', mom.format('YYYY-MMMM-DD HH:mm:ss') );
+    if (this.lastQueryEndTime) {
+      let mom = moment.utc(this.lastQueryEndTime * 1000);
+      winston.debug('The time of lastQueryEndTime is:', mom.format('YYYY-MMMM-DD HH:mm:ss') );
     }
 
     if (this.monitoringCollection) {
@@ -1430,9 +1379,6 @@ class RollingCollectionManager {
       winston.debug('onConnectionFromWorker(): Got first run');
       cfg['timeBegin'] = moment().startOf('minute').unix() - 1 - ( this.collection.lastHours * 60 * 60 ) - queryDelaySeconds ;
       cfg['timeEnd'] = moment().startOf('minute').unix() - 1 - queryDelaySeconds; // the beginning of the last minute minus one second, to give time for sessions to leave the assembler
-
-      // cfg['timeEnd'] = moment().startOf('minute').unix() - 61 - queryDelaySeconds; // the beginning of the last minute minus one second, to give time for sessions to leave the assembler
-      // cfg['timeBegin'] = ( cfg['timeEnd'] - (this.collection.lastHours * 60 * 60) ) + 1;
     }
     
     else if ( ( !this.resumed && this.runs == 2 && ( moment().unix() - this.lastRun > 60 ) ) ) {
@@ -1440,29 +1386,28 @@ class RollingCollectionManager {
       // This is the second run of a non-resumed rolling collection - this allows the first run to exceed one minute of execution and will take up whatever excess time has elapsed
       // It will only enter this block if more than 61 seconds have elapsed since the last run
       winston.debug('onConnectionFromWorker(): Got second run');
-      cfg['timeBegin'] = this.lastEnd + 1; // one second after the last run
+      cfg['timeBegin'] = this.lastQueryEndTime + 1; // one second after the last run
       cfg['timeEnd'] = moment().startOf('minute').unix() - 1 - queryDelaySeconds; // the beginning of the last minute minus one second, to give time for sessions to leave the assembler
-      // cfg['timeEnd'] = moment().startOf('minute').unix() - 61 - queryDelaySeconds; // the beginning of the last minute minus one second, to give time for sessions to leave the assembler
     }
   
     else if ( !this.resumed && this.runs >= 2) {
       // winston.debug('got to 3');
       // This is the third or greater run of a non-resumed rolling collection
       winston.debug('onConnectionFromWorker(): Got subsequent run');
-      cfg['timeBegin'] = this.lastEnd + 1; // one second after the last run
+      cfg['timeBegin'] = this.lastQueryEndTime + 1; // one second after the last run
       cfg['timeEnd'] = cfg['timeBegin'] + 60; // add one minute to cfg[timeBegin]
     }
 
     else if ( this.resumed && ( moment().unix() - this.lastRun < 60 ) ) { // resumed and less than 60 seconds have elapsed since last run
       winston.debug('onConnectionFromWorker(): Resumed collection and less than 60 seconds since last run');
-      cfg['timeBegin'] = this.lastEnd + 1; // one second after the last run
+      cfg['timeBegin'] = this.lastQueryEndTime + 1; // one second after the last run
       let secondsSinceLastRun = moment().unix() - this.lastRun;
       cfg['timeEnd'] = cfg['timeBegin'] + secondsSinceLastRun;
     }
 
     else if ( this.resumed && ( moment().unix() - this.lastRun >= 60 ) ) { // resumed and 60 seconds or more have elapsed since last run
       winston.debug('onConnectionFromWorker(): Resumed collection and greater than 60 seconds since last run');
-      cfg['timeBegin'] = this.lastEnd + 1; // one second after the last run
+      cfg['timeBegin'] = this.lastQueryEndTime + 1; // one second after the last run
       cfg['timeEnd'] = moment().startOf('minute').unix() - 1 - queryDelaySeconds;
     }
     
@@ -1475,7 +1420,7 @@ class RollingCollectionManager {
     winston.debug('The time of timeEnd is:', momEnd.format('YYYY-MMMM-DD HH:mm:ss') );
     
     this.lastRun = moment.utc().unix();
-    this.lastEnd = cfg['timeEnd']; // store the time of last run so that we can reference it the next time we loop
+    this.lastQueryEndTime = cfg['timeEnd']; // store the time of last run so that we can reference it the next time we loop
 
 
     if ('distillationTerms' in this.collection) {
@@ -1527,8 +1472,6 @@ class RollingCollectionManager {
     let runnum = this.runs; // just making sure we resolve the correct run number in the below 'data' callback.  primitive numbers are copied by value and not by reference
     // Handle data received from the worker over the socket (this really builds the collection)
     workerSocket.on('data', chunk => data = this.onDataFromWorker(data, chunk, runnum) );
-    // this.onDataFromWorkerFunc = (chunk) => this.onDataFromWorker(data, chunk);
-    // this.workerSocket.on('data', this.onDataFromWorkerFunc );
     
     // Send configuration to worker.  This officially kicks off the work.  After this, we should start receiving data on the socket
     this.sendToWorker(outerCfg, workerSocket);
@@ -1537,14 +1480,59 @@ class RollingCollectionManager {
 
 
 
+  calculateSessionsToPurge() {
+
+    if (this.monitoringCollection) {
+      this.sessions = [];
+      this.content = [];
+      this.search = [];
+    }
+    else if (!this.monitoringCollection && this.runs > 1) {
+      // Purge events older than this.collection.lastHours
+  
+      winston.debug('Running purge routine');
+      let sessionsToPurge = [];
+  
+      // Calculate the maximum age a given session is allowed to be before purging it
+      let maxTime = this.lastQueryEndTime - this.collection.lastHours * 60 * 60;
+      if (purgeHack) { maxTime = this.lastRun - 60 * purgeHackMinutes; } // 5 minute setting used for testing
+  
+      for (let i = 0; i < this.sessions.length; i++) {
+        // Look at each session and determine whether it is older than maxtime
+        // If so, add it to purgedSessionPositions and sessionsToPurge
+        let session = this.sessions[i];
+        // winston.debug('session:', session);
+        let sid = session.id;
+        if ( this.collection.serviceType == 'nw' && session.meta.time < maxTime ) {
+          sessionsToPurge.push(sid);
+        }
+        else if ( this.collection.serviceType == 'sa' && this.convertSATime(session.meta.stop_time[0]) < maxTime ) {
+          sessionsToPurge.push(sid);
+        }
+      }
+  
+      this.purgeSessions(sessionsToPurge.slice());
+     
+      // Notify the client of our purged sessions
+      if (sessionsToPurge.length > 0) {
+        let update = { collectionPurge: sessionsToPurge };
+        this.sendToRoom('purge', sessionsToPurge);
+        this.sendToHttpClients(update);
+      }
+      
+    }
+  }
+
+
+
   purgeSessions(sessionsToPurge) {
     // winston.debug('purgeSessions(): sessionsToPurge.length: ', sessionsToPurge.length)
     winston.debug('RollingCollectionManager: purgeSessions(): ' + sessionsToPurge);
+
     while (sessionsToPurge.length > 0) {
       let sessionToPurge = sessionsToPurge.shift(); // a session ID
       // winston.debug('purgeSessions(): purge for session', sessionToPurge);
   
-      // for (let i = 0; i < this.sessions.length; i++) {
       for (let i = this.sessions.length - 1; i != -1 ; i--) {
         // Remove purged sessions from this.sessions
         let session = this.sessions[i];
@@ -1555,39 +1543,20 @@ class RollingCollectionManager {
         }
       }
   
-      let searchesToPurge = [];
-      // for (let i = 0; i < this.search.length; i++) {
       for (let i = this.search.length - 1; i != -1; i--) {
         // Identify search items to purge from this.search
         let search = this.search[i];
         if (search.session == sessionToPurge) {
-          // searchesToPurge.push(search);
           winston.debug('purgeSessions(): purging search', search.session);
           this.search.splice(i, 1);
         }
       }
-      /*while (searchesToPurge.length != 0) {
-        // Remove purged search items from this.search
-        let searchToPurge = searchesToPurge.shift();
-        for (let i = 0; i < this.search.length; i++) {
-          let search = this.search[i];
-          if (searchToPurge.session == search.session && searchToPurge.contentFile == search.contentFile) {
-            // Purge search
-            winston.debug('purgeSessions(): purging search', search.session);
-            this.search.splice(i, 1);
-            break;
-          }
-        }
-      }*/
       
-      let contentsToPurge = [];
-      // for (let i = 0; i < this.content.length; i++) {
       for (let i = this.content.length - 1; i != -1; i--) {
         // Purge content
         let content = this.content[i];
         if (content.session == sessionToPurge) {
           winston.debug('purgeSessions(): purging content', content.session);
-          // contentsToPurge.push(content);
           if ('contentFile' in content) {
             fs.unlink(content.contentFile, () => {});
           }
@@ -1604,39 +1573,12 @@ class RollingCollectionManager {
         }
       }
 
-      /*while (contentsToPurge.length != 0) {
-        let contentToPurge = contentsToPurge.shift();
-        for (let i = 0; i < this.content.length; i++) {
-          let content = this.content[i];
-          if (contentToPurge.session == content.session && contentToPurge.contentFile == content.contentFile && contentToPurge.contentType == content.contentType) {
-            // Purge content
-            winston.debug('purgeSessions(): purging content', content.session);
-            this.content.splice(i, 1);
-            if ('contentFile' in content) {
-              fs.unlink(content.contentFile, () => {});
-            }
-            if ('proxyContentFile' in content) {
-              fs.unlink(content.proxyContentFile, () => {});
-            }
-            if ('thumbnail' in content) {
-              fs.unlink(content.thumbnail, () => {});
-            }
-            if ('pdfImage' in content) {
-              fs.unlink(content.pdfImage, () => {});
-            }
-            break;
-          }
-        }
-      }*/
-
     }
   }
 
 
   
   onDataFromWorker(data, chunk, runNumber) {
-  // onDataFromWorker(chunk) {
-  // onDataFromWorker = (chunk) => {
     // Handles socket data received from the worker process
     // This actually builds the collection data structures and sends updates to the client
     winston.debug('RollingCollectionManager: onDataFromWorker(): Processing update from worker');

@@ -87,9 +87,8 @@ global.schedule = require('node-schedule');
 
 // socket.io
 global.io = require('socket.io')(server);
-const ioCookieParser = require('socket.io-cookie');
-io.use(ioCookieParser);
-io.use(ioAuthenticator);
+const collectionsChannel = io.of('/collections'); // create /collections namespace
+
 
 // versioning
 const buildProperties = falseRequire('./build-properties') || BuildProperties;
@@ -133,6 +132,7 @@ winston.info('Starting Atomic Fishbowl server version', version);
 
 
 
+
 //////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////////CONFIGURATION//////////////////////////////////////////////////////////////
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -154,6 +154,7 @@ var licenseExpiryJob = null; // placeholder for cron-like job to expire the lice
 // Load config
 const ConfigManager = (function() {return falseRequire('./configuration-manager') || ConfigurationManager})();
 const afbconfig = new ConfigManager(args, io);
+const tokenMgr = afbconfig.tokenMgr;
 
 // Multipart upload config
 const upload = multer({ dest: afbconfig.tempDir });
@@ -197,8 +198,8 @@ if ( !fs.existsSync(afbconfig.tempDir) ) {
   await mongooseInit();
   // validate the license
   checkLicense();
-  afbconfig.tokenMgr.cleanBlackList();
-  setInterval( () => afbconfig.tokenMgr.cleanBlackList(), 1000 * 60); // run every minute
+  tokenMgr.cleanBlackList();
+  setInterval( () => tokenMgr.cleanBlackList(), 1000 * 60); // run every minute
   await cleanCollectionDirs();
   scheduler.updateSchedule(afbconfig.feeds);
   try {
@@ -238,8 +239,26 @@ app.post('/api/login', passport.authenticate('local'), (req,res) => {
       let tokenEpirySeconds = tokenSigningHack ? tokenSigningHackSeconds : afbconfig.tokenExpirationSeconds;
       winston.debug("tokenExpirationSeconds:", tokenEpirySeconds);
       let token = jwt.sign(user.toObject({versionKey: false, transform: transformUser}), afbconfig.jwtPrivateKey, { subject: user.id, algorithm: 'RS256', expiresIn: tokenEpirySeconds, jwtid: uuidV4() }); // expires in 24 hours
+
+      if ('query' in req && 'socketId' in req.query) {
+        // socketId is the socket.io socketID
+        let socketId = req.query.socketId;
+        
+        let decoded = jwt.decode(token);
+      
+        if (socketId in io.sockets.sockets) {
+          let socket = io.sockets.sockets[socketId];
+          socket.conn['jwtuser'] = decoded; // write our token info to the socket so it can be accessed later
+          tokenMgr.addSocketToken(socket); // decoded.jti, decoded.exp
+          socket.once('clientReady', () => onClientReady(socket) );
+          socket.emit('socketUpgrade');
+        }
+        else {
+          winston.error(`User ${req.user.username} logged in with an invalid socket id: ${socketId}`);
+        }
+      }
+
       res.cookie('access_token', token, { httpOnly: true, secure: true });
-      // res.cookie( req.session );
       res.json({
         success: true,
         user: user.toObject(),
@@ -258,8 +277,10 @@ app.get('/api/logout', passport.authenticate('jwt', { session: false } ), async 
   // winston.debug("decoded:", decoded);
   let tokenId = decoded.jti; //store this
   // winston.debug("decoded tokenId:", tokenId);
-  afbconfig.tokenMgr.removeSocketTokensByJwt(tokenId); // forcefully disconmect sockets of token
-  await afbconfig.tokenMgr.blacklistToken(tokenId); // blacklist the token
+
+  tokenMgr.removeSocketTokensByJwt(tokenId); // downgrade sockets of token
+  await tokenMgr.blacklistToken(tokenId); // blacklist the token
+
   res.clearCookie('access_token');
   res.status(200).send(JSON.stringify( { success: true } ));
 });
@@ -269,11 +290,25 @@ app.get('/api/logout', passport.authenticate('jwt', { session: false } ), async 
 app.get('/api/isloggedin', passport.authenticate('jwt', { session: false } ), (req, res) => {
   winston.debug(`${req.method} ${req.url} from ${req.headers['x-forwarded-for'] || req.connection.remoteAddress}`);
   winston.info(`User '${req.user.username}' has logged in`);
-  // winston.debug('sessionID:', req.session.id);
-  // winston.debug('Session object:', req.session);
-  // res.cookie('access_token', token, { httpOnly: true, secure: true })
-  // res.cookie( req.session.cookie );
-  // req.session.save();
+  
+  if ('query' in req && 'socketId' in req.query) {
+    // socketId is the socket.io socketID
+    let socketId = req.query.socketId;
+    
+    let decoded = jwt.decode(req.cookies.access_token); //we can use jwt.decode here without signature verification as it's already been verified during authentication
+  
+    if (socketId in io.sockets.sockets) {
+      let socket = io.sockets.sockets[socketId];  
+      socket.conn['jwtuser'] = decoded; // write our token info to the socket so it can be accessed later
+      tokenMgr.addSocketToken(socket); // decoded.jti, decoded.exp
+      socket.once('clientReady', () => onClientReady(socket) );
+      socket.emit('socketUpgrade');
+    }
+    else {
+      winston.error(`User ${req.user.username} logged in with an invalid socket id: ${socketId}`);
+    }
+  }
+
   res.json( { user: req.user.toObject(), sessionId: uuidV4() }); // { versionKey: false, transform: transformUserIsLoggedIn }
 });
 
@@ -506,7 +541,8 @@ app.delete('/api/collection/:id', passport.authenticate('jwt', { session: false 
     }
 
     await afbconfig.deleteCollection(id);
-    io.emit('collectionDeleted', { user: req.user.username, id: id } ); // let socket clients know this has been deleted
+    // io.emit('collectionDeleted', { user: req.user.username, id: id } ); // let socket clients know this has been deleted
+    tokenMgr.authSocketsEmit('collectionDeleted', { user: req.user.username, id: id } ); // let socket clients know this has been deleted
   }
   catch(error) {
     res.status(500).send( JSON.stringify( { success: false, error: error.message || error } ) );
@@ -644,13 +680,13 @@ app.post('/api/collection/edit', passport.authenticate('jwt', { session: false }
     };
     collection['modifier'] = modifier;
 
-    console.log('got to 1');
+    // console.log('got to 1');
     rollingHandler.collectionEdited(id, collection);
-    console.log('got to 2');
+    // console.log('got to 2');
 
     try {
       await afbconfig.editCollection(collection);
-      console.log('got to 3');
+      // console.log('got to 3');
     }
     catch (error) {
       throw( [ oldCollection, error ] );
@@ -1271,7 +1307,8 @@ app.delete('/api/nwserver/:id', passport.authenticate('jwt', { session: false } 
     return;
   }
   winston.info(`User '${req.user.username}' has deleted NetWitness server '${oldNwserver.user}@${oldNwserver.host}:${oldNwserver.port}'`);
-  io.emit('nwservers', redactApiServerPasswords(afbconfig.nwservers));
+  // io.emit('nwservers', redactApiServerPasswords(afbconfig.nwservers));
+  tokenMgr.authSocketsEmit('nwservers', redactApiServerPasswords(afbconfig.nwservers));
   res.status(200).send( JSON.stringify( { success: true } ) );
 });
 
@@ -1314,7 +1351,8 @@ app.post('/api/nwserver', passport.authenticate('jwt', { session: false } ), asy
   }
  
   winston.info(`User '${req.user.username}' has added NetWitness server '${nwserver.user}@${nwserver.host}:${nwserver.port}'`);
-  io.emit('nwservers', redactApiServerPasswords(afbconfig.nwservers));
+  // io.emit('nwservers', redactApiServerPasswords(afbconfig.nwservers));
+  tokenMgr.authSocketsEmit('nwservers', redactApiServerPasswords(afbconfig.nwservers));
   res.status(201).send( JSON.stringify( { success: true } ) );
     
 });
@@ -1360,7 +1398,8 @@ app.post('/api/nwserver/edit', passport.authenticate('jwt', { session: false } )
     return;
   }
   winston.info(`User '${req.user.username}' has edited NetWitness server '${oldNwserver.user}@${oldNwserver.host}:${oldNwserver.port}'`);
-  io.emit('nwservers', redactApiServerPasswords(afbconfig.nwservers));
+  // io.emit('nwservers', redactApiServerPasswords(afbconfig.nwservers));
+  tokenMgr.authSocketsEmit('nwservers', redactApiServerPasswords(afbconfig.nwservers));
   res.status(200).send( JSON.stringify( { success: true } ) );
 });
 
@@ -1457,7 +1496,8 @@ app.delete('/api/saserver/:id', passport.authenticate('jwt', { session: false } 
     return;
   }
   winston.info(`User '${req.user.username}' has deleted SA server '${oldSaserver.user}@${oldSaserver.host}:${oldSaserver.port}'`);
-  io.emit('saservers', redactApiServerPasswords(afbconfig.saservers));
+  // io.emit('saservers', redactApiServerPasswords(afbconfig.saservers));
+  tokenMgr.authSocketsEmit('saservers', redactApiServerPasswords(afbconfig.saservers));
   res.status(200).send( JSON.stringify( { success: true } ) );
 });
 
@@ -1499,7 +1539,8 @@ app.post('/api/saserver', passport.authenticate('jwt', { session: false } ), asy
     return;
   }
   winston.info(`User '${req.user.username}' has added SA server '${saserver.user}@${saserver.host}:${saserver.port}'`);
-  io.emit('saservers', redactApiServerPasswords(afbconfig.saservers));
+  // io.emit('saservers', redactApiServerPasswords(afbconfig.saservers));
+  tokenMgr.authSocketsEmit('saservers', redactApiServerPasswords(afbconfig.saservers));
   res.status(201).send( JSON.stringify( { success: true } ) );
 });
 
@@ -1543,7 +1584,8 @@ app.post('/api/saserver/edit', passport.authenticate('jwt', { session: false } )
     return;
   }
   winston.info(`User '${req.user.username}' has edited SA server '${oldSaserver.user}@${oldSaserver.host}:${oldSaserver.port}'`);
-  io.emit('saservers', redactApiServerPasswords(afbconfig.saservers));
+  // io.emit('saservers', redactApiServerPasswords(afbconfig.saservers));
+  tokenMgr.authSocketsEmit('saservers', redactApiServerPasswords(afbconfig.saservers));
   res.status(200).send( JSON.stringify( { success: true } ) );
 });
 
@@ -1800,7 +1842,7 @@ function extraJwtTokenValidation(jwt_payload, done) {
   // winston.debug("verifying token id:", jwt_payload.jti);
   
   // check blacklist
-  if (jwt_payload.jti in afbconfig.tokenMgr.tokenBlacklist) {
+  if (jwt_payload.jti in tokenMgr.tokenBlacklist) {
     winston.info("User " + jwt_payload.username + " has already logged out!");
     return done(null, false);
   }
@@ -1948,7 +1990,8 @@ function onLicenseExpired() {
   rollingHandler.killall();
   
   // tell all clients that the license is invalid
-  io.emit('license', license);
+  // io.emit('license', license);
+  tokenMgr.authSocketsEmit('license', license);
 }
 
 
@@ -2199,138 +2242,42 @@ var fixedHandler = null;
 //////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
 
-function extraIoJwtTokenValidation(jwt_payload, done) {
-  // After automatically verifying that JWT was signed by us, perform extra validation with this function
-  // winston.debug("jwt validator jwt_payload:", jwt_payload);
-  // winston.debug("verifying token id:", jwt_payload.jti);
-  
-  // check blacklist
-  if (jwt_payload.jti in afbconfig.tokenMgr.tokenBlacklist) {
-    winston.info("User " + jwt_payload.username + " has already logged out!");
-    return done(new Error());
-  }
-
-  // check whether user is enabled
-  User.findOne({id: jwt_payload.sub}, function(err, user) {
-    if (err) {
-      socket.disconnect(true);
-      return done(new Error());
-    }
-    if (user && user.enabled) {
-      // winston.debug('Accepting socket.io connection');
-      return done();
-    }
-    if (user && !user.enabled) {
-      // user is disabled
-      winston.info('Socket login denied for user', user.username);
-      winston.info('Attempt to authenticate by disabled user', user.username);
-      return done(new Error());
-    }
-    else {
-      socket.disconnect(true);
-      return done(new Error());
-      // or you could create a new account
-    }
-  });
-}
-
-
-function ioAuthenticator(socket, done) {
-  let req = socket.request;
-  // winston.debug('cookie:', req.headers.cookie);
-  // winston.debug(socket.conn);
-  let cookies = req.headers.cookie;
-  if (!cookies) {
-    socket.error('Failed to authenticate socket.io connection: no cookies in header');
-    socket.disconnect(true);
-    return done(new Error());
-  }
-  if ( !('access_token' in cookies) ) {
-    // winston.debug('Failed to authenticate socket.io connection: no access token');
-    socket.error('Failed to authenticate socket.io connection: no access token');
-    socket.disconnect(true);
-    return done(new Error());
-  }
-  if ('access_token' in cookies) {
-    let token = cookies['access_token'];
-    // winston.debug('token:', token);
-    jwt.verify(token, afbconfig.jwtPublicKey, { algorithms: ['RS256'] }, (err, decoded) => {
-
-      // winston.debug('auth error:', err);
-
-      // winston.debug('jwt:', decoded);
-      
-      if (err) {
-        // authentication failed
-        socket.error('Failed to authenticate socket.io connection: token authentication failed');
-        socket.disconnect(true);
-        return done(new Error());
-      }
-
-      socket.conn['jwtuser'] = decoded; // write our token info to the socket so it can be accessed later
-      afbconfig.tokenMgr.addSocketToken(socket); // decoded.jti, decoded.exp
-      extraIoJwtTokenValidation(decoded, done);
-      
-    } );
-  }
-}
-
-
-
-const postAuthenticate = socket => {
-  socket.emit('preferences', afbconfig.preferences);
-  socket.emit('collections', afbconfig.collections);
-  socket.emit('publicKey', afbconfig.internalPublicKey);
-  socket.emit('nwservers', redactApiServerPasswords(afbconfig.nwservers));
-  socket.emit('saservers', redactApiServerPasswords(afbconfig.saservers));
-  socket.emit('feeds', afbconfig.feeds);
-  socket.emit('feedStatus', scheduler.status() );
-  emitUsers(socket);
-  socket.emit('useCases', afbconfig.useCases);
-  socket.emit('license', license);
-}
-
-
-
 function onSocketIoConnect(socket) {
-  winston.debug('A socket client connected');
-  socket.on('disconnect', (reason) => onSocketIoDisconnect(socket, reason) );
-
-  // immediately send configuration to client
-  socket.emit('preferences', afbconfig.preferences);
-  socket.emit('collections', afbconfig.collections);
-  socket.emit('serverVersion', version);
-  socket.emit('publicKey', afbconfig.internalPublicKey);
-  socket.emit('nwservers', redactApiServerPasswords(afbconfig.nwservers));
-  socket.emit('saservers', redactApiServerPasswords(afbconfig.saservers));
-  socket.emit('feeds', afbconfig.feeds);
-  socket.emit('feedStatus', scheduler.status() );
-  emitUsers(socket);
-  socket.emit('useCases', afbconfig.useCases);
-  socket.emit('license', license);
-}
-
-
-
-function onSocketIoConnectNew(socket) {
   // allows for upgrade of auth after connect, for the always connected model - totally incomplete
   winston.debug('A socket client connected');
   socket.on('disconnect', (reason) => onSocketIoDisconnect(socket, reason) );
-  // socket.on('authenticate', () = > {} );
 
   // immediately send configuration to client
   socket.emit('serverVersion', version);
+}
+
+
+
+function onClientReady(socket) {
+  winston.debug('A socket client has authenticated and is ready for data - sending data to client');
+  socket.emit('preferences', afbconfig.preferences);
+  socket.emit('collections', afbconfig.collections);
+  socket.emit('publicKey', afbconfig.internalPublicKey);
+  if (afbconfig.serviceTypes.nw) socket.emit('nwservers', redactApiServerPasswords(afbconfig.nwservers));
+  if (afbconfig.serviceTypes.sa) socket.emit('saservers', redactApiServerPasswords(afbconfig.saservers));
+  socket.emit('feeds', afbconfig.feeds);
+  socket.emit('feedStatus', scheduler.status() );
+  emitUsers(socket);
+  socket.emit('useCases', afbconfig.useCases);
+  socket.emit('license', license);
 }
 
 
 
 function onSocketIoDisconnect(socket, reason) {
-  winston.debug('A socket client disconnected');
-  afbconfig.tokenMgr.removeSocketToken(socket, reason);
+  if ('jwtuser' in socket.conn) {
+    winston.info(`User ${socket.conn.jwtuser.username} has disconnected from an associated socket`);
+  }
+  else {
+      winston.debug('An unauthenticated socket client disconnected');
+  }
+  tokenMgr.removeSocketToken(socket, reason);
 }
-
-
-const collectionsChannel = io.of('/collections'); // create /collections namespace
 
 
 
@@ -2414,6 +2361,7 @@ function finishStartup() {
   io.on('connection', (socket) => onSocketIoConnect(socket) );
   
   rollingHandler = new rollingCollectionHandler( afbconfig, feederSocketFile, collectionsChannel);
+  afbconfig.rollingHandler = rollingHandler;
 
   fixedHandler = new fixedCollectionHandler( afbconfig, feederSocketFile, collectionsChannel);
 

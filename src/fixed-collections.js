@@ -19,6 +19,11 @@ class FixedCollectionHandler {
 
   onChannelConnect(socket) {
     winston.debug('FixedCollectionHandler: onChannelConnect()');
+    if (!('jwtuser' in socket.conn)) {
+      // socket is not authenticated - disconnect it
+      socket.disconnect(false);
+      return;
+    }
     // start listening for messages from a client after it has connected
     socket.on('joinFixed', (collectionId) => this.onSocketJoinCollection(socket, collectionId) );
     socket.on('leaveFixed', (id) => this.onLeaveCollection(socket) );
@@ -102,7 +107,7 @@ class FixedCollectionHandler {
 
     if (collectionId in socket.rooms) {
       socket.leave(collectionId);
-      winston.info(`User '${socket.conn.jwtuser.username}' has disconnected from fixed collection '${socket.collectionName}'`)
+      winston.info(`A user has disconnected from fixed collection '${socket.collectionName}'`)
       delete socket['collectionId'];
       delete socket['collectionName'];
     }
@@ -127,7 +132,7 @@ class FixedCollectionHandler {
 
 
   onChannelDisconnect(socket) {
-    // when a socket disconnects un-gracefully
+    // when a socket disconnects - either ungracefully or when the user has logged out
     winston.debug('FixedCollectionHandler: onChannelDisconnect()');
 
     if (!('collectionId' in socket)) {
@@ -138,10 +143,10 @@ class FixedCollectionHandler {
     winston.debug('FixedCollectionHandler: onChannelDisconnect(): matched collectionId:', collectionId);
 
     if (collectionId in this.afbconfig.collections) {
-      winston.info(`User '${socket.conn.jwtuser.username}' has disconnected from fixed collection '${this.afbconfig.collections[collectionId].name}'`);
+      winston.info(`A user has disconnected from fixed collection '${this.afbconfig.collections[collectionId].name}'`);
     }
     else {
-      winston.info(`User '${socket.conn.jwtuser.username}' has disconnected from fixed collections`);
+      winston.info(`A user has disconnected from fixed collections`);
     }
 
     if (collectionId in socket.rooms) {
