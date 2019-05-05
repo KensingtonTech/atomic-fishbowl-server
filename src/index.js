@@ -86,7 +86,12 @@ const isDocker = require('is-docker');
 global.schedule = require('node-schedule');
 
 // socket.io
-global.io = require('socket.io')(server);
+var socketIoOptions = {
+  pingTimeout: 25000,
+  perMessageDeflate: false,
+  httpCompression: false
+};
+global.io = require('socket.io')(server, socketIoOptions);
 const collectionsChannel = io.of('/collections'); // create /collections namespace
 
 
@@ -541,7 +546,6 @@ app.delete('/api/collection/:id', passport.authenticate('jwt', { session: false 
     }
 
     await afbconfig.deleteCollection(id);
-    // io.emit('collectionDeleted', { user: req.user.username, id: id } ); // let socket clients know this has been deleted
     tokenMgr.authSocketsEmit('collectionDeleted', { user: req.user.username, id: id } ); // let socket clients know this has been deleted
   }
   catch(error) {
@@ -1307,7 +1311,6 @@ app.delete('/api/nwserver/:id', passport.authenticate('jwt', { session: false } 
     return;
   }
   winston.info(`User '${req.user.username}' has deleted NetWitness server '${oldNwserver.user}@${oldNwserver.host}:${oldNwserver.port}'`);
-  // io.emit('nwservers', redactApiServerPasswords(afbconfig.nwservers));
   tokenMgr.authSocketsEmit('nwservers', redactApiServerPasswords(afbconfig.nwservers));
   res.status(200).send( JSON.stringify( { success: true } ) );
 });
@@ -1351,7 +1354,6 @@ app.post('/api/nwserver', passport.authenticate('jwt', { session: false } ), asy
   }
  
   winston.info(`User '${req.user.username}' has added NetWitness server '${nwserver.user}@${nwserver.host}:${nwserver.port}'`);
-  // io.emit('nwservers', redactApiServerPasswords(afbconfig.nwservers));
   tokenMgr.authSocketsEmit('nwservers', redactApiServerPasswords(afbconfig.nwservers));
   res.status(201).send( JSON.stringify( { success: true } ) );
     
@@ -1398,7 +1400,6 @@ app.post('/api/nwserver/edit', passport.authenticate('jwt', { session: false } )
     return;
   }
   winston.info(`User '${req.user.username}' has edited NetWitness server '${oldNwserver.user}@${oldNwserver.host}:${oldNwserver.port}'`);
-  // io.emit('nwservers', redactApiServerPasswords(afbconfig.nwservers));
   tokenMgr.authSocketsEmit('nwservers', redactApiServerPasswords(afbconfig.nwservers));
   res.status(200).send( JSON.stringify( { success: true } ) );
 });
@@ -1496,7 +1497,6 @@ app.delete('/api/saserver/:id', passport.authenticate('jwt', { session: false } 
     return;
   }
   winston.info(`User '${req.user.username}' has deleted SA server '${oldSaserver.user}@${oldSaserver.host}:${oldSaserver.port}'`);
-  // io.emit('saservers', redactApiServerPasswords(afbconfig.saservers));
   tokenMgr.authSocketsEmit('saservers', redactApiServerPasswords(afbconfig.saservers));
   res.status(200).send( JSON.stringify( { success: true } ) );
 });
@@ -1539,7 +1539,6 @@ app.post('/api/saserver', passport.authenticate('jwt', { session: false } ), asy
     return;
   }
   winston.info(`User '${req.user.username}' has added SA server '${saserver.user}@${saserver.host}:${saserver.port}'`);
-  // io.emit('saservers', redactApiServerPasswords(afbconfig.saservers));
   tokenMgr.authSocketsEmit('saservers', redactApiServerPasswords(afbconfig.saservers));
   res.status(201).send( JSON.stringify( { success: true } ) );
 });
@@ -1584,7 +1583,6 @@ app.post('/api/saserver/edit', passport.authenticate('jwt', { session: false } )
     return;
   }
   winston.info(`User '${req.user.username}' has edited SA server '${oldSaserver.user}@${oldSaserver.host}:${oldSaserver.port}'`);
-  // io.emit('saservers', redactApiServerPasswords(afbconfig.saservers));
   tokenMgr.authSocketsEmit('saservers', redactApiServerPasswords(afbconfig.saservers));
   res.status(200).send( JSON.stringify( { success: true } ) );
 });
@@ -1990,7 +1988,6 @@ function onLicenseExpired() {
   rollingHandler.killall();
   
   // tell all clients that the license is invalid
-  // io.emit('license', license);
   tokenMgr.authSocketsEmit('license', license);
 }
 
