@@ -30,7 +30,7 @@ SRCDIR="$BASEDIR/src"
 WORKERDIR="worker"
 FEEDERDIR="feeder"
 
-cat > build-properties.js << EOF
+cat > $SRCDIR/build-properties.js << EOF
 let BuildProperties = {
   major: $MAJOR,
   minor: $MINOR,
