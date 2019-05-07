@@ -627,9 +627,12 @@ class RollingCollectionManager {
         // If all clients have disconnected, and then one reconnects, the worker should start immediately
         this.resumed = true;
         if (this.workerProcess.length === 0) {
+          winston.debug('RollingCollectionManager: addHttpClient(): there is a workerProcess.  Setting restartWorkLoopOnExit to false');
+          this.restartWorkLoopOnExit = false;
           this.run();
         }
         else {
+          winston.debug('RollingCollectionManager: addHttpClient(): there is already a workerProcess.  Setting restartWorkLoopOnExit to true');
           this.restartWorkLoopOnExit = true;
         }
       }
@@ -658,7 +661,7 @@ class RollingCollectionManager {
     }
     
     if (this.runs > 0) {
-      winston.debug(`This is not the first client to have connected to rolling collection ${this.rollingId}.  Playing back existing collection`);
+      winston.debug(`RollingCollectionManager: addSocketClient(): This is not the first client to have connected to rolling collection ${this.rollingId}.  Playing back existing collection`);
 
       let sessions = {};
       for (let i = 0; i < this.sessions.length; i++) {
@@ -679,17 +682,25 @@ class RollingCollectionManager {
       // Emit collection state
       socket.emit('state', this.collection.state);
 
-      winston.debug(`Current number of observers: ${this.observers}`);
+      winston.debug(`RollingCollectionManager: addSocketClient(): Current number of observers: ${this.observers}`);
 
-      if (this.observers == 1) {
-        // If all clients have disconnected, and then one reconnects, the worker should start immediately
-        this.resumed = true;
-        winston.debug(`workerProcess.length: ${this.workerProcess.length}`);
-        if (this.workerProcess.length === 0) {
-          this.run();
-        }
-        else {
+      if (this.workInterval) {
+        // workInterval is already running - just let it continue
+        winston.debug('RollingCollectionManager: addSocketClient(): there is an existing workInterval running.  Not starting workLoop');
+      }
+
+      else if (!this.workInterval) {
+        // there is no existing workInterval.  Better check for a running worker in case there's an old one still floating about
+        if (this.workerProcess.length !== 0) {
+          // there's already a worker running.  When it exits, instruct it to restart the workLoop
+          winston.debug('RollingCollectionManager: addSocketClient(): there is an existing workerProcess.  The workLoop will be restarted when it exits.  Setting restartWorkLoopOnExit to true');
           this.restartWorkLoopOnExit = true;
+        }
+        else if (this.workerProcess.length === 0) {
+          // no worker is running and there is no work interval.  Start the workLoop
+          winston.debug('RollingCollectionManager: addSocketClient(): there is no existing workerProcess.  Starting workLoop');
+          this.restartWorkLoopOnExit = false;
+          this.run();
         }
       }
 
@@ -1032,9 +1043,6 @@ class RollingCollectionManager {
       ///////////////////////////
       this.calculateSessionsToPurge();
 
-
-      
-      // if ( this.workerProcess && ( this.runs > 1 || this.monitoringCollection ) ) {
       if ( ( !this.monitoringCollection && this.workerProcess.length !== 0 && this.runs > 1 ) ||
            ( this.monitoringCollection && this.collection.serviceType === 'nw' && this.workerProcess.length !== 0 )
          ) {
@@ -1049,9 +1057,6 @@ class RollingCollectionManager {
         let wProcess = this.workerProcess.shift();
         wProcess.kill('SIGINT');
       }
-
-
-
 
       // Create temp file to be used as our UNIX domain socket
       let tempName = temp.path({suffix: '.socket'});
@@ -1070,8 +1075,6 @@ class RollingCollectionManager {
         socketServer.close();
       });
 
-
-      
       socketServer.listen(tempName, () => {
         // Tell the server to listen for communication from the not-yet-started worker
 
@@ -1154,6 +1157,7 @@ class RollingCollectionManager {
     this.afbconfig.updateRollingCollection(this.collectionId);
 
     if (this.restartWorkLoopOnExit && this.workerProcess.length === 0) {
+      winston.debug('onWorkerExit(): restartWorkLoopOnExit is true.  Triggering new workLoop() interval')
       this.restartWorkLoopOnExit = false;
       this.workInterval = setInterval( () => this.workLoop(), 60000);
     }
