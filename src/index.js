@@ -614,7 +614,7 @@ app.post('/api/collection', passport.authenticate('jwt', { session: false } ), a
     if (collection.bound && collection.usecase == 'custom') {
       throw('A bound collection must be associated with a non-custom use case')
     }
-    else if (collection.bound && collection.usecase != 'custom' && !(collection.usecase in afbconfig.useCases) ) {
+    else if (collection.bound && collection.usecase !== 'custom' && !(collection.usecase in afbconfig.useCases.useCasesObj) ) {
       throw(`Collection use case ${collection.usecase} is not a valid use case!`);
     }
     
@@ -1442,7 +1442,6 @@ app.post('/api/nwserver/test', passport.authenticate('jwt', { session: false } )
   }
   catch(e) {
     winston.error("POST /api/nwserver/test: " + e);
-    // res.status(500).send(JSON.stringify({error: e.message}) );
     res.status(500).send( JSON.stringify( { success: false, error: e.message || e } ) );
   }
 
