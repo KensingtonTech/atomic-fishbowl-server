@@ -176,8 +176,8 @@ class TokenManager {
 
 
 
-  authSocketsEmit (message, value = null) {
-    Object.values(this.authenticatedSockets).forEach( (socket) => {
+  authSocketsEmit(message, value = null) {
+    Object.values(this._authenticatedSockets).forEach( (socket) => {
       if (value) {
         socket.emit(message, value);
       }
