@@ -2035,7 +2035,9 @@ async function cleanCollectionDirs() {
 
 
 async function createDefaultUser() {
-    await User.register(new User({ id: uuidV4(), username : 'admin', fullname: 'System Administrator', email: 'noreply@knowledgekta.com', enabled: true }), 'kentech0');
+  // winston.debug('createDefaultUser(): creating default user');
+  await User.register(new User({ id: uuidV4(), username : 'admin', fullname: 'System Administrator', email: 'noreply@knowledgekta.com', enabled: true }), 'kentech0', () => {});
+  // winston.debug('createDefaultUser(): finished creating default user');
 }
 
 
