@@ -146,6 +146,7 @@ class ConfigurationManager {
     }
   
     if (prefs) {
+      // non-first run
       try {
         this._preferences = await this.processPreferences(prefs);
       }
@@ -154,15 +155,13 @@ class ConfigurationManager {
       }
     }
     else {
+      // first run
       try {
         winston.info("Creating default preferences");
         this._preferences = this._defaultPreferences;
         // insert first run timestamp into preference
-        // preferences['firstRun'] = Math.floor(Date.now() / 1000);
         this.setPreference('firstRun', Math.floor(Date.now() / 1000));
         await this.dbMgr.insertRecord('preferences', this._preferences);
-        // merge in serviceTypes afterwards so it doesn't get saved
-        // this.setPreference('serviceTypes', serviceTypes);
       }
       catch(err) {
         winston.error('Caught error writing default preferences to DB.  Exiting with code 1');
@@ -455,7 +454,7 @@ class ConfigurationManager {
 
 
   setPreference(key, value) {
-    Object.defineProperty(this._preferences, key, value);
+    Object.defineProperty(this._preferences, key, { value: value, writable: true, configurable: true, enumerable: true });
   }
 
 
