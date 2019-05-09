@@ -30,7 +30,7 @@ const Winston = (function() {
     timestamp: () => moment().format('YYYY-MM-DD HH:mm:ss,SSS') + ' ',
     formatter: (options) => options.timestamp() + 'afb_server    ' + sprintf('%-10s', options.level.toUpperCase()) + ' ' + (options.message ? options.message : '') +(options.meta && Object.keys(options.meta).length ? '\n\t'+ JSON.stringify(options.meta) : '' )
   };
-  if ('SYSTEMD' in process.env) {
+  if ('SYSTEMD' in process.env && process.env.SYSTEMD === '1') {
     // systemd journal adds its own timestamp
     // delete tOptions.timestamp;
     tOptions['timestamp'] = null;

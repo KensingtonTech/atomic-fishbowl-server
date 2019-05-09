@@ -1820,7 +1820,7 @@ function redactApiServerPasswords(apiservers) {
 
 function extractJwtFromCookie(req) {
   // Extract JWT from cookie 'access_token' and return to JwtStrategyf
-  winston.debug("extractJwtFromCookie()", req.cookies);
+  // winston.debug("extractJwtFromCookie()", req.cookies);
   let token = null;
   if (req && req.cookies)
   {
@@ -1835,9 +1835,9 @@ function extractJwtFromCookie(req) {
 
 function extraJwtTokenValidation(jwt_payload, done) {
   // After automatically verifying that JWT was signed by us, perform extra validation with this function
-  winston.debug('extraJwtTokenValidation()');
-  winston.debug("extraJwtTokenValidation(): jwt_payload:", jwt_payload);
-  winston.debug("extraJwtTokenValidation(): verifying token id:", jwt_payload.jti);
+  // winston.debug('extraJwtTokenValidation()');
+  // winston.debug("extraJwtTokenValidation(): jwt_payload:", jwt_payload);
+  // winston.debug("extraJwtTokenValidation(): verifying token id:", jwt_payload.jti);
   
   // check blacklist
   if (jwt_payload.jti in tokenMgr.tokenBlacklist) {
@@ -1920,6 +1920,7 @@ async function mongooseInit() {
     secretOrKey: afbconfig.jwtPublicKey,
     algorithms: ['RS256']
   };
+  // winston.debug('mongooseInit(): jwtOpts:', jwtOpts);
   let jwtStrategy = new JwtStrategy(jwtOpts, (jwt_payload, done) => extraJwtTokenValidation(jwt_payload, done) );
   passport.use(jwtStrategy);
 

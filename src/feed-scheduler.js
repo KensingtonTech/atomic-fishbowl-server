@@ -9,6 +9,7 @@ class FeedScheduler {
     this.callback = callback;
     this.state = {};  // stores the state of jobs.  id : { 'message': string, 'time' : number }
     this.io = io; // socket.io
+    this._tokenMgr = this.afbconfig.tokenMgr;
   }
 
 
@@ -60,7 +61,7 @@ class FeedScheduler {
     delete this.schedule[id];
     delete this.scheduledFeeds[id];
     delete this.state[id];
-    this.io.emit('feedStatus', this.status() );
+    this._tokenMgr.authSocketsEmit('feedStatus', this.status() );
   }
 
 
@@ -120,20 +121,20 @@ class FeedScheduler {
       if (error) {
         winston.error('FeedScheduler: updateFeedCallback(): caught error updating feed ' + id + ':', error);
         this.state[id] = { good : false, time: timestamp };
-        this.io.emit('feedStatus', this.status() );
+        this._tokenMgr.authSocketsEmit('feedStatus', this.status() );
         return;
       }
 
       if (result.statusCode != 200) {
         winston.error('FeedScheduler: updateFeedCallback(): non-success HTTP status code received whilst updating feed ' + id + ': received', result.statusCode);
         this.state[id] = { good : false, time: timestamp };
-        this.io.emit('feedStatus', this.status() );
+        this._tokenMgr.authSocketsEmit('feedStatus', this.status() );
         return;
       }
 
       // winston.debug('updateFeedCallback(): myRequest callback()');
       this.state[id] = { good : true, time: timestamp };
-      this.io.emit('feedStatus', this.status() );
+      this._tokenMgr.authSocketsEmit('feedStatus', this.status() );
       this.callback(id);
 
     })
@@ -141,7 +142,7 @@ class FeedScheduler {
       let timestamp = new Date().getTime();
       winston.debug('FeedScheduler: updateFeedCallback(): caught error updating feed file' + id + '.feed :', err);
       this.state[id] = { good : false, time: timestamp };
-      this.io.emit('feedStatus', this.status() );
+      this._tokenMgr.authSocketsEmit('feedStatus', this.status() );
     })
     .pipe(fs.createWriteStream(this.afbconfig.feedsDir + '/' + id + '.feed'));
   }

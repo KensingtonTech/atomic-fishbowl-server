@@ -161,6 +161,7 @@ class ConfigurationManager {
         this._preferences = this._defaultPreferences;
         // insert first run timestamp into preference
         this.setPreference('firstRun', Math.floor(Date.now() / 1000));
+        this._tokenExpirationSeconds = 60 * 60 * this._preferences.tokenExpirationHours;
         await this.dbMgr.insertRecord('preferences', this._preferences);
       }
       catch(err) {
@@ -442,7 +443,7 @@ class ConfigurationManager {
     }
     this._tokenExpirationSeconds = 60 * 60 * prefs.tokenExpirationHours;
     this._preferences = prefs;
-    this.io.emit('preferences', this._preferences);
+    this._tokenMgr.authSocketsEmit('preferences', this._preferences);
     if ( (this.serviceTypes.nw && prefs.nw.queryDelayMinutes !== oldPreferences.nw.queryDelayMinutes) || (this.serviceTypes.sa && prefs.sa.queryDelayMinutes !== oldPreferences.sa.queryDelayMinutes) )  {
       // we need to bounce any running rolling collections to use the new query delay setting
       this._rollingHandler.restartRunningCollections();
@@ -549,7 +550,7 @@ class ConfigurationManager {
       sessions: {},
       id: id
     };
-    this.io.emit('collections', this._collections);
+    this._tokenMgr.authSocketsEmit('collections', this._collections);
     await this.dbMgr.insertRecord('collections', collection);
     await this.addCollectionsData(cDef);
   }
@@ -565,7 +566,7 @@ class ConfigurationManager {
       sessions: {},
       id: id
     };
-    this.io.emit('collections', this._collections);
+    this._tokenMgr.authSocketsEmit('collections', this._collections);
     console.log('editCollection: got to 1');
     await this.dbMgr.replaceRecord('collections', id, collection);
     console.log('editCollection: got to 2');
@@ -592,7 +593,7 @@ class ConfigurationManager {
     // we're just writing our current collection state
     winston.debug('updateRollingCollection()');
     let collection = this._collections[id];
-    this.io.emit('collections', this._collections);
+    this._tokenMgr.authSocketsEmit('collections', this._collections);
     try {
       await this.dbMgr.replaceRecord('collections', id, collection);
     }
@@ -606,7 +607,7 @@ class ConfigurationManager {
 
   async deleteCollection(id) {
     delete this._collections[id];
-    this.io.emit('collections', this._collections);
+    this._tokenMgr.authSocketsEmit('collections', this._collections);
     await this.dbMgr.deleteRecord('collections', id);
     if (id in this._collectionsData) {
       await this.deleteCollectionsData(id);
@@ -675,7 +676,7 @@ class ConfigurationManager {
   async addFeed(feed) {
     let id = feed.id;
     this._feeds[id] = feed;
-    this.io.emit('feeds', this._feeds);
+    this._tokenMgr.authSocketsEmit('feeds', this._feeds);
     await this.dbMgr.insertRecord('feeds', feed);
   }
 
@@ -684,7 +685,7 @@ class ConfigurationManager {
   async editFeed(feed) {
     let id = feed.id;
     this._feeds[id] = feed;
-    this.io.emit('feeds', this._feeds);
+    this._tokenMgr.authSocketsEmit('feeds', this._feeds);
     await this.dbMgr.replaceRecord('feeds', id, feed);
   }
 
@@ -692,7 +693,7 @@ class ConfigurationManager {
 
   async deleteFeed(id) {
     delete this._feeds[id];
-    io.emit('feeds', this._feeds);
+    this._tokenMgr.authSocketsEmit('feeds', this._feeds);
     await this.dbMgr.deleteRecord('feeds',id);
   }
 
