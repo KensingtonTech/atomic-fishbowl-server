@@ -80,7 +80,7 @@ else
     cp -f $SRCDIR/servicetype-nw.js $SRCDIR/servicetype.js
   fi
   # if a dev build, create server.js symlink
-  ln -s $SRCDIR/index.js server.js
+  # ln -s $SRCDIR/index.js server.js
 fi
 
 #rm -f *.mustache

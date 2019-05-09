@@ -18,7 +18,7 @@ LABEL STOP="docker run --rm --name afb-server-stop-tmp --privileged -v /:/host -
 COPY atomic-*.sh /bin/
 COPY atomic-afb-server.service /usr/lib/systemd/system/afb-server.service
 COPY node_modules /opt/kentech/afb-server/bin/node_modules/
-COPY afb-server.conf.default src/* LICENSE.txt /opt/kentech/afb-server/bin/
+COPY afb-server.conf.default src/ LICENSE.txt /opt/kentech/afb-server/bin/
 
 #install our rpm dependencies
 ARG CACHE_DATE=2016-01-01
@@ -40,6 +40,7 @@ set -x \
 && yum install -y --disableplugin=fastestmirror nodejs ghostscript poppler-utils libjpeg-turbo openjpeg unzip unrar libreoffice python36 python36-devel \
 && curl -L https://bootstrap.pypa.io/get-pip.py > /root/get-pip.py \
 # && ln -s python3.6 /usr/bin/python3 \
+&& ln -s /opt/kentech/afb-server/bin/index.js /opt/kentech/afb-server/bin/server.js \
 && python3 /root/get-pip.py \
 && rm -f /root/get-pip.py \
 && pip3 install --upgrade pip \

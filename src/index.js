@@ -1899,13 +1899,11 @@ async function mongooseInit() {
   winston.debug('Initializing mongoose');
 
   // Mongoose config
-  // let mongooseUrl = `mongodb://${config['dbConfig']['host']}:${config['dbConfig']['port']}/afb_users`
   let mongooseUrl = `mongodb://${afbconfig.dbconfig.host}:${afbconfig.dbconfig.port}/afb_users`
   let mongooseOptions = { useMongoClient: true, promiseLibrary: global.Promise };
   if (afbconfig.dbconfig.authentication.enabled) {
     mongooseUrl = `mongodb://${afbconfig.dbconfig.authentication.user}:${afbconfig.dbconfig.authentication.password}@${afbconfig.dbconfig.host}:${afbconfig.dbconfig.port}/afb_users?authSource=admin`;
   }
-
 
   // This creates local authentication passport strategy
   // This authenticates a user against the account stored in MongoDB
@@ -1914,7 +1912,6 @@ async function mongooseInit() {
   passport.use(mongooseStrategy);
   passport.serializeUser( User.serializeUser() );
   passport.deserializeUser( User.deserializeUser() );
-
 
   // This creates the JWT authentication passport strategy
   // This is used to authenticate all API calls except login and ping
