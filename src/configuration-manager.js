@@ -156,7 +156,7 @@ class ConfigurationManager {
     else {
       try {
         winston.info("Creating default preferences");
-        this._preferences = defaultPreferences;
+        this._preferences = this._defaultPreferences;
         // insert first run timestamp into preference
         // preferences['firstRun'] = Math.floor(Date.now() / 1000);
         this.setPreference('firstRun', Math.floor(Date.now() / 1000));
