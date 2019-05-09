@@ -39,7 +39,7 @@ set -x \
 && yum install -y https://dl.fedoraproject.org/pub/epel/epel-release-latest-7.noarch.rpm \
 && yum install -y --disableplugin=fastestmirror nodejs ghostscript poppler-utils libjpeg-turbo openjpeg unzip unrar libreoffice python36 python36-devel \
 && curl -L https://bootstrap.pypa.io/get-pip.py > /root/get-pip.py \
-&& ln -s python3.6 /usr/bin/python3 \
+# && ln -s python3.6 /usr/bin/python3 \
 && python3 /root/get-pip.py \
 && rm -f /root/get-pip.py \
 && pip3 install --upgrade pip \

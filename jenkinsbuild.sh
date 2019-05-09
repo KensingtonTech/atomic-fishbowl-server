@@ -55,7 +55,9 @@ EOF
 npm install
 AFBDEBUG=1
 
-if [ "$LEVEL" -ne 1 ]; then
+echo "\$forceDebugBuild = $forceDebugBuild"
+
+if [[ "$LEVEL" -ne 1 && "$forceDebugBuild" == "false" ]]; then
   # non-dev build
   
   DOCKERFILE='Dockerfile'
@@ -74,7 +76,7 @@ else
   DOCKERFILE='Dockerfile-dev'
   if [ "$serverType" == "sa" ]; then
     cp -f $SRCDIR/servicetype-sa.js $SRCDIR/servicetype.js
-  else
+  elif [ "$serverType" == "nw" ]; then
     cp -f $SRCDIR/servicetype-nw.js $SRCDIR/servicetype.js
   fi
   # if a dev build, create server.js symlink
