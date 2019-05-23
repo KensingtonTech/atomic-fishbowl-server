@@ -161,20 +161,23 @@ class FixedCollectionHandler {
 
 
 
-  async removeFixedCollectionManager(id) {
+  async removeFixedCollectionManager(id, deleteOutputDir = false) {
+    // called from manager.onCollectionDeleted(), abort(), onWorkerExit()
     winston.debug('FixedCollectionHandler: removeFixedCollectionManager()');
     delete this.collectionManagers[id];
     // disconnect all client sockets from this collection's room
     if (!(id in this.roomSockets)) {
       throw('No sockets could be found for fixed collection', id);
     }
-    try {
-      winston.debug("Deleting output directory for collection", id);
-      await rmfr( this.afbconfig.collectionsDir + '/' + id ); // Delete output directory
-    }
-    catch(error) {
-      winston.error('ERROR deleting output directory ' + this.afbconfig.collectionsDir + '/' + id, error);
-      throw(error);
+    if (deleteOutputDir) {
+      try {
+        winston.debug("Deleting output directory for collection", id);
+        await rmfr( this.afbconfig.collectionsDir + '/' + id ); // Delete output directory
+      }
+      catch(error) {
+        winston.error('ERROR deleting output directory ' + this.afbconfig.collectionsDir + '/' + id, error);
+        throw(error);
+      }
     }
     for (let i = 0; i < this.roomSockets[id].slice(0).length; i++) {
       let socket = this.roomSockets[id][i];
@@ -512,7 +515,7 @@ class FixedCollectionManager {
     this.sendToHttpClients( { collectionDeleted: this.collectionId, user: user } );
     this.endHttpClients();
     // this is handled for IO clients in the outer express collection delete method
-    this.handler.removeFixedCollectionManager(this.collectionId); // this is necessary as onWorkerExit won't trigger after killall()
+    this.handler.removeFixedCollectionManager(this.collectionId, true); // this is necessary as onWorkerExit won't trigger after killall()
   }
 
 
@@ -522,7 +525,7 @@ class FixedCollectionManager {
     winston.debug('FixedCollectionManager: abort()');
     this.killWorker();
     this.endHttpClients();
-    this.handler.removeFixedCollectionManager(this.collectionId);
+    this.handler.removeFixedCollectionManager(this.collectionId, true);
   }
 
 
