@@ -88,6 +88,7 @@ fi
 
 
 # now build the docker container
+docker pull centos:centos7
 docker build -f $DOCKERFILE --build-arg AFBDEBUG=$AFBDEBUG --build-arg CACHE_DATE=$(date +%Y-%m-%d:%H:%M:%S) -t ${PKGNAME}:${VER} -t ${PKGNAME}:latest -t ${REPONAME}/${PKGNAME}:latest -t ${REPONAME}/${PKGNAME}:${VER} .
 
 # push our two tags to our private registry

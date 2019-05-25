@@ -1,3 +1,5 @@
+# Don't let's use nikolaik/python-nodejs - the images are even bigger with CentOs
+
 FROM centos:centos7
 WORKDIR /opt/kentech/afb-server/bin
 ARG AFBDEBUG
