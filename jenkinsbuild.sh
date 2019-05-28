@@ -1,8 +1,9 @@
 set -x
 
-MAJOR=1
-MINOR=0
-PATCH=0
+VERS=`grep version package.json | head -1 | awk -F: '{ print $2 }' | sed 's/[",]//g' | tr -d '[[:space:]]'`
+MAJOR=$(echo $VERS | cut -d'.' -f1)
+MINOR=$(echo $VERS | cut -d'.' -f2)
+PATCH=$(echo $VERS | cut -d'.' -f3)
 
 if [[ $branch =~ "develop" ]]; then
   LEVEL=1

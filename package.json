@@ -1,6 +1,6 @@
 {
   "name": "atomic-fishbowl-server",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "API Server for Atomic Fishbowl",
   "main": "index.js",
   "config": {
@@ -27,7 +27,9 @@
     "buildsa": "npm run clean && cd $npm_package_config_srcDir && uglifyjs $npm_package_config_serviceTypeSa $npm_package_config_saServicePref $npm_package_config_serversrc --toplevel --compress --mangle --ecma 6 -o ../$npm_package_config_outputDir/server.js --source-map url=\"server.js.map\" && npm run buildpy",
     "buildpy": "npm run buildworker && npm run buildfeeder",
     "buildworker": "if $(uname -a | grep -q ^Darwin); then PYTHONINCLUDE=$npm_package_config_macPythonInclude && LDFLAGS=$npm_package_config_macPythonLdflags; else PYTHONINCLUDE=$npm_package_config_pythonInclude && LDFLAGS=$npm_package_config_ldflags; fi; cd $npm_package_config_srcDir/worker && for f in $npm_package_config_workersrc; do if $(cython -3 $f.py -o $f.c); then gcc -shared -pthread -fPIC -fwrapv -O2 -Wall -fno-strict-aliasing $PYTHONINCLUDE $LDFLAGS -o $f.so $f.c && mv $f.so ../../$npm_package_config_outputDir/worker && rm -f $f.c; fi; done; cp worker_stub.py ../../$npm_package_config_outputDir/worker",
-    "buildfeeder": "if $(uname -a | grep -q ^Darwin); then PYTHONINCLUDE=$npm_package_config_macPythonInclude && LDFLAGS=$npm_package_config_macPythonLdflags; else PYTHONINCLUDE=$npm_package_config_pythonInclude && LDFLAGS=$npm_package_config_ldflags; fi; cd $npm_package_config_srcDir/feeder && for f in $npm_package_config_feedersrc; do if $(cython -3 $f.py -o $f.c); then gcc -shared -pthread -fPIC -fwrapv -O2 -Wall -fno-strict-aliasing $PYTHONINCLUDE $LDFLAGS -o $f.so $f.c && mv $f.so ../../$npm_package_config_outputDir/feeder && rm -f $f.c; fi; done; cp feeder_stub.py ../../$npm_package_config_outputDir/feeder"
+    "buildfeeder": "if $(uname -a | grep -q ^Darwin); then PYTHONINCLUDE=$npm_package_config_macPythonInclude && LDFLAGS=$npm_package_config_macPythonLdflags; else PYTHONINCLUDE=$npm_package_config_pythonInclude && LDFLAGS=$npm_package_config_ldflags; fi; cd $npm_package_config_srcDir/feeder && for f in $npm_package_config_feedersrc; do if $(cython -3 $f.py -o $f.c); then gcc -shared -pthread -fPIC -fwrapv -O2 -Wall -fno-strict-aliasing $PYTHONINCLUDE $LDFLAGS -o $f.so $f.c && mv $f.so ../../$npm_package_config_outputDir/feeder && rm -f $f.c; fi; done; cp feeder_stub.py ../../$npm_package_config_outputDir/feeder",
+    "bumppatch": "npm --no-git-tag-version version patch && npm run writeBuildProperties",
+    "writeBuildProperties": "./writeBuildProperties.sh"
   },
   "author": "Kensington Technology Associates, Limited",
   "license": "SEE LICENSE IN atomic-fishbowl.license",

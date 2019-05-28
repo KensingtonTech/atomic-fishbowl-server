@@ -97,7 +97,7 @@ const collectionsChannel = io.of('/collections'); // create /collections namespa
 
 // versioning
 const buildProperties = falseRequire('./build-properties') || BuildProperties;
-const version = `${buildProperties.major}.${buildProperties.minor}.${buildProperties.patch}.${buildProperties.build}-${buildProperties.level}`;
+const version = `${buildProperties.major}.${buildProperties.minor}.${buildProperties.patch}-${buildProperties.level} Build ${buildProperties.build}`;
 
 
 // project file imports.  Handles native and minified cases
