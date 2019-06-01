@@ -10,7 +10,7 @@ class DatabaseManager {
   async connectToDB() {
     winston.debug('Initializing mongo db and reading settings');
 
-    const sleep = require('sleep');
+    const sleep = require('./sleep');
     
     // We use mongoose for auth, and MongoClient for everything else.  This is because Passport-Local Mongoose required it, and it is ill-suited to the free-formish objects which we want to use.
     let mongoUrl = `mongodb://${this.afbconfig.dbconfig.host}:${this.afbconfig.dbconfig.port}/afb`;
@@ -34,7 +34,7 @@ class DatabaseManager {
           process.exit(1);
         }
         winston.info('Could not connect to MongoDB.  Retrying in 3 seconds');
-        sleep.sleep(3);
+        sleep(3);
       }
     }
   }
