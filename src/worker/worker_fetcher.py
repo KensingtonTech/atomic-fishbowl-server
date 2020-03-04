@@ -13,10 +13,9 @@ from multiprocessing import Pool, Manager, Value, current_process, cpu_count
 import socket
 from http.client import BadStatusLine
 from threading import Timer, Thread, Event
-from requests_futures.sessions import FuturesSession
 import concurrent.futures.thread
+from requests_futures.sessions import FuturesSession
 import requests
-#requests.packages.urllib3.disable_warnings()
 from requests.packages.urllib3.exceptions import InsecureRequestWarning
 requests.packages.urllib3.disable_warnings(InsecureRequestWarning)
 
@@ -100,9 +99,9 @@ class Fetcher:
     self.sessions = {}
 
     self.cfg['thumbnailSize'] = 350, 350
-    proto='http://'
+    proto = 'http://'
     if 'ssl' in cfg and cfg['ssl'] == True:
-      proto='https://'
+      proto = 'https://'
     host = cfg['host']
     port = str(cfg['port'])
     baseUrl = proto + host + ':' + port
@@ -205,7 +204,7 @@ class SaFetcher(Fetcher): # For Solera
     self.extractResults = {}
     self.extractionComplete = False
     self.extractFutures = []
-    stopFlag = Event()
+    # stopFlag = Event()
     #timerThread = TimerThread(stopFlag, lambda y=self: self.heartbeat())
     #timerThread.start()
     #cpucount = cpu_count()

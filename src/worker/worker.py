@@ -15,6 +15,10 @@ from Crypto.PublicKey import RSA
 from base64 import b64decode
 from worker_fetcher import NwFetcher, SaFetcher
 from worker_communicator import Communicator
+try:
+  import errno
+except ImportError:
+  errno = os.errno
 
 fetcher = None
 
@@ -164,7 +168,7 @@ def configReceived(cfgObj):
       try:
         os.makedirs(outputDir)
       except OSError as e:
-        if e.errno != os.errno.EEXIST:
+        if e.errno != errno.EEXIST:
           raise   
         pass
 
