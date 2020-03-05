@@ -84,6 +84,7 @@ const path = require('path');
 const nodeCleanup = require('node-cleanup');
 const isDocker = require('is-docker');
 global.schedule = require('node-schedule');
+global.sleep = falseRequire('./sleep') || sleep;
 
 // socket.io
 var socketIoOptions = {
