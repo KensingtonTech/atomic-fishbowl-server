@@ -1,6 +1,6 @@
 {
   "name": "atomic-fishbowl-server",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "description": "API Server for Atomic Fishbowl",
   "main": "index.js",
   "config": {
