@@ -143,19 +143,10 @@ winston.info('Starting Atomic Fishbowl server version', version);
 ////////////////////////////////////////////////////////////////CONFIGURATION//////////////////////////////////////////////////////////////
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
-const testLicensing = false; // will cause the license to expire in testLicensingMins minutes
-const testLicensingMins = null; // null will disable override of minutes
-global.license = {
-  valid: false,
-  expiryTime: 0
-};
-
 var feederSocket = null;
 var feederSocketFile = null;
 var feederInitialized = false;
 var apiInitialized = false;
-
-var licenseExpiryJob = null; // placeholder for cron-like job to expire the license
 
 // Load config
 const ConfigManager = (function() {return falseRequire('./configuration-manager') || ConfigurationManager})();
@@ -202,8 +193,6 @@ if ( !fs.existsSync(afbconfig.tempDir) ) {
 (async function() {
   await afbconfig.connectToDB(); // this must come before mongoose user connection so that we know whether to create the default admin account
   await mongooseInit();
-  // validate the license
-  checkLicense();
   tokenMgr.cleanBlackList();
   setInterval( () => tokenMgr.cleanBlackList(), 1000 * 60); // run every minute
   await cleanCollectionDirs();
@@ -1939,59 +1928,6 @@ async function mongooseInit() {
 
 
 
-function checkLicense() {
-  winston.info('Checking license validity');
-  // check license validity
-  if (!development || testLicensing) {
-    let firstRun = afbconfig.preferences.firstRun;
-    winston.debug('firstRun:', firstRun);
-    let currentTime = Math.floor(Date.now() / 1000);
-    winston.debug('currentTime', currentTime);
-    let expiryTime = firstRun + 3600 * 24 * 60; // expire in 60 days from firstRun
-    if (testLicensing && testLicensingMins) {
-      winston.debug(`'testLicensing' is set to true.  License will expire ${testLicensingMins} minutes from now`);
-      expiryTime = currentTime + testLicensingMins * 60;
-    }
-    winston.debug('expiryTime', expiryTime);
-    let expiryDate = new Date(expiryTime * 1000);
-    license.expiryTime = expiryTime;
-    license.valid = currentTime < expiryTime;
-
-    if (license.valid) {
-      // run a cron-like job to expire the license at the specified time (60 days from firstRun)
-      winston.debug('License is valid.  Starting scheduler')
-      licenseExpiryJob = schedule.scheduleJob(expiryDate, onLicenseExpired);
-    }
-  }
-  else {
-    // don't expire if in development mode
-    license.valid = true;
-    license.expiryTime = 0;
-  }
-  winston.debug('license:', license);
-  if (license.valid) {
-    winston.info('License is valid and will expire on ' + new Date(license.expiryTime * 1000).toUTCString());
-  }
-  else {
-    winston.info('License has expired.  Only existing fixed collections will be viewable');
-  }
-}
-
-
-
-function onLicenseExpired() {
-  winston.info('License has expired.  Rolling and monitoring collections will not function, and fixed collections will not build. ');
-  license.valid = false;
-
-  // kill all rolling collections (we'll let any building fixed collections finish building)
-  rollingHandler.killall();
-  
-  // tell all clients that the license is invalid
-  tokenMgr.authSocketsEmit('license', license);
-}
-
-
-
 async function cleanCollectionDirs() {
   try {
     winston.info("Cleaning up collection directories");
@@ -2262,7 +2198,7 @@ function onClientReady(socket) {
   socket.emit('feedStatus', scheduler.status() );
   emitUsers(socket);
   socket.emit('useCases', afbconfig.useCases);
-  socket.emit('license', license);
+  socket.emit('initialised'); // let the client know we're done
 }
 
 

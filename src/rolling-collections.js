@@ -49,11 +49,6 @@ class RollingCollectionHandler {
     winston.debug('RollingCollectionHandler: onSocketJoinCollection(): rollingId:', rollingId);
     winston.info(`User '${socket.conn.jwtuser.username}' has connected to ${collection.type} collection '${collection.name}'`);
 
-    if (!license.valid) {
-      winston.info(`License is invalid.  Aborting attempt to connect to rolling or monitoring collection '${collection.name}'`);
-      return;
-    }
-
     if (collection.type === 'monitoring') {
       rollingId = collectionId + '_' + sessionId;
     }
@@ -67,8 +62,6 @@ class RollingCollectionHandler {
       this.roomSockets[rollingId] = [];
     }
     this.roomSockets[rollingId].push(socket);
-
-    // we leave out the licensing code here as it is handled by the client or when the collection is killed
 
     let rollingCollectionManager = null;
     if ( !(rollingId in this.rollingCollectionManagers) ) {
@@ -323,7 +316,7 @@ class RollingCollectionHandler {
 
 
   killall() {
-    // we get here during server shutdown, and when the license expires
+    // we get here during server shutdown
     winston.debug('RollingCollectionHandler: killall()');
     Object.values(this.rollingCollectionManagers).forEach( manager => {
       manager.manager.abort();
@@ -333,7 +326,7 @@ class RollingCollectionHandler {
 
 
   restartRunningCollections() {
-    // we get here during server shutdown, and when the license expires
+    // we get here during server shutdown
     winston.debug('RollingCollectionHandler: restartRunningCollections()');
     Object.values(this.rollingCollectionManagers).forEach( manager => {
       manager.manager.restart();
@@ -806,9 +799,8 @@ class RollingCollectionManager {
   async abort() {
     winston.debug('RollingCollectionManager: abort()');
 
-    // we only get here in these cases:
+    // we only get here in this case:
     //   1. the program is exiting, either gracefully or due to an error
-    //   2. license expired
 
     // stop the work loop
     if (this.workInterval) {
