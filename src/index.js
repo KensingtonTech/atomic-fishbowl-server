@@ -231,18 +231,18 @@ app.post('/api/login', passport.authenticate('local'), (req,res) => {
     else {
       winston.info(`User ${req.body.username} has logged in`);
       winston.debug("Found user " + req.body.username + ".  Signing token");
-      let tokenEpirySeconds = tokenSigningHack ? tokenSigningHackSeconds : afbconfig.tokenExpirationSeconds;
+      const tokenEpirySeconds = tokenSigningHack ? tokenSigningHackSeconds : afbconfig.tokenExpirationSeconds;
       winston.debug("tokenExpirationSeconds:", tokenEpirySeconds);
-      let token = jwt.sign(user.toObject({versionKey: false, transform: transformUser}), afbconfig.jwtPrivateKey, { subject: user.id, algorithm: 'RS256', expiresIn: tokenEpirySeconds, jwtid: uuidV4() }); // expires in 24 hours
+      const token = jwt.sign(user.toObject({versionKey: false, transform: transformUser}), afbconfig.jwtPrivateKey, { subject: user.id, algorithm: 'RS256', expiresIn: tokenEpirySeconds, jwtid: uuidV4() }); // expires in 24 hours
 
       if ('query' in req && 'socketId' in req.query) {
         // socketId is the socket.io socketID
-        let socketId = req.query.socketId;
+        const socketId = req.query.socketId;
         
-        let decoded = jwt.decode(token);
+        const decoded = jwt.decode(token);
       
         if (socketId in io.sockets.sockets) {
-          let socket = io.sockets.sockets[socketId];
+          const socket = io.sockets.sockets[socketId];
           socket.conn['jwtuser'] = decoded; // write our token info to the socket so it can be accessed later
           tokenMgr.addSocketToken(socket); // decoded.jti, decoded.exp
           socket.once('clientReady', () => onClientReady(socket) );
@@ -253,7 +253,7 @@ app.post('/api/login', passport.authenticate('local'), (req,res) => {
         }
       }
 
-      res.cookie('access_token', token, { httpOnly: true, secure: true });
+      res.cookie('access_token', token, { httpOnly: true, sameSite: 'none', secure: true });
       res.json({
         success: true,
         user: user.toObject(),
