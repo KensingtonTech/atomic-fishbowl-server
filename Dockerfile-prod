@@ -1,0 +1,30 @@
+ARG NODE_VERSION=16.15.0
+FROM node:${NODE_VERSION} AS STAGE_BUILD
+LABEL stage=builder
+WORKDIR /workspace
+COPY package.json package-lock.json tsconfig.json ./
+COPY scripts/ scripts
+COPY src/ src
+RUN npm install \
+  && npm run build
+
+
+FROM node:${NODE_VERSION}
+WORKDIR /opt/kentech/afb-server
+#RUN echo "deb http://deb.debian.org/debian stretch-backports main" >> /etc/apt/sources.list \
+COPY package.json package-lock.json LICENSE.txt ./
+COPY --from=STAGE_BUILD /workspace/dist/ bin/
+COPY src/feeder bin/feeder
+COPY src/worker bin/worker
+RUN apt-get update \
+  && apt-get install -y ghostscript poppler-utils libjpeg62-turbo libopenjp2-7-dev unzip unrar-free libreoffice python3-crypto python3-requests python3-requests-futures python3-crypto python3-rarfile python3-magic python3-pip \
+  && pip3 install Pillow \
+  && apt remove -y python3-pip \
+  && npm install --omit=dev
+  #&& apt-get install -y -t stretch-backports git
+ENV NODE_ENV="production"
+ARG AFB_DEBUG="false" # can set default ENV at build time with this
+ENV AFB_DEBUG=${AFB_DEBUG}
+EXPOSE 3002
+WORKDIR /opt/kentech/afb-server/bin
+CMD ["node", "--experimental-specifier-resolution=node", "server.js"]

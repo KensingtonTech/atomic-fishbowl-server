@@ -15,8 +15,6 @@ collectionDefsFile = open(collectionDefsFilename, 'rb')
 collections = json.loads(collectionsFile.read(), object_pairs_hook=OrderedDict)
 collectionDefs = json.loads(collectionDefsFile.read(), object_pairs_hook=OrderedDict)
 
-#pprint(collectionDefs)
-
 for c in collections:
   print collections[c]['name']
   print "\tName:",collections[c]['name']
@@ -31,13 +29,11 @@ for c in collections:
   
   i = 0
   for img in collectionDefs[collections[c]['id']]['images']:
-    #if collectionDefs[collections[c]['id']]['images'][img]['ContentType'] == image:
     if img['contentType'] == 'image':
       i += 1
 
   p = 0
   for img in collectionDefs[collections[c]['id']]['images']:
-    #if collectionDefs[collections[c]['id']]['images'][img]['ContentType'] == image:
     if img['contentType'] == 'pdf':
       p += 1
 

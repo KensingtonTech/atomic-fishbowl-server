@@ -107,13 +107,12 @@ class Fetcher:
     baseUrl = proto + host + ':' + port
     self.cfg['url'] = baseUrl
     
-    #convert to integers
+    # convert to integers
     if 'minX' in self.cfg and 'minY' in self.cfg:
       self.cfg['minX'] = int(self.cfg['minX'])
       self.cfg['minY'] = int(self.cfg['minY'])
       log.debug("Fetcher: __init__(): Minimum dimensions are: " + str(self.cfg['minX']) + " x " + str(self.cfg['minY']))
     self.cfg['contentLimit'] = int(self.cfg['contentLimit'])
-    # self.cfg['summaryTimeout'] = int(self.cfg['summaryTimeout'])
     self.cfg['queryTimeout'] = int(self.cfg['queryTimeout'])
     self.cfg['contentTimeout'] = int(self.cfg['contentTimeout'])
     self.cfg['maxContentErrors'] = int(self.cfg['maxContentErrors'])
@@ -144,15 +143,12 @@ class Fetcher:
 
 
   def sendResult(self, res):
-    #log.debug('Fetcher: sendResult()')
-    #log.debug( 'Fetcher(): sendResult(): ' + str(type(res)) )
     if res and isinstance(res, list):
       # this is an exception from the ContentProcessor which must be printed
       #log.error('Fetcher: sendResult(): Caught error in worker:\n' + str(res))
       for l in res:
         print((l.rstrip()))
     elif res and len(res['images']) != 0:
-      #log.debug("Fetcher: sendResult(): Worker sending update")
       if self.saMonitoring and not self.sentCollectionState:
         log.debug('sending state monitoring')
         self.communicator.write_data(json.dumps( { 'state': 'monitoring' } ) + '\n')
@@ -167,7 +163,6 @@ class Fetcher:
 
 
   def heartbeat(self):
-    #log.debug( "heartbeat()" )
     self.communicator.write_data( json.dumps( { 'heartbeat': True } ) + '\n' )
 
 
@@ -243,12 +238,7 @@ class SaFetcher(Fetcher): # For Solera
       'page': 0,
       'restart': True
     }
-    #pprint(data)
     post = self.convertToPostBody(data, 'GET')
-    #pprint(post)
-    #session = FuturesSession(max_workers=cpu_count() )
-
-    
     session = self.session
     try:
       self.queryDef = { 'url': url, 'auth': ( self.cfg['user'], self.cfg['dpassword'] ), 'data': post, 'verify': False, 'stream': False }
@@ -259,12 +249,9 @@ class SaFetcher(Fetcher): # For Solera
       while state != 'complete':
         self.communicator.write_data(json.dumps( { 'workerProgress': 'In Progress', 'label': 'Querying' } ) + '\n')
         response = requests.post( self.queryDef['url'], auth=self.queryDef['auth'], data=self.queryDef['data'], verify=self.queryDef['verify'], stream=self.queryDef['stream'] )
-        #print(response.text)
         if response.status_code >= 400:
           self.exitWithError('Received HTTP error code on query response: ' + str(response.status_code))
         res = response.json()
-        #self.pretty_print_POST(response.request)
-        #pprint(res)
         resultCode = res['resultCode']
         if resultCode != 'API_SUCCESS_CODE':
           raise ApiUnsuccessful( [ "API call returned " + resultCode ] )
@@ -274,7 +261,7 @@ class SaFetcher(Fetcher): # For Solera
 
       self.communicator.write_data(json.dumps( { 'workerProgress': 'First Results', 'label': 'Querying' } ) + '\n')
 
-      count = res['result']['result']['total_count'] #this tells us how many sessions the query has returned
+      count = res['result']['result']['total_count'] # this tells us how many sessions the query has returned
 
       for f in res['result']['result']['data']:
         flow = int( f['columns'][0] )

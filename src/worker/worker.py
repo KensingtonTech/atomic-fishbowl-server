@@ -279,7 +279,7 @@ def main():
     
     try:
       NODE_ENV = os.environ['NODE_ENV']
-      if NODE_ENV == 'production' and ( ('AFBDEBUG' not in os.environ) or ('AFBDEBUG' in os.environ and os.environ['AFBDEBUG'] == '0') ):
+      if NODE_ENV == 'production' and ( ('AFB_DEBUG' not in os.environ) or ('AFB_DEBUG' in os.environ and os.environ['AFB_DEBUG'] == '0') ):
         log.setLevel(logging.INFO)
     except KeyError:
       pass

@@ -1,4 +1,4 @@
-set -x
+set -xe
 
 VERS=`grep version package.json | head -1 | awk -F: '{ print $2 }' | sed 's/[",]//g' | tr -d '[[:space:]]'`
 MAJOR=$(echo $VERS | cut -d'.' -f1)
@@ -11,8 +11,6 @@ elif [[ $branch =~ "python3" ]]; then
   LEVEL=3
 elif [[ $branch =~ "release" ]]; then
   LEVEL=3
-elif [[ $branch =~ "rsac-2018" ]]; then
-  LEVEL=3
 elif [[ $branch =~ "hotfix" ]]; then
   LEVEL=4
 elif [[ $branch =~ "master" ]]; then
@@ -21,18 +19,20 @@ else
   LEVEL=1
 fi
 
-PKGNAME="afb-server"
+PKGNAME="atomic-fishbowl-server"
 ARTIFACTNAME="afb-docker-server"
-VER="$MAJOR.$MINOR.$PATCH.$BUILD_NUMBER-$LEVEL"
-REPONAME="kentechrepo:5000"
+if [[ "$LEVEL" -eq 4 || "$LEVEL" -eq 5 ]]; then
+  VER="$MAJOR.$MINOR.$PATCH.$BUILD_NUMBER"
+else
+  VER="$MAJOR.$MINOR.$PATCH.$BUILD_NUMBER-$LEVEL"  
+fi
 BASEDIR=$(pwd)
-DISTDIR="$BASEDIR/dist"
 SRCDIR="$BASEDIR/src"
-WORKERDIR="worker"
-FEEDERDIR="feeder"
+NODE_VERSION="16.15.0"
+IMAGE_PREFIX="kensingtontech"
 
-cat > $SRCDIR/build-properties.js << EOF
-let BuildProperties = {
+cat > $SRCDIR/build-properties.ts << EOF
+export const BuildProperties = {
   major: $MAJOR,
   minor: $MINOR,
   patch: $PATCH,
@@ -48,53 +48,32 @@ build:
   4: hotfix
   5: final release
 */
-
-module.exports = BuildProperties;
 EOF
-
-# Install js modules
-npm install
-AFBDEBUG=1
 
 echo "\$forceDebugBuild = $forceDebugBuild"
 
+docker pull node:${NODE_VERSION}
+
 if [[ "$LEVEL" -ne 1 && "$forceDebugBuild" == "false" ]]; then
-  # non-dev build
-  
-  DOCKERFILE='Dockerfile'
-  AFBDEBUG=0
-  
-  if [ "$serverType" == "nw" ]; then
-    npm run buildnw
-  elif [ "$serverType" == "sa" ]; then
-    npm run buildsa
-  fi
-  cd $BASEDIR
-
+ # Prod build
+  docker build --build-arg NODE_VERSION="${NODE_VERSION}" --no-cache -f Dockerfile-prod -t ${PKGNAME}:${VER} . \
+  && docker rmi $(docker images --filter=label=stage=builder --quiet)
 else
-  # dev build
-
-  DOCKERFILE='Dockerfile-dev'
-  if [ "$serverType" == "sa" ]; then
-    cp -f $SRCDIR/servicetype-sa.js $SRCDIR/servicetype.js
-  elif [ "$serverType" == "nw" ]; then
-    cp -f $SRCDIR/servicetype-nw.js $SRCDIR/servicetype.js
-  fi
-  # if a dev build, create server.js symlink
-  # ln -s $SRCDIR/index.js server.js
+  # Dev build
+  docker build --build-arg NODE_VERSION="${NODE_VERSION}" --no-cache -f Dockerfile-prod -t ${PKGNAME}:${VER} --build-arg AFB_DEBUG=true . \
+  && docker rmi $(docker images --filter=label=stage=builder --quiet)
 fi
 
-#rm -f *.mustache
-#rm -f package.json package-lock.json
-
-
-# now build the docker container
-docker pull centos:centos7
-docker build -f $DOCKERFILE --build-arg AFBDEBUG=$AFBDEBUG --build-arg CACHE_DATE=$(date +%Y-%m-%d:%H:%M:%S) -t ${PKGNAME}:${VER} -t ${PKGNAME}:latest -t ${REPONAME}/${PKGNAME}:latest -t ${REPONAME}/${PKGNAME}:${VER} .
-
-# push our two tags to our private registry
-docker push ${REPONAME}/${PKGNAME}:${VER}
-docker push ${REPONAME}/${PKGNAME}:latest
+# push our tags to docker hub
+if [ $DEPLOY = "true" ]; then
+  docker tag ${PKGNAME}:${VER} ${IMAGE_PREFIX}/${PKGNAME}:${VER}
+  docker push ${IMAGE_PREFIX}/${PKGNAME}:${VER}
+  if [ $LEVEL -eq 5 ]; then
+    docker image tag ${PKGNAME}:${VER} ${PKGNAME}:latest
+    docker image tag ${PKGNAME}:${VER} ${IMAGE_PREFIX}/${PKGNAME}:latest
+    docker push ${PKGNAME}:latest
+  fi
+fi
 
 # create artifact
-docker save ${PKGNAME}:${VER} ${PKGNAME}:latest | gzip > ${ARTIFACTNAME}_${VER}.tgz
+# docker save ${PKGNAME}:${VER} ${PKGNAME}:latest | gzip > ${ARTIFACTNAME}_${VER}.tgz

@@ -11,3 +11,7 @@ server.js.map
 test1.js
 **/__pycache__
 /dist
+
+/.vscode
+/.tsbuildinfo
+/.env*

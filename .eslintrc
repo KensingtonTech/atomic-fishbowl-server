@@ -1,0 +1,64 @@
+{
+  "root": true,
+  "ignorePatterns": [
+    "projects/**/*"
+  ],
+  "parser": "@typescript-eslint/parser",
+  "plugins": [
+    "@typescript-eslint"
+  ],
+  "extends": [
+    "eslint:recommended",
+    "plugin:@typescript-eslint/eslint-recommended",
+    "plugin:@typescript-eslint/recommended"
+  ],
+  "overrides": [
+    {
+      "files": [
+        "*.ts"
+      ],
+      "rules": {
+        "max-len": [
+          "off",
+          {
+            "code": 140
+          }
+        ],
+        "no-underscore-dangle": "off",
+        "@typescript-eslint/naming-convention": [
+          "error",
+          {
+            "selector": "variable",
+            "format": ["camelCase", "UPPER_CASE", "PascalCase"],
+            "leadingUnderscore": "allow"
+          }
+        ],
+        "member-ordering": "off",
+        "@typescript-eslint/no-explicit-any": [
+          "off",
+          {
+            "fixToUnknown": false
+          }
+        ],
+        "@typescript-eslint/no-implicit-any-catch": [
+          "error",
+          {
+            "allowExplicitAny": true
+          }
+        ],
+        "no-empty": [
+          "error",
+          {
+            "allowEmptyCatch": true
+          }
+        ],
+        "@typescript-eslint/no-unused-vars": [
+          "warn",
+          {
+            "argsIgnorePattern": "^_"
+          }
+        ]
+      }
+    }
+  ]
+}
