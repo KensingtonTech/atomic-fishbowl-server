@@ -1,6 +1,6 @@
 {
   "name": "atomic-fishbowl-server",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "description": "API Server for Atomic Fishbowl",
   "main": "src/index.js",
   "type": "module",
@@ -29,7 +29,7 @@
     "writeBuildProperties": "scripts/writeBuildProperties.sh"
   },
   "author": "Kensington Technology Associates, Limited",
-  "license": "SEE LICENSE IN atomic-fishbowl.license",
+  "license": "GPL-3.0",
   "dependencies": {
     "axios": "^0.27.2",
     "body-parser": "^1.17.1",
