@@ -1,27 +1,12 @@
-FROM node:16.15.0
+ARG NODE_VERSION=16.15.0
+FROM node:${NODE_VERSION}
+
 RUN echo "deb http://deb.debian.org/debian stretch-backports main" >> /etc/apt/sources.list \
 && apt-get update \
 && apt-get install -y zip vim less man tcpdump jq net-tools libcap2-bin \
-&& apt-get install -y ghostscript poppler-utils libjpeg62-turbo libopenjp2-7-dev unzip unrar-free libreoffice python3-crypto python3-pip \
-&& pip3 install requests requests-futures crypto Pillow rarfile python-magic \
+&& apt-get install -y ghostscript poppler-utils libjpeg62-turbo libopenjp2-7-dev unzip unrar-free libreoffice python3-crypto python3-requests python3-requests-futures python3-crypto python3-rarfile python3-magic python3-pip \
+&& pip3 install Pillow \
 && apt-get install -y -t stretch-backports git \
 && echo "root:password" | chpasswd
 
-WORKDIR /opt/kentech/afb-server/bin
-ARG AFBDEBUG
-ENV NODE_ENV="production"
-ENV AFBDEBUG=$AFBDEBUG
-EXPOSE 3002
-VOLUME [ "/etc/kentech", "/var/kentech" ]
-# We will use systemd for logging, so we don't specify /var/log in 'VOLUME'
-CMD ["node", "--experimental-specifier-resolution=node", "server.js"]
-
-#Install the rest of our files
-COPY node_modules /opt/kentech/afb-server/bin/node_modules/
-COPY afb-server.conf.default src/ LICENSE.txt /opt/kentech/afb-server/bin/
-
-#install our rpm dependencies
-ARG CACHE_DATE=2016-01-01
-RUN \
-set -x \
-&& ln -s /opt/kentech/afb-server/bin/index.js /opt/kentech/afb-server/bin/server.js
+WORKDIR=/home/node/src/atomic-fishbowl-client
