@@ -71,7 +71,7 @@ if [ $DEPLOY = "true" ]; then
   if [ $LEVEL -eq 5 ]; then
     docker image tag ${PKGNAME}:${VER} ${PKGNAME}:latest
     docker image tag ${PKGNAME}:${VER} ${IMAGE_PREFIX}/${PKGNAME}:latest
-    docker push ${PKGNAME}:latest
+    docker push ${IMAGE_PREFIX}/${PKGNAME}:latest
   fi
 fi
 
