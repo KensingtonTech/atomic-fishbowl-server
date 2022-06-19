@@ -22,9 +22,8 @@ RUN apt-get update \
   && apt remove -y python3-pip \
   && npm install --omit=dev
   #&& apt-get install -y -t stretch-backports git
-ENV NODE_ENV="production"
-ARG AFB_DEBUG="false" # can set default ENV at build time with this
-ENV AFB_DEBUG=${AFB_DEBUG}
+ARG LOG_LEVEL="debug" # can set default ENV at build time with this
+ENV LOG_LEVEL=${LOG_LEVEL}
 EXPOSE 3002
 WORKDIR /opt/kentech/afb-server/bin
 CMD ["node", "--experimental-specifier-resolution=node", "server.js"]

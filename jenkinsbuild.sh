@@ -60,7 +60,7 @@ if [[ "$LEVEL" -ne 1 && "$forceDebugBuild" == "false" ]]; then
   && docker rmi $(docker images --filter=label=stage=builder --quiet)
 else
   # Dev build
-  docker build --build-arg NODE_VERSION="${NODE_VERSION}" --no-cache -f Dockerfile-prod -t ${PKGNAME}:${VER} --build-arg AFB_DEBUG=true . \
+  docker build --build-arg NODE_VERSION="${NODE_VERSION}" --no-cache -f Dockerfile-prod -t ${PKGNAME}:${VER} --build-arg LOG_LEVEL=debug . \
   && docker rmi $(docker images --filter=label=stage=builder --quiet)
 fi
 

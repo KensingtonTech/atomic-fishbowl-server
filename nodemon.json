@@ -1,6 +1,6 @@
 {
-  "watch": ["src", ".env", ".py"],
-  "ext": "ts",
+  "watch": ["src", ".env", ".py", "nodemon.json"],
+  "ext": "ts,py",
   "ignore": ["src/**/*.spec.ts"],
   "exec": "npm run buildenv && cd dist && node --inspect server.js"
 }

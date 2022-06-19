@@ -58,7 +58,6 @@ export class ConfigurationManager {
   readonly sofficePath = '/usr/bin/soffice';
   readonly pdftotextPath = '/usr/bin/pdftotext';
   readonly unrarPath = '/usr/bin/unrar';
-  readonly devMode: boolean;
 
   justInstalled = true;
   private preferences!: Preferences;
@@ -92,9 +91,8 @@ export class ConfigurationManager {
 
 
 
-  constructor(socketIo: SocketServer, devMode: boolean) {
+  constructor(socketIo: SocketServer) {
     this.io = socketIo;
-    this.devMode = devMode;
     this.mongoConfig = this.loadMongoConfig();
 
     

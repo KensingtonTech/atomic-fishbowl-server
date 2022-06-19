@@ -63,24 +63,16 @@ const collectionsChannel = io.of('/collections'); // create /collections namespa
 const version = `${BuildProperties.major}.${BuildProperties.minor}.${BuildProperties.patch}-${BuildProperties.level} Build ${BuildProperties.build}`;
 
 // project file imports.  Handles native and minified cases
-const devMode = utils.getStringEnvVar('NODE_ENV', 'development') === 'development';
-const debugMode = utils.getBooleanEnvVar('AFB_DEBUG', true);
+const logLevel = utils.getStringEnvVar('LOG_LEVEL', 'info');
+log.level = logLevel;
 const purgeTest = utils.getBooleanEnvVar('PURGE_HACK', false); // causes sessions older than 5 minutes to be purged, if set to true.  Useful for testing purging without having to wait an hour
 const purgeTestMinutes = utils.getNumberEnvVar('PURGE_HACK_MINUTES', 5);
 const tokenSigningHack = utils.getBooleanEnvVar('TOKEN_SIGNING_HACK', false);
 const tokenSigningHackSeconds = utils.getNumberEnvVar('TOKEN_SIGNING_HACK_SECONDS', 60);
 
 log.info('Starting Atomic Fishbowl server version', version);
-if (devMode) {
-  log.level = 'debug';
-  log.debug('Atomic Fishbowl Server is running in development mode');
-}
-else {
-  log.level = 'info';
-}
-if (debugMode) {
+if (logLevel === 'debug') {
   log.debug('Atomic Fishbowl Server debug logging is enabled');
-  log.level = 'debug';
 }
 
 let feederSrvProcess: ChildProcess | undefined;
@@ -95,7 +87,7 @@ let feederInitialized = false;
 let apiInitialized = false;
 
 // Load config
-const afbConfig = new ConfigurationManager(io, devMode);
+const afbConfig = new ConfigurationManager(io);
 const tokenMgr = afbConfig.getTokenManager();
 
 // Multipart upload config
