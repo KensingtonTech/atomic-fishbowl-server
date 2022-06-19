@@ -4,8 +4,8 @@ import net, { Socket as NetSocket } from 'net';
 import rmfr from 'rmfr';
 import { spawn, ChildProcess } from 'child_process';
 import temp from 'temp';
-import log from './logging';
-import { ConfigurationManager } from './configuration-manager';
+import log from './logging.js';
+import { ConfigurationManager } from './configuration-manager.js';
 import { Namespace, Socket } from 'socket.io';
 import { Request, Response } from 'express';
 import { JwtUser } from './types/jwt-user';
@@ -17,7 +17,7 @@ import {
 } from './types/collection';
 import { WorkerConfig } from './types/worker';
 import moment from 'moment';
-import * as utils from './utils';
+import * as utils from './utils.js';
 import * as SocketMessages from './types/socket-messages';
 
 /*

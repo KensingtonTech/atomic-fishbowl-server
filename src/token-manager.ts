@@ -1,8 +1,8 @@
 import schedule from 'node-schedule';
-import log from './logging';
-import { ConfigurationManager } from './configuration-manager';
+import log from './logging.js';
+import { ConfigurationManager } from './configuration-manager.js';
 import { Socket } from 'socket.io';
-import { DatabaseManager } from './database';
+import { DatabaseManager } from './database.js';
 
 export class TokenManager {
 

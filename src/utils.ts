@@ -1,7 +1,6 @@
 import Https from 'https';
 import axios, { AxiosRequestConfig } from 'axios';
 import fssync from 'fs';
-import { arrayBuffer } from 'stream/consumers';
 
 export const Axios = axios.create({
   timeout: 3000,

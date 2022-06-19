@@ -2,7 +2,7 @@ import log from './logging.js';
 import { sleep } from './utils.js';
 import mongo from 'mongodb';
 import process from 'process';
-import { MongoDBConfig } from './configuration-manager';
+import { MongoDBConfig } from './configuration-manager.js';
 const { MongoClient } = mongo;
 
 

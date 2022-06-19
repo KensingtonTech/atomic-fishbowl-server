@@ -2,5 +2,5 @@
   "watch": ["src", ".env", ".py"],
   "ext": "ts",
   "ignore": ["src/**/*.spec.ts"],
-  "exec": "npm run buildenv && cd dist && node --inspect --experimental-specifier-resolution=node server.js"
+  "exec": "npm run buildenv && cd dist && node --inspect server.js"
 }

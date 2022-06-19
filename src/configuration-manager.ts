@@ -4,13 +4,13 @@ import * as utils from './utils.js';
 import selfsigned from 'selfsigned';
 import os from 'os';
 import NodeRSA from 'node-rsa';
-import { DatabaseManager } from './database';
-import { UseCases } from './usecases';
-import { TokenManager } from './token-manager'
-import { ServiceTypes } from './servicetype';
-import { DefaultAfbPreferences } from './default-afb-preferences';
-import { DefaultNwPreferences } from './default-nw-preferences';
-import { DefaultSaPreferences } from './default-sa-preferences';
+import { DatabaseManager } from './database.js';
+import { UseCases } from './usecases.js';
+import { TokenManager } from './token-manager.js'
+import { ServiceTypes } from './servicetype.js';
+import { DefaultAfbPreferences } from './default-afb-preferences.js';
+import { DefaultNwPreferences } from './default-nw-preferences.js';
+import { DefaultSaPreferences } from './default-sa-preferences.js';
 import { Server as SocketServer } from 'socket.io';
 import { UseCase, ClientUseCases } from './types/use-case';
 import { Preferences } from './types/preferences';

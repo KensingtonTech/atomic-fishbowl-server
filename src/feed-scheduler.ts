@@ -1,10 +1,10 @@
-import log from './logging';
-import { ConfigurationManager } from './configuration-manager';
+import log from './logging.js';
+import { ConfigurationManager } from './configuration-manager.js';
 import { Server as SocketServer } from 'socket.io';
 import { FeedState, ScheduledFeed } from './types/feed';
-import * as utils from './utils';
+import * as utils from './utils.js';
 import { AxiosRequestConfig } from 'axios';
-import { TokenManager } from 'token-manager';
+import { TokenManager } from 'token-manager.js';
 
 
 export class FeedScheduler {
